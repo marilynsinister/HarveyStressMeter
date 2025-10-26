@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+
+    <!-- опции ModBuildConfig -->
+    <ModFolderName>HarveyOverhaulStress</ModFolderName>
+    <EnableModDeploy>true</EnableModDeploy>
+    <EnableGameDebugging>true</EnableGameDebugging>
+    <EnableModZip>false</EnableModZip>
+    <GamePath>D:\Games\Steam\steamapps\common\Stardew Valley</GamePath>
+    <GameModsPath>$(GamePath)\Mods\HarveyOverhaul</GameModsPath>
+    
+    <!-- Исключить .deps.json из деплоя (не нужен для SMAPI модов) -->
+    <IgnoreModFilePaths>\.deps\.json$</IgnoreModFilePaths>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.4.0" />
+  </ItemGroup>
+
+  <!-- Копирование файлов -->
+  <ItemGroup>
+    <!-- Конфиг мода -->
+    <Content Include="Config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- Все ассеты -->
+    <Content Include="assets\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Кастомный таргет больше не нужен - ModBuildConfig копирует в правильную папку -->
+
+</Project>

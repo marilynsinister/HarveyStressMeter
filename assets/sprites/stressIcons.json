@@ -1,0 +1,28 @@
+{
+  "Texture": "assets/sprites/stressIcons.png",
+  "Sprites": {
+    "Overwork":        { "X": 0,  "Y": 0,  "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Crowd":           { "X": 16, "Y": 0,  "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Storm":           { "X": 32, "Y": 0,  "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "LateNight":       { "X": 48, "Y": 0,  "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Cave":            { "X": 64, "Y": 0,  "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Lonely":          { "X": 80, "Y": 0,  "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Blank":           { "X": 96, "Y": 0,  "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+
+    "Glass":           { "X": 0,  "Y": 16, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "ThinIce":         { "X": 16, "Y": 16, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Clutter":         { "X": 32, "Y": 16, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Map":             { "X": 48, "Y": 16, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Cold":            { "X": 64, "Y": 16, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Insomnia":        { "X": 80, "Y": 16, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Numb":            { "X": 96, "Y": 16, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+
+    "Heart":           { "X": 0,  "Y": 32, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Care":            { "X": 16, "Y": 32, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Tea":             { "X": 32, "Y": 32, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Fish":            { "X": 48, "Y": 32, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Candle":          { "X": 64, "Y": 32, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Hands":           { "X": 80, "Y": 32, "Width": 16, "Height": 16, "Edges": [4,4,4,4] },
+    "Shadow":          { "X": 96, "Y": 32, "Width": 16, "Height": 16, "Edges": [4,4,4,4] }
+  }
+}

@@ -1,0 +1,2325 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.Xna.Framework;
+using StardewModdingAPI;
+using StardewModdingAPI.Events;
+using StardewValley;
+using StardewValley.Buffs; // Buff, BuffEffects
+using StardewModdingAPI.Utilities;
+using StardewValley.Menus;            // IClickableMenu.drawTextureBox
+using StardewValley.Locations; // наверху файла
+using StardewUI.Framework;
+using System.ComponentModel;
+using StardewValley.GameData;
+using StardewValley.GameData.Buffs;
+using StardewValley.ItemTypeDefinitions;
+using StardewValley.BellsAndWhistles;
+using System.Reflection;
+
+using Microsoft.Xna.Framework.Graphics;
+// исходный прямоугольник в текстуре
+
+
+
+namespace HarveyStressMeter
+{
+    public enum HandbookTab { Inventory, Skills }
+    public sealed class ModConfig
+    {
+        public KeybindList OpenHandbook { get; set; } = KeybindList.Parse("LeftShift + H");
+        public HandbookTab ButtonOn { get; set; } = HandbookTab.Inventory; // только на этой вкладке
+    }
+
+    public sealed class SaveData
+    {
+        public SDate LastDay { get; set; } = SDate.Now();
+        public HashSet<string> TalkedNpcsToday { get; set; } = new();
+
+        // залоченные дебаффы и их прогресс
+        public Dictionary<string, string> ActiveLockedDebuffs { get; set; } = new(); // BuffId -> QuestId
+        public Dictionary<string, TreatmentProgress> Treatment { get; set; } = new();
+
+        // «переутомление»: перерывы
+        public int OverworkBreaksToday { get; set; } = 0;
+        public int OverworkBreakSeconds { get; set; } = 0;
+        public bool OverworkBreakActive { get; set; } = false;
+
+        public bool TalkedToHarveyToday { get; set; } = false;
+
+        public Dictionary<string, SDate> LastIssuedDay { get; set; } = new();
+    }
+
+    public sealed class TreatmentProgress
+    {
+        public string QuestId { get; set; } = "";
+        public SDate StartedOn { get; set; } = SDate.Now();
+
+        public int SecondsNearHarvey { get; set; } = 0;      // гроза
+        public int EveningInLightSeconds { get; set; } = 0;  // темнота
+        public int TalkedUniqueToday { get; set; } = 0;      // одиночество
+        public bool AteAnyFood { get; set; } = false;        // голод
+        public int WarmSeconds { get; set; } = 0;            // холод
+        public int EarlySleepStreak { get; set; } = 0;  // недосып: серия ранних отбоев
+
+        // --- для лечения усталости (B_Tired) ---
+        public int TiredRestMinutes;     // сколько ИГРОВЫХ минут отдохнули дома
+        public int? TiredLastTimeOfDay;   // последнее зафиксированное Game1.timeOfDay во время отдыха
+
+    }
+
+    // public sealed class HandbookVm
+    // {
+    //     // Активные и все состояния (дебаффы)
+    //     public List<StateVm> Active { get; set; } = new();
+    //     public List<StateVm> All { get; set; } = new();
+    //     // Методы лечения (баффы-лечение/поддержка)
+    //     public List<TreatmentVm> Treatments { get; set; } = new();
+    // }
+
+    public sealed class StateVm : INotifyPropertyChanged
+    {
+        public event PropertyChangedEventHandler? PropertyChanged;
+        public string Id { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string EffectsText { get; set; } = "";
+        public string CauseText { get; set; } = "";
+        public string CureText { get; set; } = "";
+        public string UISpriteKey { get; set; } = ""; // <— ДЛЯ ИКОНКИ В HANDBOOK
+
+        // прогресс лечения
+        private int _cur, _max;
+        public int ProgressCurrent { get => _cur; set { _cur = value; PropertyChanged?.Invoke(this, new("ProgressText")); } }
+        public int ProgressMax { get => _max; set { _max = value; PropertyChanged?.Invoke(this, new("ProgressText")); } }
+        public string ProgressText => (ProgressMax > 0) ? $"Прогресс: {ProgressCurrent}/{ProgressMax}" : "";
+        public string HarveyComment { get; set; } = "";
+    }
+
+
+    public sealed class TreatmentVm
+    {
+        public string Title { get; set; } = "";
+        public string Desc { get; set; } = "";
+        public ParsedItemData? IconItemData { get; set; }
+    }
+
+
+    file sealed class AtlasJson
+    {
+        public string Texture { get; set; } = "";
+        public Dictionary<string, AtlasSprite> Sprites { get; set; } = new();
+    }
+    file sealed class AtlasSprite
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+    }
+
+    public sealed class ModEntry : Mod
+    {
+        private ModConfig Config = null!;
+        private SaveData Data = new();
+        private float _prevStamina;
+
+        private IViewEngine _viewEngine = null!;
+
+        // для отслеживания разговоров
+        private string? _lastDialogueNpc;
+
+        private ClickableTextureComponent? _btnHandbook;
+        private Texture2D? _btnTex;
+        private Rectangle _btnSrc;
+
+        private Texture2D _handbookTex = null!;          // assets/sprites/handbook.png (без подложки)
+        private Rectangle _handbookRect;         // хитбокс
+        private const int HandbookSize = 44;     // масштаб в меню
+
+        private Texture2D? _iconsTex;
+
+        private bool IsInventoryPage(GameMenu gm) => gm.currentTab == GameMenu.inventoryTab;
+
+        // --- universal helpers for SDV 1.5/1.6 style fields ---
+        private static string AsString(object? v)
+        {
+            if (v == null) return "";
+            // NetString/Netcode types имеют свойство Value
+            var prop = v.GetType().GetProperty("Value");
+            if (prop != null && prop.PropertyType == typeof(string))
+                return (string)(prop.GetValue(v) ?? "");
+            return v as string ?? v.ToString() ?? "";
+        }
+
+        private static bool AsBool(object? v)
+        {
+            if (v == null) return false;
+            var prop = v.GetType().GetProperty("Value");
+            if (prop != null && prop.PropertyType == typeof(bool))
+                return (bool)(prop.GetValue(v) ?? false);
+            return v is bool b && b;
+        }
+
+        // В 1.6 у Buff есть id: NetString; в 1.5 могло не быть.
+        // Забираем ID через рефлексию безопасно.
+        private static string GetBuffId(Buff buff)
+        {
+            var t = buff.GetType();
+            var p = t.GetProperty("id") ?? t.GetProperty("Id");
+            return p != null ? AsString(p.GetValue(buff)) : "";
+        }
+
+        // безопасно получить поле/свойство по имени и типу
+        private static bool TryGetMember<T>(object obj, string name, out T? value)
+        {
+            var t = obj.GetType();
+            var prop = t.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (prop != null && typeof(T).IsAssignableFrom(prop.PropertyType))
+            {
+                value = (T?)prop.GetValue(obj);
+                return true;
+            }
+            var field = t.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (field != null && typeof(T).IsAssignableFrom(field.FieldType))
+            {
+                value = (T?)field.GetValue(obj);
+                return true;
+            }
+            value = default;
+            return false;
+        }
+
+
+        // строковый идентификатор квеста (пробуем несколько общих вариантов)
+        private static string GetQuestStringId(object q)
+        {
+            if (TryGetMember<string>(q, "QuestId", out var s) && !string.IsNullOrWhiteSpace(s)) return s;
+            if (TryGetMember<string>(q, "questKey", out s) && !string.IsNullOrWhiteSpace(s)) return s;
+            if (TryGetMember<int>(q, "id", out var i) && i != 0) return i.ToString();
+            if (TryGetMember<string>(q, "id", out s) && !string.IsNullOrWhiteSpace(s)) return s;
+            return "";
+        }
+
+        public sealed class SpriteView
+        {
+            public Texture2D Texture { get; init; } = null!;
+            public Rectangle? SourceRect { get; init; }
+            public SpriteView(Texture2D texture, Rectangle sourceRect)
+            {
+                Texture = texture;
+                SourceRect = sourceRect;
+            }
+        }
+        public sealed class HandbookRow
+        {
+            public SpriteView IconSprite { get; init; } = null!;
+            public string IconResource { get; init; } = "";
+
+            public string Title { get; init; } = "";
+            public string Effects { get; init; } = "";
+            public string Causes { get; init; } = "";
+            public string CureSummary { get; init; } = "";
+            public string StatusText { get; set; } = "";
+            public string BuffId { get; init; } = "";
+            public string TreatmentStageText { get; set; } = "";
+            public string StatusColor { get; set; } = "#7f6139"; // default color
+        }
+
+
+
+        public sealed class HandbookViewModel
+        {
+            public List<HandbookRow> ActiveStates { get; } = new();
+            public List<HandbookRow> AllStates { get; } = new();
+        }
+
+        private static string UI(string key)
+    => $"@Mods/marilynsinister.HarveyStressMeter/Sprites/{key}";
+
+        private IEnumerable<StateVm> EnumerateAllStates()
+        {
+            // Пугающая гроза
+            yield return new StateVm
+            {
+                Id = B_Thunder,
+                Title = "Пугающая гроза",
+                UISpriteKey = UI("buffStressThunder"),
+                EffectsText = "Эффекты: -1 защита.",
+                CauseText = "Причина: гроза на улице.",
+                CureText = "Лечение: проведите 120 сек рядом с Харви в укрытии."
+            };
+
+            // Боязнь темноты
+            yield return new StateVm
+            {
+                Id = B_Darkness,
+                Title = "Боязнь темноты",
+                UISpriteKey = UI("buffStressDarkness"),
+                EffectsText = "Эффекты: -1 защита.",
+                CauseText = "Причина: ночь на улице (после 20:00) и вы вне дома.",
+                CureText = "Лечение: пробудьте 180 сек в светлой локации (дом/клиника/купальни)."
+            };
+
+            // Одиночество
+            yield return new StateVm
+            {
+                Id = B_Lonely,
+                Title = "Одиночество",
+                UISpriteKey = UI("buffStressLonely"),
+                EffectsText = "Эффекты: -1 защита.",
+                CauseText = "Причина: целый день ни с кем не говорили.",
+                CureText = "Лечение: поговорите минимум с 3 разными жителями в этот день."
+            };
+
+            // Слабость от голода
+            yield return new StateVm
+            {
+                Id = B_Hunger,
+                Title = "Слабость от голода",
+                UISpriteKey = UI("buffCareTea"),
+                EffectsText = "Эффекты: -20 макс. выносливости, -1 защита.",
+                CauseText = "Причина: очень низкая выносливость днём.",
+                CureText = "Лечение: съешьте любую еду (не в купальнях)."
+            };
+
+            // Переутомление
+            yield return new StateVm
+            {
+                Id = B_Overwork,
+                Title = "Переутомление",
+                UISpriteKey = UI("buffStressOverworkCloud"),
+                EffectsText = "Эффекты: -34 макс. выносливости, -1 защита.",
+                CauseText = "Причина: серия тяжёлых действий без перерыва.",
+                CureText = "Лечение: сделайте 3 перерыва по ~30 сек в зоне отдыха (дом/клиника/купальни)."
+            };
+
+            // Недосып
+            yield return new StateVm
+            {
+                Id = B_NoSleep,
+                Title = "Недосып",
+                UISpriteKey = UI("buffStressNoSleep"),
+                EffectsText = "Эффекты: -1 ко всем защитным реакциям.",
+                CauseText = "Причина: поздний отбой несколько ночей подряд.",
+                CureText = "Лечение: лягте спать до полуночи три раза подряд."
+            };
+
+            // Переохлаждение
+            yield return new StateVm
+            {
+                Id = B_TooCold,
+                Title = "Переохлаждение",
+                UISpriteKey = UI("buffStressTooCold"),
+                EffectsText = "Эффекты: -1 защита.",
+                CauseText = "Причина: зима/непогода и вы на улице.",
+                CureText = "Лечение: согревайтесь 120 сек в доме/клинике/купальнях."
+            };
+
+            // Усталость (лёгкая)
+            yield return new StateVm
+            {
+                Id = B_Tired,
+                Title = "Усталость",
+                UISpriteKey = UI("buffStressTired"),
+                EffectsText = "Эффекты: лёгкая вялость и рассеянность.",
+                CauseText = "Причина: обычная нагрузка в течение дня.",
+                CureText = "Лечение: короткий отдых дома или перекус."
+            };
+
+            // Аура заботы Харви (для раздела «все состояния», чтобы игрок видел бафф-поддержку)
+            yield return new StateVm
+            {
+                Id = B_CareAura,
+                Title = "Рядом с Харви",
+                UISpriteKey = UI("buffCareAura"),
+                EffectsText = "Эффекты: +1 защита, +10 макс. выносливости.",
+                CauseText = "Причина: Харви находится рядом.",
+                CureText = "Держись рядом — доктор контролирует ситуацию."
+            };
+
+            // Доп. эстетические состояния из атласа (если решишь задействовать)
+            yield return new StateVm
+            {
+                Id = "HarveyStress.Paranoia",
+                Title = "Тени вокруг",
+                UISpriteKey = UI("buffStressParanoia"),
+                EffectsText = "Эффекты: -2 защита, -скорость.",
+                CauseText = "Причина: затяжной стресс и темнота.",
+                CureText = "Лечение: поговорить с Харви и провести вечер в свете."
+            };
+            yield return new StateVm
+            {
+                Id = "HarveyStress.Numbness",
+                Title = "Эмоциональное онемение",
+                UISpriteKey = UI("buffStressNumbness"),
+                EffectsText = "Эффекты: -удача, -скорость.",
+                CauseText = "Причина: длительное перенапряжение.",
+                CureText = "Лечение: несколько тёплых бесед и отдых."
+            };
+            yield return new StateVm
+            {
+                Id = "HarveyStress.Anxiety",
+                Title = "Тревожность",
+                UISpriteKey = UI("buffStressAnxiety"),
+                EffectsText = "Эффекты: -удача, -защита.",
+                CauseText = "Причина: накопившиеся факторы.",
+                CureText = "Лечение: дыхательная практика и разговор с Харви."
+            };
+        }
+
+        private HandbookViewModel BuildHandbookVM()
+        {
+            string uid = this.ModManifest.UniqueID;
+            // Карта: бафф -> ключ иконки
+            var iconKeyByBuff = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [B_Overwork] = "Overwork",
+                [B_Lonely] = "Lonely",
+                [B_Thunder] = "Storm",
+                [B_Darkness] = "LateNight",
+                [B_NoSleep] = "Insomnia",
+                [B_Hunger] = "Tea",      // символ «еда/тёплое»
+                [B_TooCold] = "Cold",
+                [B_Tired] = "Glass",    // «хрупкость/усталость»
+                [B_CareAura] = "Heart",
+
+                ["HarveyStress.Paranoia"] = "Shadow",
+                ["HarveyStress.Numbness"] = "Numb",
+                ["HarveyStress.Anxiety"] = "Hands"
+            };
+
+
+            // Описания—возьмите ваши тексты/локализацию
+            var data = EnumerateAllStates(); // ← ваш метод, возвращающий: id, title, effects, causes, cures[] и т.п.
+
+            // какие баффы сейчас на игроке
+            var activeBuffIds = GetCurrentStressBuffIds(); // см. ниже
+
+            var vm = new HandbookViewModel();
+
+            foreach (var s in data)
+            {
+
+                if (_iconsTex is null)
+                    _iconsTex = Helper.ModContent.Load<Texture2D>("assets/sprites/stressIcons.png");
+
+                string iconKey = iconKeyByBuff.TryGetValue(s.Id, out var k) ? k : "Blank";
+
+
+                Rectangle src = _iconRects[iconKey]; // iconKey — имя твоей иконки, например "Overwork"
+
+
+                var row = new HandbookRow
+                {
+                    BuffId = s.Id,
+                    Title = s.Title,
+                    Effects = s.EffectsText,
+                    Causes = s.CauseText,
+                    CureSummary = s.CureText,
+                    TreatmentStageText = GetTreatmentStageText(s.Id),
+                    // ВАЖНО: это то, что будем биндить в SML
+                    IconSprite = new SpriteView(_iconsTex, src),
+
+                    // Можно оставить, если используешь где-то ещё
+                    IconResource = $"@Mods/{this.ModManifest.UniqueID}/Sprites/stressIcons#{iconKey}",
+                };
+
+                // статус
+                if (activeBuffIds.Contains(s.Id))
+                {
+                    var (questName, progressText) = GetCureProgressForBuff(s.Id);
+                    row.StatusText = string.IsNullOrEmpty(questName)
+                        ? "Есть сейчас"
+                        : $"Есть сейчас · Квест: {questName} — {progressText}";
+                    row.StatusColor = "#7f6139"; // активный
+                    vm.ActiveStates.Add(row);
+                }
+                else
+                {
+                    var (_, progressText) = GetCureProgressForBuff(s.Id);
+                    row.StatusText = string.IsNullOrEmpty(progressText) ? "Не активен" : progressText;
+                    row.StatusColor = string.IsNullOrEmpty(progressText) ? "#6b6b6b" : "#228B22"; // неактивный/завершено
+                }
+                vm.AllStates.Add(row);
+
+            }
+
+            // Активные выносим вверх
+            vm.ActiveStates.Sort((a, b) => string.Compare(a.Title, b.Title, StringComparison.CurrentCulture));
+            vm.AllStates.Sort((a, b) => string.Compare(a.Title, b.Title, StringComparison.CurrentCulture));
+            return vm;
+
+        }
+
+        private readonly string SaveKey = "stress-data-v1";
+        // ===== Идентификаторы наших динамических баффов =====
+        private const string B_Tired = "buffStressTired";
+        private const string B_Lonely = "buffStressLonely";
+        private const string B_Thunder = "buffStressThunder";
+        private const string B_Darkness = "buffStressDarkness";
+        private const string B_Hunger = "buffStressHunger";
+        private const string B_Overwork = "buffStressOverwork";
+        private const string B_NoSleep = "buffStressNoSleep";
+        private const string B_TooCold = "buffStressTooCold";
+
+        private const string B_Immunity = "buffStressImmunity"; // ← важно для hasBuff()
+        private const string B_CareAura = "HarveyStress.CareAura"; // временный свой, оставь как логический
+        private const string B_Social = "buffStressSocial"; // либо см. ниже про Social
+
+        // баффы для квестов лечения
+        private const string B_RestingAtHome = "buffRestingAtHome";
+        private const string B_OverworkBreak = "buffOverworkBreak";
+        private const string B_LightAndSafe = "buffLightAndSafe";
+        private const string B_CalmingAtHospital = "buffCalmingAtHospitalWithHarvey";
+
+
+        // квесты из Data/Quests (смотри свои json)
+        private const string Q_Thunder = "HarveyMod_ThunderRecovery";
+        private const string Q_Darkness = "HarveyMod_DarknessRecovery";
+        private const string Q_Lonely = "HarveyMod_LonelyRecovery";
+        private const string Q_Overwork = "HarveyMod_OverworkRecovery"; // есть в твоём наборе
+        private const string Q_Hunger = "HarveyMod_HungerRecovery";
+        private const string Q_Cold = "HarveyMod_TooColdRecovery";
+        private const string Q_Social = "HarveyMod_SocialRecovery";
+        private const string Q_NoSleep = "HarveyMod_NoSleepRecovery";
+        private const string Q_Tired = "HarveyMod_TiredRecovery";
+
+
+        // письма (создай в Mail_data): старт и «готово»
+        private const string M_Thunder_Start = "mailHarveyStressTreatmentThunder";
+        private const string M_Darkness_Start = "mailHarveyStressTreatmentDarkness";
+        private const string M_Lonely_Start = "mailHarveyStressTreatmentLonely";
+        private const string M_Overwork_Start = "mailHarveyStressTreatmentOverwork";
+        private const string M_Generic_Done = "HarveyStress_Letter_Generic_Done";
+        private const string M_Hunger_Start = "mailHarveyStressTreatmentHunger";
+        private const string M_Cold_Start = "mailHarveyStressTreatmentTooCold";
+        private const string M_Social_Start = "mailHarveyStressTreatmentSocial";
+        private const string M_Tired_Start = "mailHarveyStressTreatmentTired";
+        private const string M_Nosleep_Start = "mailHarveyStressTreatmentNoSleep";
+
+
+        private static string GetCompleteMailIdFor(string buffId) => buffId switch
+        {
+            // var x when x == B_Thunder => M_Thunder_Done,   // проверь, что такие константы у тебя есть
+            // var x when x == B_Darkness => M_Darkness_Done,
+            // var x when x == B_Lonely => M_Lonely_Done,
+            // var x when x == B_Overwork => M_Overwork_Done,
+            // var x when x == B_Hunger => M_Hunger_Done,
+            // var x when x == B_TooCold => M_Cold_Done,
+            // var x when x == B_NoSleep => M_NoSleep_Done,
+            // var x when x == B_Tired => M_Tired_Done,
+            // var x when x == B_Social => M_Social_Done,
+
+            var x when x == B_Thunder => "",   // проверь, что такие константы у тебя есть
+            var x when x == B_Darkness => "",
+            var x when x == B_Lonely => "",
+            var x when x == B_Overwork => "",
+            var x when x == B_Hunger => "",
+            var x when x == B_TooCold => "",
+            var x when x == B_NoSleep => "",
+            var x when x == B_Tired => "",
+            var x when x == B_Social => "",
+
+            _ => ""
+        };
+
+
+
+        private readonly Dictionary<string, Rectangle> _iconRects = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // 16x16 сетка (ширина 112, высота 48): 7 колонок * 3 ряда
+            ["Overwork"] = new Rectangle(0, 0, 16, 16),
+            ["Crowd"] = new Rectangle(16, 0, 16, 16),
+            ["Storm"] = new Rectangle(32, 0, 16, 16),
+            ["LateNight"] = new Rectangle(48, 0, 16, 16),
+            ["Cave"] = new Rectangle(64, 0, 16, 16),
+            ["Lonely"] = new Rectangle(80, 0, 16, 16),
+            ["Blank"] = new Rectangle(96, 0, 16, 16),
+
+            ["Glass"] = new Rectangle(0, 16, 16, 16),
+            ["ThinIce"] = new Rectangle(16, 16, 16, 16),
+            ["Clutter"] = new Rectangle(32, 16, 16, 16),
+            ["Map"] = new Rectangle(48, 16, 16, 16),
+            ["Cold"] = new Rectangle(64, 16, 16, 16),
+            ["Insomnia"] = new Rectangle(80, 16, 16, 16),
+            ["Numb"] = new Rectangle(96, 16, 16, 16),
+
+            ["Heart"] = new Rectangle(0, 32, 16, 16),
+            ["Care"] = new Rectangle(16, 32, 16, 16),
+            ["Tea"] = new Rectangle(32, 32, 16, 16),
+            ["Fish"] = new Rectangle(48, 32, 16, 16),
+            ["Candle"] = new Rectangle(64, 32, 16, 16),
+            ["Hands"] = new Rectangle(80, 32, 16, 16),
+            ["Shadow"] = new Rectangle(96, 32, 16, 16),
+        };
+
+        // бафф -> (topic, days)
+        private static readonly Dictionary<string, (string topic, int days)> _topicByBuff = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [B_Tired] = ("topicStressTired", 2),
+            [B_Lonely] = ("topicStressLonely", 2),        // см. п.3: ставим утром, если вчера не говорил
+            [B_Thunder] = ("topicStressThunder", 1),
+            [B_Hunger] = ("topicStressHunger", 1),
+            [B_Overwork] = ("topicStressOverwork", 4),
+            [B_NoSleep] = ("topicStressNoSleep", 1),
+            [B_TooCold] = ("topicStressTooCold", 1),
+            [B_Darkness] = ("topicStressDarkness", 1),
+            [B_Social] = ("topicStressSocial", 1),
+        };
+
+        // бафф → (топик лечения, дней, письмо старта)
+        private static readonly Dictionary<string, (string topic, int days, string? mail)> _treatmentStartByBuff = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [B_Tired] = ("topicStressTreatmentTiredStarted", 5, M_Tired_Start),
+            [B_Lonely] = ("topicStressTreatmentLonelyStarted", 5, M_Lonely_Start),
+            [B_Thunder] = ("topicStressTreatmentThunderStarted", 5, M_Thunder_Start),
+            [B_Hunger] = ("topicStressTreatmentHungerStarted", 3, M_Hunger_Start),
+            [B_Overwork] = ("topicStressTreatmentOverworkStarted", 5, M_Overwork_Start),
+            [B_NoSleep] = ("topicStressTreatmentNoSleepStarted", 5, M_Nosleep_Start),
+            [B_TooCold] = ("topicStressTreatmentTooColdStarted", 3, M_Cold_Start),
+            [B_Darkness] = ("topicStressTreatmentDarknessStarted", 5, M_Darkness_Start),
+            [B_Social] = ("topicStressTreatmentSocialStarted", 5, M_Social_Start),
+        };
+
+        // бафф -> cured-топик (для единообразия при завершении лечения в C#)
+        private static readonly Dictionary<string, string> _curedTopicByBuff = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [B_Tired] = "topicStressTreatmentTiredCured",
+            [B_Lonely] = "topicStressTreatmentLonelyCured",
+            [B_Thunder] = "topicStressTreatmentThunderCured",
+            [B_Hunger] = "topicStressTreatmentHungerCured",
+            [B_Overwork] = "topicStressTreatmentOverworkCured",
+            [B_NoSleep] = "topicStressTreatmentNoSleepCured",
+            [B_TooCold] = "topicStressTreatmentTooColdCured",
+            [B_Darkness] = "topicStressTreatmentDarknessCured",
+            [B_Social] = "topicStressTreatmentSocialCured",
+        };
+
+        // private static readonly Dictionary<string, string> _dataBuffKeyByLogical = new(StringComparer.OrdinalIgnoreCase)
+        // {
+        //     [B_Thunder] = "buffStressThunder",
+        //     [B_Darkness] = "buffStressDarkness",
+        //     [B_Lonely] = "buffStressLonely",
+        //     [B_Overwork] = "buffStressOverwork",
+        //     [B_Hunger] = "buffStressHunger",
+        //     [B_NoSleep] = "buffStressNoSleep",
+        //     [B_TooCold] = "buffStressTooCold",
+        //     [B_Social] = "buffStressSocial",
+        //     [B_Tired] = "buffStressTired"
+        // };
+
+        // квест восстановления → логический id баффа
+        private static readonly Dictionary<string, string> _buffByQuest = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [Q_Thunder] = B_Thunder,
+            [Q_Darkness] = B_Darkness,
+            [Q_Lonely] = B_Lonely,
+            [Q_Overwork] = B_Overwork,
+            [Q_Hunger] = B_Hunger,
+            [Q_Cold] = B_TooCold,
+            [Q_Social] = B_Social,
+            [Q_NoSleep] = B_NoSleep,
+            [Q_Tired] = B_Tired,
+        };
+
+        // Последнее время, когда говорил по категории (в секундах реального игрового времени)
+        private readonly Dictionary<SpeakCategory, double> _lastSpokenAt = new();
+        // Для разнообразия — чтобы не повторять одну и ту же фразу подряд
+        private readonly Dictionary<SpeakCategory, int> _lastIndex = new();
+
+        // Сопоставление твоих баффов → категории реплик
+        private readonly Dictionary<string, SpeakCategory> _buffToCategory = new()
+        {
+            [B_Tired] = SpeakCategory.Tired,
+            [B_Lonely] = SpeakCategory.Lonely,
+            [B_Thunder] = SpeakCategory.Thunder,
+            [B_Darkness] = SpeakCategory.Darkness,
+            [B_Hunger] = SpeakCategory.Hunger,
+            [B_Overwork] = SpeakCategory.Overwork,
+            [B_NoSleep] = SpeakCategory.NoSleep,
+            [B_TooCold] = SpeakCategory.TooCold,
+            [B_Social] = SpeakCategory.Social,
+        };
+
+        // служебные «флаги-доказательства»
+        private const string T_SpokeToday = "topicSpeakToSomebody";
+        private const string T_AteToday = "topicEatSomething";
+        private const string T_LonelyPending = "topicStressLonely_Pending";
+
+        // общий «маяк» как в JSON (используется в условиях start-триггеров лечения)
+        private const string T_TreatmentStarted = "topicStressTreatmentStarted";
+
+        // ===== категории реплик =====
+        private enum SpeakCategory
+        {
+            NearSupport,    // Харви рядом (в любом месте)
+            Stress60,       // >=60
+            Stress80,       // >=80 (критика) — полноценный диалог
+            Tired, Lonely, Thunder, Darkness, Hunger, Overwork, NoSleep, TooCold, Social
+        }
+        private readonly Dictionary<string, int> _lastToastPct = new(); // buffId -> последний порог 25/50/75/100
+
+        // Кулдауны (сек) на категории
+        private readonly Dictionary<SpeakCategory, int> _speakCooldown = new()
+        {
+            [SpeakCategory.NearSupport] = 45,
+            [SpeakCategory.Stress60] = 60,
+            [SpeakCategory.Stress80] = 120,
+            [SpeakCategory.Tired] = 90,
+            [SpeakCategory.Lonely] = 90,
+            [SpeakCategory.Thunder] = 60,
+            [SpeakCategory.Darkness] = 90,
+            [SpeakCategory.Hunger] = 90,
+            [SpeakCategory.Overwork] = 90,
+            [SpeakCategory.NoSleep] = 120,
+            [SpeakCategory.TooCold] = 90,
+            [SpeakCategory.Social] = 90,
+        };
+
+        private static readonly Dictionary<string, string> _questByBuff = new()
+        {
+            [B_Hunger] = Q_Hunger,
+            [B_Thunder] = Q_Thunder,
+            [B_Darkness] = Q_Darkness,
+            [B_TooCold] = Q_Cold,
+            [B_Overwork] = Q_Overwork,
+            [B_Tired] = Q_Tired,
+            [B_NoSleep] = Q_NoSleep,
+            [B_Lonely] = Q_Lonely,
+            [B_Social] = Q_Social,
+        };
+
+
+        private static bool HasHeavyTools(Farmer f)
+        {
+            foreach (var it in f.Items)
+            {
+                if (it is StardewValley.Tools.Pickaxe) return true;
+                if (it is StardewValley.Tools.Axe) return true;
+                if (it is StardewValley.Tools.Hoe) return true;
+            }
+            return false;
+        }
+
+        private bool IsQuestInLog(string questId, out object? quest, out bool completed)
+        {
+            quest = null;
+            completed = false;
+
+            foreach (var q in Game1.player.questLog)
+            {
+                var qid = GetQuestStringId(q);
+                if (!string.Equals(qid, questId, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                quest = q;
+
+                // completed может быть bool полем/свойством — если нашли, используем; если нет, оставляем false
+                if (TryGetMember<bool>(q, "completed", out var c))
+                    completed = c;
+
+                return true;
+            }
+            return false;
+        }
+
+
+        private void ReapplyLockedBuff(string buffId)
+        {
+            // если иммунитет активен — временно не навешиваем, подождём
+            if (Game1.player.hasBuff(B_Immunity))
+                return;
+
+            ApplyOrRefreshBuff(buffId); // твоя перегрузка, которая берёт эффекты из JSON по карте соответствий
+            TryAddTopicForBuff(buffId); // чтобы диалоги по стресс-топикам не потерялись
+        }
+
+        // держит инвариант: активный квест -> активный бафф и запись в ActiveLockedDebuffs
+        private void SyncQuestsAndBuffs()
+        {
+            // 4.1 Восстановить по квестам, если нет записи в ActiveLockedDebuffs или баффа
+            foreach (var kv in _buffByQuest)
+            {
+                string questId = kv.Key;
+                string buffId = kv.Value;
+
+                if (IsQuestInLog(questId, out var q, out bool completed))
+                {
+                    if (completed)
+                    {
+                        // квест отмечен как выполненный, а бафф мог «залипнуть» — подчистим
+                        if (Game1.player.hasBuff(buffId))
+                            Game1.player.buffs.Remove(buffId);
+                        Data.ActiveLockedDebuffs.Remove(buffId);
+                        Data.Treatment.Remove(buffId);
+                        continue;
+                    }
+
+                    // квест активен: гарантируем запись и бафф
+                    if (!Data.ActiveLockedDebuffs.TryGetValue(buffId, out var qid) || !string.Equals(qid, questId, StringComparison.OrdinalIgnoreCase))
+                        Data.ActiveLockedDebuffs[buffId] = questId;
+
+                    if (!Game1.player.hasBuff(buffId))
+                        ReapplyLockedBuff(buffId);
+
+                    if (!Game1.player.hasBuff(buffId))
+                    {
+                        Monitor.Log($"[Sync] Quest '{questId}' активен, но бафф '{buffId}' не повесился.", LogLevel.Warn);
+                        // при желании — авто-зачистка или отложить до следующего тика
+                    }
+                    if (!Data.Treatment.ContainsKey(buffId))
+                        Data.Treatment[buffId] = new TreatmentProgress { QuestId = questId, StartedOn = SDate.Now() };
+                }
+            }
+
+            // 4.2 Удалить «сиротские» лока-замки: запись есть, а квеста нет — чистим
+            foreach (var (buffId, questId) in Data.ActiveLockedDebuffs.ToList())
+            {
+                if (!IsQuestInLog(questId, out var q, out var completed))
+                {
+                    // квеста в журнале нет → снимаем бафф и чистим прогресс
+                    if (Game1.player.hasBuff(buffId))
+                        Game1.player.buffs.Remove(buffId);
+                    Data.ActiveLockedDebuffs.Remove(buffId);
+                    Data.Treatment.Remove(buffId);
+                }
+            }
+        }
+
+
+
+        private HashSet<string> GetCurrentStressBuffIds()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // уже залоченные дебаффы считаем активными
+            foreach (var id in Data.ActiveLockedDebuffs.Keys)
+                set.Add(id);
+
+            // AppliedBuffs — словарь: ключ -> Buff
+            foreach (var kv in Game1.player.buffs.AppliedBuffs)
+            {
+                var buff = kv.Value;
+                if (buff == null) continue;
+
+                string id = GetBuffId(buff); // ← универсально для 1.5/1.6
+                if (!string.IsNullOrEmpty(id))
+                    set.Add(id);
+            }
+            return set;
+        }
+
+        // вернём допускающие null, чтобы убрать предупреждения nullability
+        private (string? QuestName, string? Progress) GetCureProgressForBuff(string buffId)
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [B_Overwork] = Q_Overwork,
+                [B_Lonely] = Q_Lonely,
+                [B_Thunder] = Q_Thunder,
+                [B_Darkness] = Q_Darkness,
+                [B_Hunger] = Q_Hunger,
+                [B_TooCold] = Q_Cold,
+                [B_NoSleep] = Q_NoSleep,
+                [B_Tired] = Q_Tired,
+                [B_Social] = Q_Social,
+            };
+            if (!map.TryGetValue(buffId, out var key))
+                return (null, null);
+
+            // Ищем квест по id (string или NetString — не важно, используем AsString)
+            var q = Game1.player.questLog.FirstOrDefault(q =>
+                string.Equals(AsString(q.id), key, StringComparison.OrdinalIgnoreCase));
+
+            if (q == null) return (null, null);
+
+            if (AsBool(q.completed))
+                return (AsString(q.questTitle), "завершено");
+
+            string step = !string.IsNullOrWhiteSpace(AsString(q.currentObjective))
+                ? AsString(q.currentObjective)
+                : "в процессе";
+
+            return (AsString(q.questTitle), step);
+        }
+
+        private string GetTreatmentStageText(string buffId)
+        {
+            if (Data.Treatment.TryGetValue(buffId, out var p))
+            {
+                // Пример: возвращаем прогресс для каждого типа баффа
+                return buffId switch
+                {
+                    var x when x == B_Thunder => $"Рядом с Харви: {p.SecondsNearHarvey}/120 сек",
+                    var x when x == B_Darkness => $"В светлой локации: {p.EveningInLightSeconds}/180 сек",
+                    var x when x == B_Lonely => $"Разговоры: {p.TalkedUniqueToday}/3",
+                    var x when x == B_Overwork => $"Перерывы: {Data.OverworkBreaksToday}/3",
+                    var x when x == B_Hunger => p.AteAnyFood ? "Поел" : "Голоден",
+                    var x when x == B_TooCold => $"В тепле: {p.WarmSeconds}/120 сек",
+                    _ => ""
+                };
+            }
+            return "";
+        }
+
+        private static ParsedItemData? Icon(string itemId, string fallback = "(O)93") // "(O)93" = факел
+        {
+            return ItemRegistry.GetData(itemId) ?? ItemRegistry.GetData(fallback);
+        }
+
+        // ===== Conversation Topics helpers (SDV 1.5/1.6 совместимо) =====
+        private static bool HasTopic(string topic)
+        {
+            var d = Game1.player.activeDialogueEvents;
+            return d != null && d.TryGetValue(topic, out int days) && days > 0;
+        }
+
+        private static void AddTopic(string topic, int days)
+        {
+            if (days <= 0) days = 1;
+            var d = Game1.player.activeDialogueEvents;
+            if (d.ContainsKey(topic))
+                d[topic] = Math.Max(d[topic], days);   // не укорачиваем существующий
+            else
+                d.Add(topic, days);
+        }
+
+        private static void RemoveTopic(string topic)
+        {
+            var d = Game1.player.activeDialogueEvents;
+            if (d.ContainsKey(topic))
+                d.Remove(topic);
+        }
+
+        private void TryAddTopicForBuff(string buffId)
+        {
+            if (!Game1.player.hasBuff(buffId))
+                return;
+
+            if (_topicByBuff.TryGetValue(buffId, out var t) && !HasTopic(t.topic))
+                AddTopic(t.topic, t.days);
+        }
+
+        private void StartTreatmentFor(string buffId)
+        {
+            if (!Game1.player.hasBuff(buffId))
+                return;
+            // 0) общий «маяк» программы лечения (как в JSON)
+            if (!HasTopic(T_TreatmentStarted))
+                AddTopic(T_TreatmentStarted, 0);
+
+            // 1) конкретный старт-топик лечения, длительность и письмо
+            if (_treatmentStartByBuff.TryGetValue(buffId, out var t))
+            {
+                if (!HasTopic(t.topic))
+                    AddTopic(t.topic, t.days);
+
+                // 2) убрать исходный «стресс-топик», если был
+                if (_topicByBuff.TryGetValue(buffId, out var stressTopic))
+                    if (HasTopic(stressTopic.topic))
+                        RemoveTopic(stressTopic.topic);
+
+                // 3) выдать квест лечения (он уже хранится в ActiveLockedDebuffs[buffId])
+                if (Data.ActiveLockedDebuffs.TryGetValue(buffId, out var qid))
+                    TryAddQuest(qid);
+
+                // 4) письмо на завтра (если задано)
+                if (!string.IsNullOrEmpty(t.mail))
+                    TryAddMailForTomorrow(t.mail!);
+
+                SaveNow();
+            }
+        }
+
+        private void StartLockedDebuff(string buffId, string questId, BuffEffects effects, string displayName, string? mailIdStart = null)
+        {
+            var today = SDate.Now();
+            if (Data.LastIssuedDay.TryGetValue(buffId, out var last)
+                && last.Day == today.Day && last.Season == today.Season && last.Year == today.Year)
+                return;
+
+            if (Data.ActiveLockedDebuffs.ContainsKey(buffId))
+                return;
+
+            // навесим бесконечный бафф (видимый)
+            if (_questByBuff.TryGetValue(buffId, out var qid))
+            {
+                ApplyOrRefreshBuff(buffId); // дебафф из buffsStress.json
+                Data.ActiveLockedDebuffs[buffId] = qid;
+                Data.Treatment[buffId] = new TreatmentProgress { QuestId = qid, StartedOn = SDate.Now() };
+
+                TryAddTopicForBuff(buffId);
+            }
+            // ApplyOrRefreshBuff(buffId, displayName, effects, Buff.ENDLESS);
+            // TryAddTopicForBuff(buffId);
+
+            // Data.ActiveLockedDebuffs[buffId] = questId;
+            // Data.Treatment[buffId] = new TreatmentProgress { QuestId = questId, StartedOn = SDate.Now() };
+
+            // короткая реакция Харви (если рядом)
+            var harvey = Game1.getCharacterFromName("Harvey");
+            if (harvey != null && harvey.currentLocation == Game1.currentLocation)
+            {
+                bool said = false;
+
+                if (!said)
+                {
+                    harvey.doEmote(40);
+                    harvey.showTextAboveHead("Дыши со мной. Я рядом.");
+                }
+            }
+
+            Data.LastIssuedDay[buffId] = SDate.Now();
+            SaveNow();
+            SyncQuestsAndBuffs();
+        }
+        private void ApplyOrRefreshBuff(string id, string name, BuffEffects effects, int durationMs)
+        {
+            if (Game1.player.hasBuff(id))
+                Game1.player.buffs.Remove(id);
+
+            var buff = new Buff(id, name, iconTexture: null, iconSheetIndex: 0, duration: durationMs, effects: effects)
+            { visible = true };
+            Game1.player.applyBuff(buff);
+        }
+
+        // конвертер из GameData (BuffAttributesData) -> BuffEffects
+        // конвертер из GameData (BuffAttributesData) -> BuffEffects
+        private static BuffEffects ToEffects(BuffAttributesData a)
+        {
+            var e = new BuffEffects();
+
+            // базовые характеристики
+            if (a.MaxStamina != 0) e.MaxStamina.Add(a.MaxStamina);
+            if (a.Speed != 0) e.Speed.Add(a.Speed);
+            if (a.Defense != 0) e.Defense.Add(a.Defense);
+            if (a.Attack != 0) e.Attack.Add(a.Attack);
+            if (a.Immunity != 0) e.Immunity.Add(a.Immunity);
+            if (a.LuckLevel != 0) e.LuckLevel.Add(a.LuckLevel);
+            if (a.MagneticRadius != 0) e.MagneticRadius.Add(a.MagneticRadius);
+
+            // уровни навыков (если используешь их в json — оставь)
+            if (a.FarmingLevel != 0) e.FarmingLevel.Add(a.FarmingLevel);
+            if (a.FishingLevel != 0) e.FishingLevel.Add(a.FishingLevel);
+            if (a.MiningLevel != 0) e.MiningLevel.Add(a.MiningLevel);
+            if (a.ForagingLevel != 0) e.ForagingLevel.Add(a.ForagingLevel);
+            if (a.CombatLevel != 0) e.CombatLevel.Add(a.CombatLevel);
+
+            // НЕТ поля StaminaRegen в BuffAttributesData и НЕТ коллекции StaminaRegen в BuffEffects.
+
+            return e;
+        }
+
+
+        // перегрузка: применяем бафф по id из Data/Buffs (1.6)
+        // перегрузка: применяем бафф по id из Data/Buffs (1.6)
+        private void ApplyOrRefreshBuff(string logicalId)
+        {
+            var dict = Game1.content.Load<Dictionary<string, BuffData>>("Data/Buffs");
+
+            if (!dict.TryGetValue(logicalId, out var data))
+            {
+                Monitor.Log($"[Buff] Data/Buffs не содержит ключ '{logicalId}'. Бафф не применён.", LogLevel.Warn);
+                return;
+            }
+
+            // держим «замочный» бафф бесконечным
+            int duration = Buff.ENDLESS;
+
+            if (Game1.player.hasBuff(logicalId))
+                Game1.player.buffs.Remove(logicalId);
+
+            var effects = data.Effects != null ? ToEffects(data.Effects) : new BuffEffects();
+
+            // применяем с тем же ID, что и в JSON (buffStress*)
+            var buff = new Buff(logicalId, data.DisplayName, iconTexture: null, iconSheetIndex: 0, duration: duration, effects: effects)
+            { visible = true };
+
+            Game1.player.applyBuff(buff);
+        }
+
+
+
+
+
+        private void TryAddQuest(string questId)
+        {
+            try { Game1.player.addQuest(questId); } catch { }
+        }
+
+        private void TryAddMailForTomorrow(string mailId)
+        {
+            try { Game1.addMailForTomorrow(mailId); } catch { }
+        }
+
+        private bool PlayerHasQuest(string questId)
+        {
+            foreach (var q in Game1.player.questLog)
+                if (string.Equals(AsString(q.id), questId, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+
+
+        private void MaybeProgressToast(string buffId, int current, int target, string label)
+        {
+            if (target <= 0) return;
+            int pct = (int)(current * 100.0 / target);
+            int step = pct >= 100 ? 100 : (pct >= 75 ? 75 : (pct >= 50 ? 50 : (pct >= 25 ? 25 : 0)));
+
+            if (step > 0 && (!_lastToastPct.TryGetValue(buffId, out var last) || step > last))
+            {
+                _lastToastPct[buffId] = step;
+                Game1.addHUDMessage(new HUDMessage($"{label}: {current}/{target} ({step}%)", 2));
+            }
+        }
+
+
+        // === Хелперы проверки времени/локаций/сезона/погоды ===
+        private static bool IsTimeBetween(int from, int to) => Game1.timeOfDay >= from && Game1.timeOfDay <= to;
+
+        private static bool IsSeasonOneOf(params string[] seasons)
+        {
+            var s = Game1.currentSeason?.ToLowerInvariant();
+            return seasons.Any(x => string.Equals(x, s, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsLocationOneOf(GameLocation loc, params string[] names)
+        {
+            string n = loc?.Name ?? "";
+            return names.Any(x => string.Equals(x, n, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool WeatherOneOf(params string[] weathers)
+        {
+            // упрощение: Storm, Rain, Wind, Snow
+            bool storm = Game1.isLightning;
+            bool rain = Game1.isRaining;
+            bool wind = Game1.isDebrisWeather;
+            bool snow = Game1.isSnowing;
+
+            return (storm && weathers.Contains("Storm", StringComparer.OrdinalIgnoreCase))
+                || (rain && weathers.Contains("Rain", StringComparer.OrdinalIgnoreCase))
+                || (wind && weathers.Contains("Wind", StringComparer.OrdinalIgnoreCase))
+                || (snow && weathers.Contains("Snow", StringComparer.OrdinalIgnoreCase));
+        }
+
+        private static string ExtractPortraitTag(string s, out string clean)
+        {
+            // ожидаем тег в конце строки: ...$a / $h / $u / $l / $s / $8
+            string tag = "";
+            if (s.Length >= 2 && s[^2] == '$')
+            {
+                tag = s[^2..];
+                clean = s[..^2];
+            }
+            else clean = s;
+            return tag;
+        }
+
+        private static void DoEmoteFromTag(NPC harvey, string tag)
+        {
+            // твои коды:
+            // 20 - любовь, 32 - улыбка, 36 - отказ/строгость, 40 - разговор, 28 - грусть, 16 - удивление
+            int emote = tag switch
+            {
+                "$l" => 20,
+                "$h" => 32,
+                "$a" => 36,
+                "$u" => 40,
+                "$s" => 28,
+                "$8" => 16,
+                _ => 40
+            };
+            harvey.doEmote(emote);
+        }
+
+        private static void OpenHarveyDialogue(NPC harvey, IEnumerable<string> lines)
+        {
+            // Очистим и заполним очередь диалога
+            harvey.CurrentDialogue.Clear();
+            foreach (var line in lines)
+                //harvey.CurrentDialogue.Push(new Dialogue(harvey, line));
+                harvey.CurrentDialogue.Push(new StardewValley.Dialogue(harvey, line));
+            Game1.drawDialogue(harvey);
+        }
+
+
+        public override void Entry(IModHelper helper)
+        {
+            Config = helper.ReadConfig<ModConfig>();
+            Helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
+            Helper.Events.GameLoop.ReturnedToTitle += (_, __) => Data = new SaveData();
+            Helper.Events.GameLoop.DayStarted += OnDayStarted;
+            Helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
+            Helper.Events.Display.MenuChanged += OnMenuChanged; // считаем разговоры
+            helper.Events.GameLoop.GameLaunched += OnGameLaunched;
+            Helper.ConsoleCommands.Add("hs.handbook", "Открыть справочник Харви", (_, __) => OpenHandbook());
+            Helper.ConsoleCommands.Add("harvey_fix_sync", "Resync quests and stress buffs.", (_, __) =>
+            {
+                SyncQuestsAndBuffs();
+                var q = Data.ActiveLockedDebuffs.Count;
+                var b = Game1.player.buffs?.AppliedBuffs?.Count ?? 0;
+                Monitor.Log($"Synced. Locks={q}, Buffs={b}", LogLevel.Info);
+            });
+            Helper.ConsoleCommands.Add("hs.trigger", "Manually run check for quest completion triggers.", (_, __) =>
+            {
+                CheckManualTriggers();
+                Monitor.Log("Manual triggers checked.", LogLevel.Info);
+            });
+            Helper.Events.Display.RenderedActiveMenu += OnRenderedActiveMenu; // рисуем поверх меню
+            Helper.Events.Input.ButtonPressed += OnButtonPressed;
+            Helper.Events.Input.ButtonsChanged += OnButtonsChanged;
+            helper.Events.GameLoop.DayEnding += OnDayEnding;
+            helper.Events.Player.Warped += OnWarped;
+
+            try
+            {
+                _btnTex = Helper.ModContent.Load<Texture2D>("assets/sprites/handbook.png"); // ← ТАК
+                _btnSrc = new Rectangle(0, 0, _btnTex.Width, _btnTex.Height);
+                Monitor.Log("Handbook icon loaded.", LogLevel.Trace);
+            }
+            catch (Exception ex)
+            {
+                _btnTex = null;
+                Monitor.Log($"Handbook icon not found: {ex.Message}", LogLevel.Warn);
+            }
+
+            _handbookTex = Helper.ModContent.Load<Texture2D>("assets/sprites/handbook.png");
+
+
+
+        }
+
+
+        private void OnDayEnding(object? sender, DayEndingEventArgs e)
+        {
+            // Hunger: к концу дня не было факта еды?
+            if (Game1.stats.DaysPlayed >= 3
+                && !HasTopic("topicEatSomething") // ставим его в ReportFoodEaten/эвристике на еду
+                && !Game1.player.hasBuff(B_Hunger)
+                && !Game1.player.hasBuff(B_Immunity))
+            {
+                StartLockedDebuff(B_Hunger, Q_Hunger, new BuffEffects { }, "Голод");
+            }
+
+            if (IsTimeBetween(2400, 2600) && !Game1.player.hasBuff(B_NoSleep) && !Game1.player.hasBuff(B_Immunity))
+                StartLockedDebuff(B_NoSleep, Q_NoSleep, new BuffEffects { }, "Недосып");
+
+            // NoSleep quest - ранний отбой
+            if (Data.Treatment.TryGetValue(B_NoSleep, out var pNS))
+            {
+                // если уснули до полуночи — считаем «ранний отбой»
+                if (Game1.timeOfDay < 2400) pNS.EarlySleepStreak = Math.Min(3, pNS.EarlySleepStreak + 1);
+                else pNS.EarlySleepStreak = 0;
+
+                Data.Treatment[B_NoSleep] = pNS;
+            }
+
+            // NoSleep quest - завершение при раннем отбое (до 22:00)
+            if (PlayerHasQuest(Q_NoSleep) && Game1.timeOfDay >= 600 && Game1.timeOfDay <= 2200)
+            {
+                TryCompleteQuest(Q_NoSleep);
+                RemoveBuff(B_NoSleep);
+                AddTopic("topicStressTreatmentNoSleepCured", 2);
+                Data.ActiveLockedDebuffs.Remove(B_NoSleep);
+                Data.Treatment.Remove(B_NoSleep);
+                Game1.playSound("questcomplete");
+                SaveNow();
+            }
+
+            // Darkness quest - завершение если провели вечер при свете
+            if (PlayerHasQuest(Q_Darkness) 
+                && Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 200
+                && Game1.player.hasBuff(B_LightAndSafe)
+                && Game1.player.currentLocation is StardewValley.Locations.FarmHouse)
+            {
+                RemoveBuff(B_LightAndSafe);
+                AddTopic("topicStressTreatmentDarknessCured", 2);
+                Game1.playSound("questcomplete");
+                RemoveBuff(B_Darkness);
+                TryCompleteQuest(Q_Darkness);
+                Data.ActiveLockedDebuffs.Remove(B_Darkness);
+                Data.Treatment.Remove(B_Darkness);
+                SaveNow();
+            }
+
+            SaveNow();
+        }
+
+        private void OnButtonsChanged(object? s, ButtonsChangedEventArgs e)
+        {
+            // чтобы не срабатывало, когда меню открыты / не в мире
+            if (!Context.IsPlayerFree)
+                return;
+
+            if (Config.OpenHandbook.JustPressed())
+            {
+                OpenHandbook(); // твой метод
+                                // При желании можно подавить дальнейшую обработку:
+                                // Helper.Input.SuppressActiveKeybinds(Config.OpenHandbook);
+                Helper.Input.SuppressActiveKeybinds(Config.OpenHandbook);
+            }
+        }
+
+        private void OnButtonPressed(object? s, ButtonPressedEventArgs e)
+        {
+            if (Game1.activeClickableMenu is not GameMenu gm) return;
+            if (!IsInventoryPage(gm)) return;
+
+            if (e.Button.IsUseToolButton() || e.Button == SButton.MouseLeft || e.Button == SButton.ControllerA)
+            {
+                // клик по кнопке?
+                if (_handbookRect.Contains(Game1.getMouseX(), Game1.getMouseY()))
+                {
+                    // показать меню из SML
+                    var vm = BuildHandbookVM();
+                    Game1.activeClickableMenu = _viewEngine.CreateMenuFromAsset(
+                        $"Mods/{this.ModManifest.UniqueID}/Views/Handbook", vm);
+                    Helper.Input.Suppress(SButton.MouseLeft);
+                }
+            }
+        }
+
+        private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
+        {
+            _viewEngine = Helper.ModRegistry.GetApi<IViewEngine>("focustense.StardewUI")!;
+
+            if (_viewEngine == null)
+            {
+                Monitor.Log("StardewUI не найден. Внутриигровой справочник будет отключён.", LogLevel.Warn);
+                return;
+            }
+            _viewEngine.RegisterViews("Mods/marilynsinister.HarveyStressMeter/Views", "assets/views");
+            _viewEngine.RegisterSprites("Mods/marilynsinister.HarveyStressMeter/Sprites", "assets/sprites");
+
+            _iconsTex = Helper.ModContent.Load<Texture2D>("assets/sprites/stressIcons.png");
+        }
+
+
+        private void OnMenuChanged(object? s, MenuChangedEventArgs e)
+        {
+            if (e.NewMenu is DialogueBox && Game1.currentSpeaker is NPC who && who != null && who.Name != "Harvey")
+            {
+                var fr = Game1.player.getFriendshipHeartLevelForNPC(who.Name) * 250; // ~сердца→очки (грубо)
+                if (fr >= 750 && !Game1.player.hasBuff(B_Social) && Game1.random.NextDouble() < 0.30)
+                    StartLockedDebuff(B_Social, Q_Social, new BuffEffects { }, "Социальный стресс");
+            }
+            if (e.NewMenu is DialogueBox)
+            {
+                var npc = Game1.currentSpeaker;
+                if (npc != null) _lastDialogueNpc = npc.Name;
+
+                if (Game1.currentSpeaker?.Name == "Harvey")
+                {
+                    // Старт лечения строго по факту показа реплики из topicStress*
+
+                    var topicsNow = Game1.player.activeDialogueEvents.Keys
+                        .Where(k => k.StartsWith("topicStress", StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    foreach (var topic in topicsNow)
+                    {
+                        // маппим топик -> бафф лаконично по суффиксу
+                        string? buffId = topic.ToLowerInvariant() switch
+                        {
+                            "topicstresstired" => B_Tired,
+                            "topicstresslonely" => B_Lonely,
+                            "topicstressthunder" => B_Thunder,
+                            "topicstresshunger" => B_Hunger,
+                            "topicstressoverwork" => B_Overwork,
+                            "topicstressnosleep" => B_NoSleep,
+                            "topicstresstoocold" => B_TooCold,
+                            "topicstressdarkness" => B_Darkness,
+                            "topicstresssocial" => B_Social,
+                            _ => null
+                        };
+
+                        if (buffId is null)
+                            continue;
+
+                        if (!Game1.player.hasBuff(buffId) || !Data.ActiveLockedDebuffs.ContainsKey(buffId))
+                            continue; // нет реального дебаффа → не стартуем лечение
+
+                        // при необходимости — ставим «замок» ровно сейчас, когда игрок поговорил с Харви
+                        if (!Data.ActiveLockedDebuffs.ContainsKey(buffId) && !Game1.player.hasBuff(B_Immunity))
+                        {
+                            // берём квест из карты и сразу вешаем сам бафф из JSON
+                            if (_questByBuff.TryGetValue(buffId, out var qid))
+                                StartLockedDebuff(buffId, qid, new BuffEffects { }, ""); // эффекты/имя игнорируются внутри
+                        }
+
+
+
+
+                        // запускаем программу лечения (ставит старт-топики лечения/письмо/квест по твоей текущей логике)
+                        StartTreatmentFor(buffId);
+
+                        // снимаем исходный стресс-топик, чтобы не триггерилось повторно
+                        RemoveTopic(topic);
+
+                        SaveNow();
+                    }
+
+
+                    // Найти активный залоченный дебафф, для которого ещё не выдан квест
+                    var pending = Data.ActiveLockedDebuffs
+                        .Where(kv => !PlayerHasQuest(kv.Value))
+                        .Select(kv => kv.Key)
+                        .FirstOrDefault();
+
+                    if (pending != null && Data.Treatment.TryGetValue(pending, out var p))
+                    {
+                        // Короткая фраза Харви по типу дебаффа
+                        string line = pending switch
+                        {
+                            var x when x == B_Thunder => $"Гроза пугает, но я рядом. Держись возле меня, и мы справимся.",
+                            var x when x == B_Darkness => $"Темнота не страшна, если рядом свет и я.",
+                            var x when x == B_Lonely => $"Одиночество лечится разговорами. Поговори с жителями.",
+                            var x when x == B_Overwork => $"Ты переутомилась. Перерывы помогут восстановиться.",
+                            var x when x == B_Hunger => $"Тебе нужно поесть. Это важно для лечения.",
+                            var x when x == B_TooCold => $"Переохлаждение опасно. Согревайся в доме или клинике.",
+                            _ => "Я помогу тебе справиться с этим."
+                        };
+                        var h = Game1.getCharacterFromName("Harvey");
+                        if (h != null)
+                        {
+                            string tag = ExtractPortraitTag(line, out var clean);
+                            DoEmoteFromTag(h, tag);
+                            h.showTextAboveHead(clean);
+                        }
+
+                        // 1) Выдать квест на лечение
+                        TryAddQuest(Data.ActiveLockedDebuffs[pending]);
+
+                        // 2) Запланировать письмо на завтра (конкретное под дебафф)
+                        switch (pending)
+                        {
+                            case var x when x == B_Thunder: TryAddMailForTomorrow(M_Thunder_Start); break;
+                            case var x when x == B_Darkness: TryAddMailForTomorrow(M_Darkness_Start); break;
+                            case var x when x == B_Lonely: TryAddMailForTomorrow(M_Lonely_Start); break;
+                            case var x when x == B_Overwork: TryAddMailForTomorrow(M_Overwork_Start); break;
+                            case var x when x == B_Hunger: TryAddMailForTomorrow(M_Hunger_Start); break;
+                            case var x when x == B_TooCold: TryAddMailForTomorrow(M_Cold_Start); break;
+                            case var x when x == B_Social: TryAddMailForTomorrow(M_Social_Start); break;
+                        }
+
+                        // 3) Отметить, что сегодня состоялся разговор с Харви
+                        Data.TalkedToHarveyToday = true;
+                        SaveNow();
+                    }
+
+                    // найдём любой активный «замок» и скажем короткую фразу о прогрессе
+                    var active = Data.ActiveLockedDebuffs.Keys.FirstOrDefault();
+                    if (active != null && Data.Treatment.TryGetValue(active, out var p2))
+                    {
+                        string line = active switch
+                        {
+                            var x when x == B_Thunder => $"Ещё {Math.Max(0, 120 - p2.SecondsNearHarvey)} сек рядом со мной — и закончим.$u",
+                            var x when x == B_Darkness => $"Нужно {Math.Max(0, 180 - p2.EveningInLightSeconds)} сек в свете. Доведи дело до конца.$a",
+                            var x when x == B_Lonely => $"Осталось {Math.Max(0, 3 - p2.TalkedUniqueToday)} разговора сегодня. Тебе это под силу.$0",
+                            var x when x == B_Overwork => $"Перерывов: {Data.OverworkBreaksToday}/3. Я слежу за темпом.$a",
+                            var x when x == B_Hunger => $"Съешь что-то тёплое — и мы закроем вопрос.$u",
+                            var x when x == B_TooCold => $"Ещё {Math.Max(0, 120 - p2.WarmSeconds)} сек в тепле — и достаточно.$u",
+                            _ => ""
+                        };
+                        if (!string.IsNullOrEmpty(line))
+                        {
+                            var h = Game1.getCharacterFromName("Harvey");
+                            if (h != null)
+                            {
+                                string tag = ExtractPortraitTag(line, out var clean);
+                                DoEmoteFromTag(h, tag);
+                                h.showTextAboveHead(clean);
+                            }
+                        }
+                    }
+                }
+            }
+            else if (e.OldMenu is DialogueBox && _lastDialogueNpc != null)
+            {
+                Data.TalkedNpcsToday.Add(_lastDialogueNpc);
+                _lastDialogueNpc = null;
+
+                // флаг «сегодня говорил» (раньше – Spiderbuttons.BETAS_DialogueOpened)
+                if (!HasTopic(T_SpokeToday))
+                    AddTopic(T_SpokeToday, 1);
+
+                // === LONELY QUEST - СЧЕТЧИК РАЗГОВОРОВ ===
+                if (PlayerHasQuest(Q_Lonely) && Data.Treatment.TryGetValue(B_Lonely, out var pLonely))
+                {
+                    pLonely.TalkedUniqueToday = Data.TalkedNpcsToday.Count;
+                    Data.Treatment[B_Lonely] = pLonely;
+                    
+                    // Показываем прогресс игроку
+                    Game1.addHUDMessage(new HUDMessage($"+1 общение ({pLonely.TalkedUniqueToday}/3)", 2));
+                    
+                    // Проверяем завершение квеста
+                    if (pLonely.TalkedUniqueToday >= 3)
+                    {
+                        Game1.playSound("questcomplete");
+                        TryCompleteQuest(Q_Lonely);
+                        RemoveBuff(B_Lonely);
+                        AddTopic("topicStressTreatmentLonelyCured", 2);
+                        Data.ActiveLockedDebuffs.Remove(B_Lonely);
+                        Data.Treatment.Remove(B_Lonely);
+                        SaveNow();
+                    }
+                }
+            }
+
+            if (e.NewMenu is GameMenu gm)
+            {
+
+                CreateOrUpdateHandbookButton(gm);
+            }
+            else
+                _btnHandbook = null;
+
+            // foreach (var buffId in Data.ActiveLockedDebuffs.Keys.ToList())
+            //     StartTreatmentFor(buffId);
+        }
+
+        private void OnRenderedActiveMenu(object? s, RenderedActiveMenuEventArgs e)
+        {
+            if (Game1.activeClickableMenu is not GameMenu gm) return;
+            if (!IsInventoryPage(gm)) return;
+
+            float ui = Game1.options.uiScale;
+            int size = (int)(HandbookSize * ui);
+
+            // пытаемся привязаться к реальной "мусорке"
+            Rectangle anchor = TryGetTrashCanBounds(gm)
+                ?? new Rectangle(
+                    gm.xPositionOnScreen + gm.width - (int)(96 * ui),
+                    gm.yPositionOnScreen + gm.height - (int)(96 * ui),
+                    (int)(64 * ui), (int)(64 * ui));
+
+            int x = anchor.X + (anchor.Width - size) / 2;
+            int y = anchor.Bottom + (int)(18 * ui);
+            _handbookRect = new Rectangle(x, y, size, size);
+
+            // РИСУЕМ ТОЛЬКО PNG — без подложек и рамок
+            e.SpriteBatch.Draw(_handbookTex, _handbookRect, Color.White);
+
+            if (_handbookRect.Contains(Game1.getMouseX(), Game1.getMouseY()))
+                IClickableMenu.drawHoverText(e.SpriteBatch, "Справочник Харви", Game1.smallFont);
+            gm.drawMouse(e.SpriteBatch); // перерисуем курсор поверх нашей кнопки
+        }
+
+        private void OnSaveLoaded(object? s, SaveLoadedEventArgs e)
+        {
+            // грузим/создаём сохранение
+            Data = Helper.Data.ReadSaveData<SaveData>(SaveKey) ?? new SaveData();
+            Data.LastDay = SDate.Now();
+
+            SyncQuestsAndBuffs();
+        }
+
+        private void OnDayStarted(object? s, DayStartedEventArgs e)
+        {
+            SyncQuestsAndBuffs();
+
+            // утро: если был pending одиночества — применяем бафф и топик на сегодня
+            if (HasTopic(T_LonelyPending))
+            {
+                RemoveTopic(T_LonelyPending);
+
+                // вешаем залоченный бафф и выдаём его разговорный топик (см. п.3)
+                StartLockedDebuff(B_Lonely, Q_Lonely, new BuffEffects { Defense = { -1 } }, "Одиночество");
+                // подстраховка: если хочешь точно Days=2
+                if (!HasTopic("topicStressLonely")) AddTopic("topicStressLonely", 2);
+            }
+
+            _prevStamina = Game1.player.Stamina;
+            Data.TalkedNpcsToday.Clear();
+            Data.OverworkBreaksToday = 0;
+            Data.OverworkBreakSeconds = 0;
+            Data.OverworkBreakActive = false;
+            Data.TalkedToHarveyToday = false;
+
+            // === СБРОС СЧЕТЧИКОВ КВЕСТОВ ===
+            // Overwork - сброс перерывов и баффов
+            if (PlayerHasQuest(Q_Overwork))
+            {
+                Data.OverworkBreaksToday = 0;
+                RemoveBuff(B_OverworkBreak);
+                RemoveTopic("topicOverworkBreakActive");
+                RemoveTopic("topicOverworkBreakInterrupted");
+            }
+
+            // Lonely - сброс счетчика разговоров
+            if (Data.Treatment.TryGetValue(B_Lonely, out var pL))
+            {
+                pL.TalkedUniqueToday = 0;
+                Data.Treatment[B_Lonely] = pL;
+            }
+
+            // === ВОЗОБНОВЛЕНИЕ БАФФОВ ЛЕЧЕНИЯ ===
+            // Если есть активный топик лечения, но нет баффа лечения - восстанавливаем
+            foreach (var (buffId, treatmentInfo) in _treatmentStartByBuff)
+            {
+                if (HasTopic(treatmentInfo.topic) && !Game1.player.hasBuff("buffHarveyTreatment" + buffId.Replace("buffStress", "")))
+                {
+                    var treatmentBuffId = "buffHarveyTreatment" + buffId.Replace("buffStress", "");
+                    ApplyOrRefreshBuff(treatmentBuffId, "Лечение", new BuffEffects { }, Buff.ENDLESS);
+                }
+            }
+
+            SaveNow();
+        }
+
+        private void OnWarped(object? sender, WarpedEventArgs e)
+        {
+            if (!e.IsLocalPlayer) return;
+
+            // Darkness: строго как в JSON — только при смене локации ночью и в нужных зонах
+            if (Game1.stats.DaysPlayed >= 3
+                && Game1.timeOfDay >= 2200 && Game1.timeOfDay <= 2600
+                && !Game1.player.hasBuff(B_Darkness) && !Game1.player.hasBuff(B_Immunity))
+            {
+                var n = e.NewLocation?.NameOrUniqueName;
+                if (n == "Backwoods" || n == "Forest" || n == "Mountain")
+                {
+                    StartLockedDebuff(B_Darkness, Q_Darkness, new BuffEffects { }, "Темнота");
+                }
+            }
+
+            // === ТРИГГЕРЫ КВЕСТОВ ЛЕЧЕНИЯ ===
+            
+            // HarveyMod_Trigger_TiredRecovery - бафф отдыха дома
+            if (PlayerHasQuest(Q_Tired) 
+                && e.NewLocation is StardewValley.Locations.FarmHouse
+                && !HasHeavyTools(Game1.player))
+            {
+                ApplyOrRefreshBuff(B_RestingAtHome, "Отдых дома", new BuffEffects { }, Buff.ENDLESS);
+            }
+
+            // Overwork - старт/отмена перерыва
+            if (PlayerHasQuest(Q_Overwork))
+            {
+                var n = e.NewLocation?.NameOrUniqueName;
+                bool restZone = n == "FarmHouse" || n == "HarveyRoom" || n == "Hospital" 
+                             || e.NewLocation is BathHousePool;
+                
+                if (restZone && Data.OverworkBreaksToday < 3 && !Game1.player.hasBuff(B_OverworkBreak))
+                {
+                    // Старт перерыва
+                    ApplyOrRefreshBuff(B_OverworkBreak, "Перерыв", new BuffEffects { }, Buff.ENDLESS);
+                    AddTopic("topicOverworkBreakActive", 1);
+                    RemoveTopic("topicOverworkBreakInterrupted");
+                    Game1.playSound("sipTea");
+                }
+                else if (!restZone && Game1.player.hasBuff(B_OverworkBreak))
+                {
+                    // Отмена перерыва - вышли из зоны отдыха
+                    RemoveBuff(B_OverworkBreak);
+                    AddTopic("topicOverworkBreakInterrupted", 0);
+                    RemoveTopic("topicOverworkBreakActive");
+                    Game1.playSound("cancel");
+                }
+            }
+
+            // Darkness - бафф света и безопасности
+            if (PlayerHasQuest(Q_Darkness)
+                && Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 200
+                && !Game1.player.hasBuff(B_LightAndSafe)
+                && e.NewLocation is StardewValley.Locations.FarmHouse)
+            {
+                // Проверяем наличие ламп в доме (упрощенная проверка)
+                ApplyOrRefreshBuff(B_LightAndSafe, "Свет и безопасность", new BuffEffects { }, Buff.ENDLESS);
+            }
+        }
+
+        private void OnUpdateTicked(object? s, UpdateTickedEventArgs e)
+        {
+            if (!Context.IsWorldReady) return;
+
+            // Manual триггеры - проверяем каждую секунду
+            if (e.IsMultipleOf(60))
+            {
+                CheckManualTriggers();
+            }
+
+            if (e.IsMultipleOf(60))
+            {
+
+                var loc = Game1.currentLocation;
+                bool outdoors = loc?.IsOutdoors == true;
+                bool nightOutside = outdoors && Game1.timeOfDay >= 2000;
+                bool thunder = Game1.isLightning;
+
+                float stamPct = Game1.player.Stamina / Game1.player.maxStamina.Value;
+
+                if (Game1.timeOfDay >= 1800 && Data.TalkedNpcsToday.Count == 0 && !HasTopic(T_LonelyPending))
+                    AddTopic(T_LonelyPending, 1);
+
+                bool harveyNearby = false;
+                {
+                    var harvey = Game1.getCharacterFromName("Harvey");
+                    if (harvey != null && harvey.currentLocation == Game1.currentLocation)
+                    {
+                        Vector2 hp = harvey.getStandingPosition();
+                        Vector2 pp = Game1.player.getStandingPosition();
+                        harveyNearby = Vector2.Distance(hp, pp) <= 6f * Game1.tileSize;
+                    }
+                }
+
+                if (harveyNearby)
+                    ApplyOrRefreshBuff(B_CareAura, "Рядом с Харви",
+                        new BuffEffects { Defense = { +1 }, MaxStamina = { +10 } }, 2000);
+                else
+                    RemoveBuff(B_CareAura);
+
+                // Thunder quest - бафф успокоения в больнице с Харви
+                if (PlayerHasQuest(Q_Thunder) 
+                    && Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
+                    && (Game1.isLightning || Game1.isRaining)
+                    && harveyNearby)
+                {
+                    ApplyOrRefreshBuff(B_CalmingAtHospital, "Успокоение с Харви", new BuffEffects { }, Buff.ENDLESS);
+                }
+
+
+
+                // В твоём же месте, где ты считаешь прогресс по другим лечениям (внутри e.IsMultipleOf(60)):
+                if (Data.Treatment.TryGetValue(B_Social, out var pS))
+                {
+                    // 1) Секунды рядом с Харви (ты уже вычисляешь harveyNearby выше)
+                    if (harveyNearby)
+                    {
+                        pS.SecondsNearHarvey += 1; // считаем по 1 сек/тик (раз в 60 тиков)
+                    }
+
+                    // 2) Уникальные диалоги за день — ты добавляешь в Data.TalkedNpcsToday при закрытии DialogueBox.
+                    pS.TalkedUniqueToday = Data.TalkedNpcsToday.Count;
+
+                    // Индикаторы прогресса на HUD (необязательно)
+                    MaybeProgressToast(B_Social, pS.TalkedUniqueToday, 3, "Разговоры");
+                    MaybeProgressToast(B_Social, pS.SecondsNearHarvey, 60, "Рядом с Харви");
+
+                    Data.Treatment[B_Social] = pS;
+
+                    // Условия завершения: 3 уникальных жителя + 60 сек рядом с Харви
+                    if (pS.TalkedUniqueToday >= 3 && pS.SecondsNearHarvey >= 60)
+                    {
+                        // Снимаем бафф и очищаем «залоченный» статус
+                        RemoveBuff(B_Social);
+                        Data.ActiveLockedDebuffs.Remove(B_Social);
+
+                        // Завершаем квест (если выдавался)
+                        try { Game1.player.completeQuest(Q_Social); } catch { }
+
+                        // Тёплая реакция Харви
+                        var harvey = Game1.getCharacterFromName("Harvey");
+                        if (harvey != null && harvey.currentLocation == Game1.currentLocation)
+                        {
+                            harvey.doEmote(56);
+                            harvey.showTextAboveHead("Вот! Видишь? Получилось.$h");
+                        }
+
+                        SaveNow();
+                    }
+                }
+
+
+                bool blockStart = Game1.eventUp; // на фестивалях не стартуем новые "замки"
+
+                if (!blockStart)
+                {
+                    bool hasAnyLock = Data.ActiveLockedDebuffs.Count > 0;
+
+                    // === СТАРТ ЛЕЧЕБНЫХ КВЕСТОВ (залоченные баффы) ===
+
+                    if (nightOutside)
+                    {
+                        bool safeLight = Game1.currentLocation is BathHousePool
+                                      || Game1.currentLocation?.NameOrUniqueName == "FarmHouse"
+                                      || Game1.currentLocation?.NameOrUniqueName == "Hospital";
+                        if (!hasAnyLock && !safeLight)
+                            StartLockedDebuff(B_Darkness, Q_Darkness, new BuffEffects { Defense = { -1 } }, "Боязнь темноты", M_Darkness_Start);
+                    }
+                    if (!hasAnyLock && Data.TalkedNpcsToday.Count == 0 && Game1.timeOfDay >= 1600)
+                        StartLockedDebuff(B_Lonely, Q_Lonely, new BuffEffects { Defense = { -1 } }, "Одиночество", M_Lonely_Start);
+
+                    if (!hasAnyLock && stamPct < 0.15f && Game1.timeOfDay >= 1400)
+                        StartLockedDebuff(B_Hunger, Q_Hunger, new BuffEffects { Defense = { -1 }, MaxStamina = { -20 } }, "Слабость от голода", M_Hunger_Start);
+
+                    // «Переутомление» — если за 10 мин было много тяжёлых действий (счётчик можешь вести как раньше)
+                    if (!hasAnyLock && Data.OverworkBreaksToday == 0 && PlayedHardLast10m())
+                        StartLockedDebuff(B_Overwork, Q_Overwork, new BuffEffects { Defense = { -1 }, MaxStamina = { -34 } }, "Переутомление", M_Overwork_Start);
+
+                    // Лёгкая усталость — если стамина низкая с утра
+                    if (!hasAnyLock && Game1.dayOfMonth >= 1 && Game1.timeOfDay <= 1200 && stamPct < 0.35f && !Game1.player.hasBuff(B_Tired))
+                        StartLockedDebuff(B_Tired, Q_Tired, new BuffEffects { }, "Усталость");
+
+                    // Недосып — если поздний отбой (переносим с
+                    if (IsTimeBetween(2400, 2600) && !Game1.player.hasBuff(B_NoSleep) && !Game1.player.hasBuff(B_Immunity))
+                        StartLockedDebuff(B_NoSleep, Q_NoSleep, new BuffEffects { }, "Недосып");
+                    // Thunder (гроза): Days>=2 и шторм
+                    if (!hasAnyLock
+                        && Game1.stats.DaysPlayed >= 2
+                        && Game1.isLightning
+                        && !Game1.player.hasBuff(B_Thunder)
+                        && !Game1.player.hasBuff(B_Immunity))
+                    {
+                        StartLockedDebuff(B_Thunder, Q_Thunder, new BuffEffects { }, "Пугающая гроза");
+                    }
+
+
+                    if (!hasAnyLock
+                        && Game1.stats.DaysPlayed >= 2
+                        && Game1.timeOfDay >= 2100 && Game1.timeOfDay <= 2600
+                        && (Game1.currentSeason == "spring" || Game1.currentSeason == "fall" || Game1.currentSeason == "winter"))
+                    {
+                        var n = Game1.currentLocation?.NameOrUniqueName;
+                        bool locOk = n == "Mountain" || n == "Forest" || n == "Railroad" || n == "Backwoods";
+                        bool weatherOk = Game1.isSnowing || Game1.isRaining || Game1.isDebrisWeather || Game1.isLightning;
+                        bool outdoorsOk = Game1.currentLocation?.IsOutdoors == true;
+                        if (outdoorsOk && locOk && weatherOk
+                            && !Game1.player.hasBuff(B_TooCold) && !Game1.player.hasBuff(B_Immunity))
+                        {
+                            // ПИСЬМО НЕ ДАЁМ ЗДЕСЬ, только бафф и запуск квеста после разговора с Харви
+                            StartLockedDebuff(B_TooCold, Q_Cold /*или Q_TooCold — как у тебя заведено*/,
+                                new BuffEffects { Defense = { -1 } }, "Переохлаждение");
+                        }
+                    }
+
+
+                }
+                // ---- авто-зачёт еды: резкий прирост стамины => считаем, что поел ----
+                float delta = Game1.player.Stamina - _prevStamina;
+                bool inSpa = Game1.currentLocation is BathHousePool;
+                if (!inSpa && delta >= 10f && delta <= 200f) // верхняя отсечка – защита от артефактов
+                {
+                    if (Data.Treatment.TryGetValue(B_Hunger, out var progHun))
+                    {
+                        progHun.AteAnyFood = true;
+                        Data.Treatment[B_Hunger] = progHun;
+                    }
+                    if (!HasTopic(T_AteToday))
+                        AddTopic(T_AteToday, 1); // ← ставим "ел сегодня"
+                    
+                    // Естественное снятие голода при еде
+                    if (Game1.player.hasBuff(B_Hunger) && !Data.ActiveLockedDebuffs.ContainsKey(B_Hunger))
+                    {
+                        RemoveBuff(B_Hunger);
+                        Game1.addHUDMessage(new HUDMessage("Голод утолён", HUDMessage.newQuest_type));
+                    }
+                }
+                _prevStamina = Game1.player.Stamina;
+
+                // === ЕСТЕСТВЕННОЕ СНЯТИЕ БАФФОВ БЕЗ КВЕСТОВ ===
+                
+                // Tired - снятие при отдыхе дома
+                if (Game1.player.hasBuff(B_Tired) 
+                    && !Data.ActiveLockedDebuffs.ContainsKey(B_Tired)
+                    && Game1.player.currentLocation is StardewValley.Locations.FarmHouse
+                    && Game1.timeOfDay >= 2200 && Game1.timeOfDay <= 200)
+                {
+                    RemoveBuff(B_Tired);
+                    RemoveTopic("topicStressTired");
+                }
+
+                // Lonely - снятие при разговоре с Харви
+                if (Game1.player.hasBuff(B_Lonely)
+                    && !Data.ActiveLockedDebuffs.ContainsKey(B_Lonely)
+                    && harveyNearby
+                    && Game1.player.currentLocation?.NameOrUniqueName != null)
+                {
+                    RemoveBuff(B_Lonely);
+                    RemoveTopic("topicStressLonely");
+                    var harvey = Game1.getCharacterFromName("Harvey");
+                    if (harvey != null)
+                        harvey.showTextAboveHead("Я всегда рядом.");
+                }
+
+                // Thunder - снятие при нахождении в помещении с Харви
+                if (Game1.player.hasBuff(B_Thunder)
+                    && !Data.ActiveLockedDebuffs.ContainsKey(B_Thunder)
+                    && harveyNearby
+                    && Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
+                    && (Game1.isLightning || Game1.isRaining))
+                {
+                    RemoveBuff(B_Thunder);
+                    RemoveTopic("topicStressThunder");
+                }
+
+                // TooCold - снятие при нахождении в тепле
+                if (Game1.player.hasBuff(B_TooCold)
+                    && !Data.ActiveLockedDebuffs.ContainsKey(B_TooCold))
+                {
+                    var n = Game1.player.currentLocation?.NameOrUniqueName;
+                    bool warmZone = n == "FarmHouse" || n == "Hospital" 
+                                 || Game1.player.currentLocation is BathHousePool;
+                    if (warmZone)
+                    {
+                        RemoveBuff(B_TooCold);
+                        RemoveTopic("topicStressTooCold");
+                    }
+                }
+
+                // Darkness - снятие при нахождении при свете
+                if (Game1.player.hasBuff(B_Darkness)
+                    && !Data.ActiveLockedDebuffs.ContainsKey(B_Darkness))
+                {
+                    var n = Game1.player.currentLocation?.NameOrUniqueName;
+                    bool safeLight = n == "FarmHouse" || n == "Hospital" 
+                                  || Game1.player.currentLocation is BathHousePool;
+                    if (safeLight && Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 200)
+                    {
+                        RemoveBuff(B_Darkness);
+                        RemoveTopic("topicStressDarkness");
+                    }
+                }
+
+                // === ПРОГРЕСС КВЕСТОВ И ЗАВЕРШЕНИЕ ===
+                UpdateTreatmentProgressAndMaybeComplete(harveyNearby, outdoors);
+                EnsureLockedBuffsPersist();
+                if (e.IsMultipleOf(60))
+                    SyncQuestsAndBuffs();
+            }
+        }
+
+        private void CreateHandbookButton(GameMenu gm)
+        {
+            float ui = Game1.options.uiScale;
+
+            // компактнее и аккуратнее (40px вместо 48)
+            int size = (int)(40 * ui);
+            int margin = (int)(10 * ui);
+
+            // сместим левее, чтобы не наезжать на правую колонку чужих кнопок
+            int x = gm.xPositionOnScreen + gm.width - size - (int)(78 * ui);
+            int y = gm.yPositionOnScreen + margin;
+
+            _btnHandbook = new ClickableTextureComponent(
+                new Rectangle(x, y, size, size),
+                _btnTex ?? Game1.menuTexture,
+                _btnTex != null ? _btnSrc : new Rectangle(0, 256, 60, 60),
+                _btnTex != null ? 1f : (size / 60f)
+            )
+            { hoverText = "Справочник Харви" };
+        }
+
+        // helper: достать trashCan через рефлексию (в 1.6 он internal)
+        private Rectangle? TryGetTrashCanBounds(GameMenu gm)
+        {
+            if (gm.pages[gm.currentTab] is InventoryPage inv)
+            {
+                var field = Helper.Reflection.GetField<ClickableTextureComponent>(inv, "trashCan", false);
+                var trash = field?.GetValue();
+                if (trash != null) return trash.bounds;
+            }
+            return null;
+        }
+
+        private void CreateOrUpdateHandbookButton(GameMenu gm)
+        {
+            float ui = Game1.options.uiScale;
+            int tab = gm.currentTab;
+            var page = gm.pages[tab];
+
+            // показываем только на выбранной вкладке
+            bool shouldShow =
+                (Config.ButtonOn == HandbookTab.Inventory && page is InventoryPage) ||
+                (Config.ButtonOn == HandbookTab.Skills && page is SkillsPage);
+            if (!shouldShow) { _btnHandbook = null; return; }
+
+            int size = (int)((page is SkillsPage ? 56 : 48) * ui);
+            int x, y;
+
+            if (page is InventoryPage)
+            {
+                // под мусоркой (если нашли), иначе – правый низ окна
+                Rectangle anchor = TryGetTrashCanBounds(gm)
+                    ?? new Rectangle(
+                        gm.xPositionOnScreen + gm.width - (int)(96 * ui),
+                        gm.yPositionOnScreen + gm.height - (int)(96 * ui),
+                        (int)(64 * ui), (int)(64 * ui));
+
+                x = anchor.X + (anchor.Width - size) / 2;
+                y = anchor.Bottom + (int)(6 * ui);
+            }
+            else // SkillsPage
+            {
+                // справа от таблицы навыков
+                x = gm.xPositionOnScreen + gm.width - size - (int)(14 * ui);
+                y = gm.yPositionOnScreen + (int)(84 * ui);
+            }
+
+            var src = _btnTex != null ? _btnSrc : new Rectangle(0, 256, 60, 60);
+            float scale = _btnTex != null ? 1f : (size / 60f);
+
+            if (_btnHandbook == null)
+                _btnHandbook = new ClickableTextureComponent(new Rectangle(x, y, size, size),
+                    _btnTex ?? Game1.menuTexture, src, scale)
+                { hoverText = "Справочник Харви" };
+            else
+            {
+                _btnHandbook.bounds = new Rectangle(x, y, size, size);
+                _btnHandbook.sourceRect = src;
+                _btnHandbook.baseScale = scale;
+            }
+        }
+
+        private void OpenHandbook()
+        {
+            if (_viewEngine == null) return;
+            var vm = BuildHandbookVM(); // <-- только этот
+            Game1.activeClickableMenu = _viewEngine.CreateMenuFromAsset(
+                $"Mods/{this.ModManifest.UniqueID}/Views/Handbook", vm);
+        }
+
+
+        public void ReportFoodEaten(string[] tags)
+        {
+            if (!HasTopic(T_AteToday))
+                AddTopic(T_AteToday, 1);
+
+            if (Data.Treatment.TryGetValue(B_Hunger, out var p))
+            {
+                p.AteAnyFood = true;
+                Data.Treatment[B_Hunger] = p;
+            }
+        }
+
+        private bool PlayedHardLast10m()
+        {
+            // Мини-эвристика: мало выносливости и уже не раннее утро
+            return Game1.player.maxStamina.Value > 0
+                && (Game1.player.Stamina / Game1.player.maxStamina.Value) < 0.30f
+                && Game1.timeOfDay >= 1100;
+        }
+
+        private void RemoveBuff(string id)
+        {
+            // если бафф залочен квестом — не снимаем до завершения
+            if (Data.ActiveLockedDebuffs.ContainsKey(id))
+                return;
+
+            if (Game1.player.hasBuff(id))
+                Game1.player.buffs.Remove(id);
+        }
+
+        private void EnsureLockedBuffsPersist()
+        {
+            foreach (var (buffId, questId) in Data.ActiveLockedDebuffs)
+            {
+                if (!Game1.player.hasBuff(buffId))
+                {
+                    ApplyOrRefreshBuff(buffId);   // ← подтянет иконку/название/эффекты из json, но под логическим id
+                    TryAddTopicForBuff(buffId);
+                }
+            }
+        }
+
+
+        private static string GetLockedBuffDisplayName(string buffId) => buffId switch
+        {
+            var x when x == B_Thunder => "Пугающая гроза",
+            var x when x == B_Darkness => "Боязнь темноты",
+            var x when x == B_Lonely => "Одиночество",
+            var x when x == B_Overwork => "Переутомление",
+            var x when x == B_Hunger => "Слабость от голода",
+            var x when x == B_TooCold => "Переохлаждение",
+            _ => "Стресс"
+        };
+
+        private void CompleteTreatment(string buffId)
+        {
+            // достанем questId по баффу; если не нашли — пустая строка
+            if (!_questByBuff.TryGetValue(buffId, out var qid))
+                qid = "";
+
+            // письмо «об окончании» если у тебя заведены константы — верни по карте
+            var mail = GetCompleteMailIdFor(buffId); // может вернуть "" если нет письма
+
+            CompleteTreatment(buffId, qid, mail);
+        }
+        private void CompleteTreatment(string buffId, string questId, string harveyLine)
+        {
+            Data.ActiveLockedDebuffs.Remove(buffId);
+            if (Game1.player.hasBuff(buffId))
+                Game1.player.buffs.Remove(buffId);
+
+            Game1.playSound("discoverMineral");
+            Game1.addHUDMessage(new HUDMessage("Лечение завершено.", HUDMessage.newQuest_type));
+
+            var harvey = Game1.getCharacterFromName("Harvey");
+            if (harvey != null && harvey.currentLocation == Game1.currentLocation)
+            {
+                harvey.doEmote(32);
+                harvey.showTextAboveHead(harveyLine);
+            }
+
+            // награда: дружба, письмо, закрытие квеста
+            if (harvey != null) Game1.player.changeFriendship(100, harvey);
+            TryAddMailForTomorrow(M_Generic_Done);
+            Data.Treatment.Remove(buffId);
+
+            // 1) Снять конкретный старт-топик лечения
+            if (_treatmentStartByBuff.TryGetValue(buffId, out var tStart))
+                RemoveTopic(tStart.topic);
+
+            // 2) Снять общий «маяк» программы лечения
+            if (HasTopic(T_TreatmentStarted))
+                RemoveTopic(T_TreatmentStarted);
+
+            // 3) Поставить cured-топик (у тебя уже делается), завершить квест
+            if (_curedTopicByBuff.TryGetValue(buffId, out var cured))
+                AddTopic(cured, 2);
+
+            SaveNow();
+            TryCompleteQuest(questId);
+            _lastToastPct.Remove(buffId);
+            SyncQuestsAndBuffs();
+        }
+
+
+
+        private void TryCompleteQuest(string questId)
+        {
+            try
+            {
+                var complete = typeof(Farmer).GetMethod("completeQuest", new[] { typeof(string) });
+                if (complete != null) { complete.Invoke(Game1.player, new object[] { questId }); return; }
+
+                var remove = typeof(Farmer).GetMethod("removeQuest", new[] { typeof(string) });
+                if (remove != null) { remove.Invoke(Game1.player, new object[] { questId }); return; }
+            }
+            catch { /* ок */ }
+        }
+
+        private void UpdateTreatmentProgressAndMaybeComplete(bool harveyNearby, bool outdoors)
+        {
+            if (Data.ActiveLockedDebuffs.Count == 0) return;
+
+            foreach (var (buffId, questId) in Data.ActiveLockedDebuffs.ToList())
+            {
+                if (!Data.Treatment.TryGetValue(buffId, out var p))
+                    Data.Treatment[buffId] = p = new TreatmentProgress { QuestId = questId, StartedOn = SDate.Now() };
+
+                switch (buffId)
+                {
+                    case var x when x == B_Thunder:
+                        if (harveyNearby) p.SecondsNearHarvey++;
+                        MaybeProgressToast(buffId, p.SecondsNearHarvey, 120, "Гроза — рядом с Харви");
+                        if (p.SecondsNearHarvey >= 120)
+                            CompleteTreatment(buffId, questId, "Мы пережили грозу вместе. Ты справилась.");
+                        break;
+
+                    case var x when x == B_Darkness:
+                        bool night = Game1.timeOfDay >= 2000;
+                        if (night && !(outdoors && night)) p.EveningInLightSeconds++;
+                        MaybeProgressToast(buffId, p.EveningInLightSeconds, 180, "Темнота — время при свете");
+                        if (p.EveningInLightSeconds >= 180)
+                            CompleteTreatment(buffId, questId, "Свет сильнее тьмы. Горжусь тобой.");
+                        break;
+
+                    case var x when x == B_Lonely:
+                        p.TalkedUniqueToday = Data.TalkedNpcsToday.Count;
+                        MaybeProgressToast(buffId, p.TalkedUniqueToday, 3, "Одиночество — разговоры");
+                        if (p.TalkedUniqueToday >= 3)
+                            CompleteTreatment(buffId, questId, "Голоса людей — лучшая терапия.");
+                        break;
+
+                    case var x when x == B_Overwork:
+                        UpdateOverworkBreakProgress();
+                        MaybeProgressToast(buffId, Data.OverworkBreaksToday, 3, "Переутомление — перерывы");
+                        if (Data.OverworkBreaksToday >= 3)
+                            CompleteTreatment(buffId, questId, "Отдых — часть лечения. Умница.");
+                        break;
+
+                    case var x when x == B_Hunger:
+                        if (p.AteAnyFood)
+                            CompleteTreatment(buffId, questId, "Организм получил топливо. Так держать.");
+                        break;
+
+                    case var x when x == B_TooCold:
+                        bool warmZone = Game1.currentLocation is BathHousePool
+                                      || Game1.currentLocation?.NameOrUniqueName == "FarmHouse"
+                                      || Game1.currentLocation?.NameOrUniqueName == "Hospital";
+                        if (warmZone) p.WarmSeconds++;
+                        MaybeProgressToast(buffId, p.WarmSeconds, 120, "Переохлаждение — согреваешься");
+                        if (p.WarmSeconds >= 120)
+                            CompleteTreatment(buffId, questId, "Тепло вернуло силы. Береги себя.");
+                        break;
+                    case var x when x == B_NoSleep:
+                        // показать прогресс на HUD (по желанию)
+                        if (Data.Treatment.TryGetValue(B_NoSleep, out var pNo))
+                        {
+                            MaybeProgressToast(buffId, pNo.EarlySleepStreak, 3, "Недосып — ранний отбой");
+                            if (pNo.EarlySleepStreak >= 3)
+                                CompleteTreatment(buffId, questId, "Сон восстановлен. Так держать.");
+                        }
+                        break;
+                    case var x when x == B_Tired:
+                        {
+                            // Условия «правильного» отдыха:
+                            // 1) Находимся в фермерском доме (FarmHouse)
+                            // 2) В инвентаре НЕТ кирки/топора/мотыг
+                            bool atHome = Game1.player.currentLocation is StardewValley.Locations.FarmHouse;
+                            bool noHeavy = !HasHeavyTools(Game1.player);
+                            bool resting = atHome && noHeavy;
+
+                            // если только что начали/продолжаем «правильный» отдых — считаем ИГРОВЫЕ минуты
+                            // (в SDV время ходит по 10 минут: 0600, 0610, 0620 ... 2600)
+                            if (resting)
+                            {
+                                if (p.TiredLastTimeOfDay == null)
+                                    p.TiredLastTimeOfDay = Game1.timeOfDay;
+
+                                // начисляем только когда сменилось игровое «время на часах»
+                                if (p.TiredLastTimeOfDay != Game1.timeOfDay)
+                                {
+                                    int prev = p.TiredLastTimeOfDay.Value;
+                                    int cur = Game1.timeOfDay;
+
+                                    // разница в «десятках минут» (0610 -> 0620 = +10)
+                                    int delta = (cur - prev) / 10;
+                                    if (delta > 0)
+                                        p.TiredRestMinutes += delta;
+
+                                    p.TiredLastTimeOfDay = cur;
+                                    SaveNow();
+                                }
+                            }
+                            else
+                            {
+                                // не отдыхаем «правильно» — просто держим синхронизированное значение,
+                                // чтобы при возвращении домой не начислить лишнее.
+                                p.TiredLastTimeOfDay = Game1.timeOfDay;
+                            }
+
+                            // Прогресс для подсказок Харви (например, «Осталось N минут»)
+                            int need = 60; // цель: 60 ИГРОВЫХ минут
+                            int left = Math.Max(0, need - p.TiredRestMinutes);
+
+                            // показать короткую реплику при каждом шаге 10 минут (опционально)
+                            if (left % 10 == 0 && left != 60) // чтобы не спамить на старте
+                            {
+                                var h = Game1.getCharacterFromName("Harvey");
+                                if (h != null && h.currentLocation == Game1.currentLocation)
+                                    h.showTextAboveHead($"Отдыхай дома. Осталось ~{left} мин.$u");
+                            }
+
+                            // Условия завершения лечения усталости:
+                            if (p.TiredRestMinutes >= need)
+                            {
+                                // Завершаем: снимаем «усталость», закрываем квест, чистим прогресс и топики лечения
+                                CompleteTreatment(buffId); // используй твой уже существующий метод финализации
+                                return; // выходим, дальше не считаем другие ветки
+                            }
+
+                            break;
+                        }
+
+                }
+
+                Data.Treatment[buffId] = p;
+            }
+        }
+
+
+        // учёт «перерыва» для переутомления: 3× по ~30 сек стоя в зоне отдыха
+        private void UpdateOverworkBreakProgress()
+        {
+            var loc = Game1.currentLocation;
+            bool restZone = loc?.NameOrUniqueName == "FarmHouse"
+                         || loc?.NameOrUniqueName == "Hospital"
+                         || loc is BathHousePool;
+            bool idle = Game1.player.isMoving() == false;
+
+            if (restZone && idle)
+            {
+                Data.OverworkBreakActive = true;
+                Data.OverworkBreakSeconds++;
+                if (Data.OverworkBreakSeconds >= 30)
+                {
+                    Data.OverworkBreaksToday = Math.Min(3, Data.OverworkBreaksToday + 1);
+                    Data.OverworkBreakSeconds = 0;
+                    Data.OverworkBreakActive = false;
+                    Game1.playSound("reward");
+                    Game1.addHUDMessage(new HUDMessage($"+1 перерыв ({Data.OverworkBreaksToday}/3)", HUDMessage.achievement_type));
+                }
+            }
+            else
+            {
+                Data.OverworkBreakActive = false;
+                Data.OverworkBreakSeconds = 0;
+            }
+        }
+
+
+
+
+
+
+        private void SaveNow() =>
+            Helper.Data.WriteSaveData(SaveKey, Data);
+
+        // === MANUAL ТРИГГЕРЫ === 
+        // Периодически проверяем условия завершения квестов
+        private void CheckManualTriggers()
+        {
+            // HarveyMod_Trigger_RestCheck - квест усталости
+            if (PlayerHasQuest(Q_Tired) 
+                && Game1.player.currentLocation is StardewValley.Locations.FarmHouse
+                && !HasHeavyTools(Game1.player)
+                && !Game1.player.hasBuff(B_RestingAtHome))
+            {
+                Game1.playSound("questcomplete");
+                TryCompleteQuest(Q_Tired);
+                RemoveBuff(B_Tired);
+                AddTopic("topicStressTreatmentTiredCured", 2);
+                Data.ActiveLockedDebuffs.Remove(B_Tired);
+                Data.Treatment.Remove(B_Tired);
+                SaveNow();
+            }
+
+            // HarveyMod_Trigger_ThunderCalmingCheck - квест грозы
+            if (PlayerHasQuest(Q_Thunder)
+                && Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
+                && (Game1.isLightning || Game1.isRaining)
+                && !Game1.player.hasBuff(B_CalmingAtHospital))
+            {
+                Game1.playSound("questcomplete");
+                TryCompleteQuest(Q_Thunder);
+                RemoveBuff(B_Thunder);
+                AddTopic("topicStressTreatmentThunderCured", 2);
+                Data.ActiveLockedDebuffs.Remove(B_Thunder);
+                Data.Treatment.Remove(B_Thunder);
+                SaveNow();
+            }
+
+            // {{ModId}}_triggerOverworkBreakComplete - завершение одного перерыва
+            if (PlayerHasQuest(Q_Overwork) && !Game1.player.hasBuff(B_OverworkBreak))
+            {
+                // Перерыв завершился без прерывания - засчитываем
+                var topicActive = "topicOverworkBreakActive";
+                var topicInterrupted = "topicOverworkBreakInterrupted";
+                
+                if (HasTopic(topicActive) && !HasTopic(topicInterrupted))
+                {
+                    Data.OverworkBreaksToday++;
+                    Game1.playSound("reward");
+                    Game1.addHUDMessage(new HUDMessage($"+1 отдых ({Data.OverworkBreaksToday}/3)", HUDMessage.achievement_type));
+                    RemoveTopic(topicActive);
+                    SaveNow();
+                }
+            }
+        }
+
+
+
+
+
+
+
+    }
+
+
+
+
+}

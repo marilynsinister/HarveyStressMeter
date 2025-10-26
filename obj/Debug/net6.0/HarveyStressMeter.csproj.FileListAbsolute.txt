@@ -1,0 +1,16 @@
+C:\Users\Admin\HarveyStressMeter\bin\Debug\net6.0\Config.json
+C:\Users\Admin\HarveyStressMeter\bin\Debug\net6.0\assets\sprites\handbook.json
+C:\Users\Admin\HarveyStressMeter\bin\Debug\net6.0\assets\sprites\handbook.png
+C:\Users\Admin\HarveyStressMeter\bin\Debug\net6.0\assets\sprites\stressIcons.json
+C:\Users\Admin\HarveyStressMeter\bin\Debug\net6.0\assets\sprites\stressIcons.png
+C:\Users\Admin\HarveyStressMeter\bin\Debug\net6.0\assets\sprites\ui.json
+C:\Users\Admin\HarveyStressMeter\bin\Debug\net6.0\assets\sprites\ui.png
+C:\Users\Admin\HarveyStressMeter\bin\Debug\net6.0\assets\views\Handbook.sml
+C:\Users\Admin\HarveyStressMeter\bin\Debug\net6.0\HarveyStressMeter.deps.json
+C:\Users\Admin\HarveyStressMeter\bin\Debug\net6.0\HarveyStressMeter.dll
+C:\Users\Admin\HarveyStressMeter\obj\Debug\net6.0\HarveyStressMeter.csproj.AssemblyReference.cache
+C:\Users\Admin\HarveyStressMeter\obj\Debug\net6.0\HarveyStressMeter.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Admin\HarveyStressMeter\obj\Debug\net6.0\HarveyStressMeter.AssemblyInfoInputs.cache
+C:\Users\Admin\HarveyStressMeter\obj\Debug\net6.0\HarveyStressMeter.AssemblyInfo.cs
+C:\Users\Admin\HarveyStressMeter\obj\Debug\net6.0\HarveyStressMeter.csproj.CoreCompileInputs.cache
+C:\Users\Admin\HarveyStressMeter\obj\Debug\net6.0\HarveyStressMeter.dll
