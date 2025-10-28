@@ -9,7 +9,6 @@ using StardewValley.Menus;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Services;
-using HarveyStressMeter.Helpers;
 using HarveyStressMeter.UI;
 using StardewUI.Framework;
 
@@ -144,24 +143,13 @@ namespace HarveyStressMeter
             for (int i = 0; i < Math.Min(Game1.player.questLog.Count, 5); i++)
             {
                 var quest = Game1.player.questLog[i];
-                var id = ReflectionHelper.GetQuestStringId(quest, Monitor);
+                var id = quest.id.Value;
                 var questType = quest.GetType().Name;
                 
-                // Пытаемся получить дополнительные поля для диагностики
-                string additionalInfo = "";
-                try
-                {
-                    if (ReflectionHelper.TryGetMember<int>(quest, "id", out var intId))
-                        additionalInfo += $", int_id={intId}";
-                    if (ReflectionHelper.TryGetMember<string>(quest, "questTitle", out var title))
-                        additionalInfo += $", title={title}";
-                }
-                catch { }
-                
                 if (string.IsNullOrWhiteSpace(id))
-                    Monitor.Log($"  • [{i}] Тип: {questType}{additionalInfo}", LogLevel.Info);
+                    Monitor.Log($"  • [{i}] Тип: {questType}", LogLevel.Info);
                 else
-                    Monitor.Log($"  • [{i}] ID: {id}, Тип: {questType}{additionalInfo}", LogLevel.Info);
+                    Monitor.Log($"  • [{i}] ID: {id}, Тип: {questType}", LogLevel.Info);
             }
 
             Monitor.Log($"Social quest HarveyMod_SocialRecovery in Data/Quests: {questData.ContainsKey("HarveyMod_SocialRecovery")}", LogLevel.Info);
@@ -322,8 +310,9 @@ namespace HarveyStressMeter
         private void ShowDetailedAnalysis()
         {
             Monitor.Log("\n🔍 ДЕТАЛЬНЫЙ АНАЛИЗ СОСТОЯНИЯ:", LogLevel.Info);
-            ReflectionHelper.LogObjectFields(_data, Monitor, "SaveData_Debug");
-            ReflectionHelper.LogObjectFields(_data.StressState, Monitor, "StressState_Debug");
+            Monitor.Log($"ActiveTreatments: {_data.StressState.ActiveTreatments.Count}", LogLevel.Info);
+            Monitor.Log($"TreatmentHistory: {_data.StressState.TreatmentHistory.Count}", LogLevel.Info);
+            Monitor.Log($"TalkedNpcsToday: {_data.TalkedNpcsToday.Count}", LogLevel.Info);
         }
 
         private void ClearAllStressStates()
@@ -433,9 +422,6 @@ namespace HarveyStressMeter
 
             Monitor.Log($"[OnSaveLoaded] Загружены данные: активных лечений={_data.StressState.ActiveTreatments.Count}", LogLevel.Debug);
 
-            // Логируем состояние данных сохранения для отладки
-            ReflectionHelper.LogObjectFields(_data, Monitor, "SaveData");
-
             // Мигрируем старые данные в новую структуру
             _stateService.MigrateOldData();
 
@@ -488,7 +474,7 @@ namespace HarveyStressMeter
             CheckDayStartedStressTriggers();
 
             // Логируем состояние игрока в начале дня для отладки
-            ReflectionHelper.LogPlayer(Game1.player, Monitor);
+            Monitor.Log($"[OnDayStarted] Игрок: стамина={Game1.player.Stamina}, локация={Game1.player.currentLocation?.NameOrUniqueName}", LogLevel.Debug);
 
             Monitor.Log("[OnDayStarted] Новый день инициализирован", LogLevel.Debug);
 
@@ -636,7 +622,7 @@ namespace HarveyStressMeter
             CheckDayEndingQuestCompletion();
 
             // Логируем состояние данных в конце дня для отладки
-            ReflectionHelper.LogObjectFields(_data, Monitor, "SaveData_EndOfDay");
+            Monitor.Log($"[OnDayEnding] Данные: активных лечений={_data.StressState.ActiveTreatments.Count}", LogLevel.Debug);
 
             SaveData();
         }
@@ -689,9 +675,6 @@ namespace HarveyStressMeter
                 _triggerService.UpdateTreatmentProgress(GameStateHelper.IsHarveyNearby());
                 _triggerService.CheckManualTriggers();
                 ProcessGameTick();
-
-                // Проверка топиков начала лечения
-                CheckTreatmentStartTopics();
             }
         }
 
@@ -877,7 +860,7 @@ namespace HarveyStressMeter
             if (e.NewLocation != null)
             {
                 // Логируем новую локацию для отладки
-                ReflectionHelper.LogLocation(e.NewLocation, Monitor);
+                Monitor.Log($"[OnWarped] Новая локация: {e.NewLocation.NameOrUniqueName}", LogLevel.Debug);
                 
                 CheckDarknessDebuff(e.NewLocation);
                 ApplyQuestLocationBuffs(e.NewLocation);
@@ -964,7 +947,6 @@ namespace HarveyStressMeter
             if (e.NewMenu is DialogueBox && Game1.currentSpeaker is NPC npc)
             {
                 Monitor.Log($"[OnMenuChanged] Начался диалог с {npc.Name}", LogLevel.Debug);
-                ReflectionHelper.LogNPC(npc, Monitor);
             }
 
             HandleDialogueEvents(e);
@@ -990,6 +972,76 @@ namespace HarveyStressMeter
             {
                 Monitor.Log($"[Диалог] Начался разговор с Харви. Текущие топики: {string.Join(", ", Game1.player.activeDialogueEvents.Keys.Where(k => k.Contains("Stress")))}", LogLevel.Info);
                 Monitor.Log($"[Диалог] Дебафф Social активен: {_stateService.HasActiveBuffInGame(BuffIds.Social)}", LogLevel.Info);
+
+                // ⭐ ИСПРАВЛЕНО: Получаем dialogueKey из characterDialogue через TranslationKey
+                string? dialogueKey = null;
+                try
+                {
+                    var dialogueBox = e.NewMenu as DialogueBox;
+                    if (dialogueBox != null)
+                    {
+                        // Получаем characterDialogue напрямую
+                        var characterDialogue = dialogueBox.characterDialogue;
+                        
+                        if (characterDialogue != null)
+                        {
+                            Monitor.Log($"[Диалог] ═══ CHARACTERDIALOGUE INFO ═══", LogLevel.Debug);
+                            
+                            // Получаем ключ диалога через свойство TranslationKey
+                            dialogueKey = characterDialogue.TranslationKey;
+                            
+                            // Проверяем, последняя ли это строка диалога
+                            bool isCurrentDialogueFinal = characterDialogue.isOnFinalDialogue();
+                            Monitor.Log($"[Диалог] isOnFinalDialogue: {isCurrentDialogueFinal}", LogLevel.Info);
+                            
+                            if (!string.IsNullOrEmpty(dialogueKey))
+                            {
+                                Monitor.Log($"[Диалог] ✅ Ключ диалога: {dialogueKey}", LogLevel.Info);
+                                Monitor.Log($"[Диалог] Говорит: {characterDialogue.speaker?.Name}", LogLevel.Debug);
+                                
+                                try
+                                {
+                                    var currentDialogue = characterDialogue.getCurrentDialogue();
+                                    Monitor.Log($"[Диалог] Текст: {currentDialogue}", LogLevel.Debug);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Monitor.Log($"[Диалог] Ошибка getCurrentDialogue: {ex.Message}", LogLevel.Debug);
+                                }
+                            }
+                            else
+                            {
+                                Monitor.Log($"[Диалог] ⚠️ TranslationKey пустой или null", LogLevel.Debug);
+                            }
+                        }
+                        else
+                        {
+                            Monitor.Log($"[Диалог] characterDialogue is null", LogLevel.Debug);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Monitor.Log($"[Диалог] Ошибка при получении dialogueKey: {ex.Message}", LogLevel.Warn);
+                }
+                
+                // ⭐ НОВОЕ: Проверяем активные топики стресса и выдаем квест лечения
+                // Выдаем квест только если это последняя строка диалога
+                bool isFinalDialogue = false;
+                if (e.NewMenu is DialogueBox finalCheck && finalCheck.characterDialogue != null)
+                {
+                    isFinalDialogue = finalCheck.characterDialogue.isOnFinalDialogue();
+                }
+                
+                if (isFinalDialogue)
+                {
+                    Monitor.Log($"[Диалог] Последняя строка диалога. Проверяем топики и выдаем квест.", LogLevel.Info);
+                    CheckStressTopicsAndStartTreatment(harveyNpc, dialogueKey);
+                }
+                else
+                {
+                    Monitor.Log($"[Диалог] Не последняя строка диалога. Пропускаем выдачу квеста.", LogLevel.Debug);
+                }
             }
             else if (e.OldMenu is DialogueBox && _lastDialogueNpc != null)
             {
@@ -1104,17 +1156,18 @@ namespace HarveyStressMeter
             // ⭐ НОВОЕ: Проверяем, изменилось ли количество разговоров
             bool conversationsChanged = socialTreatment.Progress.SocialTalksAfterQuest != conversationsAfterQuest;
 
+            // ⭐ НОВОЕ: Всегда логируем текущее состояние для диагностики
+            Monitor.Log($"[UpdateSocialQuestProgress] ═══ ДИАГНОСТИКА ПРОГРЕССА ═══", LogLevel.Info);
+            Monitor.Log($"[UpdateSocialQuestProgress] База при получении квеста: {baseConversations}", LogLevel.Info);
+            Monitor.Log($"[UpdateSocialQuestProgress] Текущее общее количество: {currentTotal}", LogLevel.Info);
+            Monitor.Log($"[UpdateSocialQuestProgress] Разговоров после квеста: {conversationsAfterQuest}", LogLevel.Info);
+            Monitor.Log($"[UpdateSocialQuestProgress] Время с Харви: {socialTreatment.Progress.SecondsNearHarvey}/60 сек", LogLevel.Info);
+            Monitor.Log($"[UpdateSocialQuestProgress] Изменилось: {conversationsChanged}", LogLevel.Info);
+
             if (conversationsChanged)
             {
                 // ⭐ НОВОЕ: Обновляем ПРАВИЛЬНОЕ ПОЛЕ в прогрессе
                 socialTreatment.Progress.SocialTalksAfterQuest = conversationsAfterQuest;
-
-                // ⭐ НОВОЕ: Детальное логирование для отладки
-                Monitor.Log($"[UpdateSocialQuestProgress] ═══ ОБНОВЛЕНИЕ ПРОГРЕССА ═══", LogLevel.Info);
-                Monitor.Log($"[UpdateSocialQuestProgress] База при получении квеста: {baseConversations}", LogLevel.Info);
-                Monitor.Log($"[UpdateSocialQuestProgress] Текущее общее количество: {currentTotal}", LogLevel.Info);
-                Monitor.Log($"[UpdateSocialQuestProgress] Разговоров после квеста: {conversationsAfterQuest}", LogLevel.Info);
-                Monitor.Log($"[UpdateSocialQuestProgress] Время с Харви: {socialTreatment.Progress.SecondsNearHarvey}/60 сек", LogLevel.Info);
 
                 // ⭐ НОВОЕ: Обновляем описание квеста через TriggerService
                 _triggerService?.UpdateQuestDescription(socialTreatment.Progress);
@@ -1211,102 +1264,7 @@ namespace HarveyStressMeter
         /// Проверяет топики начала лечения (устанавливаются из диалогов при согласии игрока)
         /// Проверяет наличие соответствующего дебаффа перед запуском лечения
         /// </summary>
-        private void CheckTreatmentStartTopics()
-        {
-            var treatmentTopics = new Dictionary<string, (string buffId, string displayName)>
-            {
-                [TopicIds.TreatmentStartTired] = (BuffIds.Tired, "Усталость"),
-                [TopicIds.TreatmentStartLonely] = (BuffIds.Lonely, "Одиночество"),
-                [TopicIds.TreatmentStartThunder] = (BuffIds.Thunder, "Страх грозы"),
-                [TopicIds.TreatmentStartHunger] = (BuffIds.Hunger, "Голод"),
-                [TopicIds.TreatmentStartOverwork] = (BuffIds.Overwork, "Переработка"),
-                [TopicIds.TreatmentStartNoSleep] = (BuffIds.NoSleep, "Недосып"),
-                [TopicIds.TreatmentStartTooCold] = (BuffIds.TooCold, "Переохлаждение"),
-                [TopicIds.TreatmentStartSocial] = (BuffIds.Social, "Социальный дискомфорт"),
-                [TopicIds.TreatmentStartDarkness] = (BuffIds.Darkness, "Темнота"),
-                [TopicIds.TreatmentStartCriticism] = (BuffIds.Criticism, "Самокритика"),
-                [TopicIds.TreatmentStartBadDream] = (BuffIds.BadDream, "Кошмары"),
-                [TopicIds.TreatmentStartPanic] = (BuffIds.Panic, "Паническая атака"),
-                [TopicIds.TreatmentStartSleepDeprivation] = (BuffIds.SleepDeprivation, "Депривация сна"),
-                [TopicIds.TreatmentStartAnxietyWave] = (BuffIds.AnxietyWave, "Волна тревоги"),
-                [TopicIds.TreatmentStartMentalFatigue] = (BuffIds.MentalFatigue, "Ментальная усталость"),
-                [TopicIds.TreatmentStartShadowParanoia] = (BuffIds.ShadowParanoia, "Страх теней"),
-                [TopicIds.TreatmentStartFreezeResponse] = (BuffIds.FreezeResponse, "Реакция замирания"),
-                [TopicIds.TreatmentStartIsolation] = (BuffIds.Isolation, "Изоляция"),
-                [TopicIds.TreatmentStartBreakdown] = (BuffIds.Breakdown, "Эмоциональный срыв"),
-                [TopicIds.TreatmentStartCollapse] = (BuffIds.Collapse, "Обморок"),
-                [TopicIds.TreatmentStartNumbness] = (BuffIds.Numbness, "Эмоциональное онемение"),
-                [TopicIds.TreatmentStartDespair] = (BuffIds.Despair, "Отчаяние"),
-            };
 
-            int foundTopics = 0;
-            int startedTreatments = 0;
-
-            foreach (var (topic, (buffId, displayName)) in treatmentTopics)
-            {
-                if (ConversationHelper.HasTopic(topic))
-                {
-                    foundTopics++;
-                    Monitor.Log($"[Лечение] ═══ Найден топик начала лечения: {topic} → {displayName} ═══", LogLevel.Info);
-                    Monitor.Log($"[Лечение] Текущее состояние ПЕРЕД началом:", LogLevel.Info);
-                    Monitor.Log($"[Лечение]   - HasBuff({buffId}): {_stateService.HasActiveBuffInGame(buffId)}", LogLevel.Info);
-                    Monitor.Log($"[Лечение]   - В ActiveTreatments: {_data.StressState.IsTreatmentLocked(buffId)}", LogLevel.Info);
-                    Monitor.Log($"[Лечение]   - Всего разговоров сегодня: {_data.TalkedNpcsToday.Count}", LogLevel.Info);
-
-                    // Удалить топик-триггер
-                    ConversationHelper.RemoveTopic(topic);
-
-                    // Проверяем, можно ли начать лечение
-                    bool shouldStartTreatment = CanStartTreatment(buffId);
-                    string reason = shouldStartTreatment ? 
-                        (_stateService.HasActiveBuffInGame(buffId) ? "активный дебафф" : "состояние в сохранении") : 
-                        "нет активного дебаффа или валидного состояния";
-
-                    if (shouldStartTreatment)
-                    {
-                        Monitor.Log($"[Лечение] ✓ {displayName}: {reason}", LogLevel.Info);
-                        
-                        // Восстанавливаем дебафф, если его нет
-                        if (!_stateService.HasActiveBuffInGame(buffId))
-                        {
-                            _buffService.ApplyBuffFromData(buffId);
-                            Monitor.Log($"[Лечение] ✓ {displayName}: дебафф восстановлен из сохранения", LogLevel.Info);
-                        }
-                    }
-                    else
-                    {
-                        Monitor.Log($"[Лечение] ✗ {displayName}: {reason}", LogLevel.Warn);
-                    }
-
-                    if (shouldStartTreatment)
-                    {
-                        // Запустить лечение
-                        Monitor.Log($"[Лечение] ▶ Вызов StartTreatment для {displayName}...", LogLevel.Info);
-                        _treatmentService.StartTreatment(buffId, displayName);
-                        startedTreatments++;
-
-                        // Проверяем состояние ПОСЛЕ
-                        Monitor.Log($"[Лечение] Состояние ПОСЛЕ StartTreatment:", LogLevel.Info);
-                        Monitor.Log($"[Лечение]   - HasBuff({buffId}): {_stateService.HasActiveBuffInGame(buffId)}", LogLevel.Info);
-                        Monitor.Log($"[Лечение]   - В ActiveTreatments: {_data.StressState.IsTreatmentLocked(buffId)}", LogLevel.Info);
-                        
-                        // Логируем состояние данных после начала лечения
-                        ReflectionHelper.LogObjectFields(_data.StressState, Monitor, "StressState_AfterTreatmentStart");
-                        
-                        Monitor.Log($"[Лечение] ✅ УСПЕШНО: Лечение начато (причина: {reason})", LogLevel.Info);
-                    }
-                    else
-                    {
-                        Monitor.Log($"[Лечение] ❌ ПРОПУСК: Дебафф {displayName} не активен", LogLevel.Warn);
-                    }
-                }
-            }
-
-            if (foundTopics > 0)
-            {
-                Monitor.Log($"[Лечение] Итог проверки: найдено топиков={foundTopics}, начато лечений={startedTreatments}", LogLevel.Info);
-            }
-        }
 
         #region Вспомогательные методы для работы с лечением
 
@@ -1338,6 +1296,27 @@ namespace HarveyStressMeter
             // Проверяем валидное состояние в истории
             return _data.StressState.HasValidTreatmentInHistory(buffId, SDate.Now());
         }
+        
+        /// <summary>
+        /// Получает ID квеста для баффа
+        /// </summary>
+        private string? GetQuestIdForBuff(string buffId)
+        {
+            var questMap = new Dictionary<string, string>
+            {
+                [BuffIds.Tired] = QuestIds.Tired,
+                [BuffIds.Lonely] = QuestIds.Lonely,
+                [BuffIds.Thunder] = QuestIds.Thunder,
+                [BuffIds.Hunger] = QuestIds.Hunger,
+                [BuffIds.Overwork] = QuestIds.Overwork,
+                [BuffIds.NoSleep] = QuestIds.NoSleep,
+                [BuffIds.TooCold] = QuestIds.TooCold,
+                [BuffIds.Social] = QuestIds.Social,
+                [BuffIds.Darkness] = QuestIds.Darkness,
+            };
+            
+            return questMap.TryGetValue(buffId, out var questId) ? questId : null;
+        }
 
         /// <summary>
         /// Обновляет прогресс лечения с проверкой на null
@@ -1349,6 +1328,139 @@ namespace HarveyStressMeter
             {
                 updateAction(treatment.Progress);
             }
+        }
+
+        /// <summary>
+        /// ⭐ КОНСТАНТА: Словарь для маппинга топиков и dialogue keys на дебаффы/квесты
+        /// </summary>
+        private static readonly Dictionary<string, (string buffId, string questId, string displayName, bool isTreatmentTopic)> TopicMapping = new()
+        {
+            // Топики стресса (используются при первом разговоре с Харви о проблеме)
+            [TopicIds.StressTired] = (BuffIds.Tired, QuestIds.Tired, "Усталость", false),
+            [TopicIds.StressLonely] = (BuffIds.Lonely, QuestIds.Lonely, "Одиночество", false),
+            [TopicIds.StressThunder] = (BuffIds.Thunder, QuestIds.Thunder, "Страх грозы", false),
+            [TopicIds.StressHunger] = (BuffIds.Hunger, QuestIds.Hunger, "Голод", false),
+            [TopicIds.StressOverwork] = (BuffIds.Overwork, QuestIds.Overwork, "Переработка", false),
+            [TopicIds.StressNoSleep] = (BuffIds.NoSleep, QuestIds.NoSleep, "Недосып", false),
+            [TopicIds.StressTooCold] = (BuffIds.TooCold, QuestIds.TooCold, "Переохлаждение", false),
+            [TopicIds.StressSocial] = (BuffIds.Social, QuestIds.Social, "Социальный дискомфорт", false),
+            [TopicIds.StressDarkness] = (BuffIds.Darkness, QuestIds.Darkness, "Темнота", false),
+            
+            // Топики начала лечения (устанавливаются из диалогов при согласии на лечение)
+            [TopicIds.TreatmentStartTired] = (BuffIds.Tired, QuestIds.Tired, "Усталость", true),
+            [TopicIds.TreatmentStartLonely] = (BuffIds.Lonely, QuestIds.Lonely, "Одиночество", true),
+            [TopicIds.TreatmentStartThunder] = (BuffIds.Thunder, QuestIds.Thunder, "Страх грозы", true),
+            [TopicIds.TreatmentStartHunger] = (BuffIds.Hunger, QuestIds.Hunger, "Голод", true),
+            [TopicIds.TreatmentStartOverwork] = (BuffIds.Overwork, QuestIds.Overwork, "Переработка", true),
+            [TopicIds.TreatmentStartNoSleep] = (BuffIds.NoSleep, QuestIds.NoSleep, "Недосып", true),
+            [TopicIds.TreatmentStartTooCold] = (BuffIds.TooCold, QuestIds.TooCold, "Переохлаждение", true),
+            [TopicIds.TreatmentStartSocial] = (BuffIds.Social, QuestIds.Social, "Социальный дискомфорт", true),
+            [TopicIds.TreatmentStartDarkness] = (BuffIds.Darkness, QuestIds.Darkness, "Темнота", true),
+        };
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Запускает лечение на основе dialogueKey из словаря
+        /// </summary>
+        private void StartTreatmentForDialogue((string buffId, string questId, string displayName, bool isTreatmentTopic) mapping, string dialogueKey)
+        {
+            var (buffId, questId, displayName, isTreatmentTopic) = mapping;
+            var topicType = isTreatmentTopic ? "начала лечения" : "стресса";
+            
+            Monitor.Log($"[Диалог] Dialogue key '{dialogueKey}' соответствует дебаффу {buffId} ({displayName})", LogLevel.Info);
+            
+            // Проверяем активность дебаффа
+            if (!_stateService.HasActiveBuffInGame(buffId))
+            {
+                Monitor.Log($"[Диалог] ⚠️ Дебафф {buffId} не активен. Диалог '{dialogueKey}' не соответствует текущему состоянию.", LogLevel.Warn);
+                return;
+            }
+            
+            // Проверяем, не активен ли уже квест
+            if (_data.StressState.HasActiveQuest(questId))
+            {
+                Monitor.Log($"[Диалог] Квест {questId} уже активен для {displayName}. Пропускаем.", LogLevel.Debug);
+                return;
+            }
+            
+            // Запускаем лечение
+            Monitor.Log($"[Диалог] ✅ Запуск лечения для {displayName} на основе dialogue key '{dialogueKey}'...", LogLevel.Info);
+            _treatmentService.StartTreatment(buffId, displayName);
+        }
+
+        /// <summary>
+        /// Проверяет активные топики стресса и лечения при диалоге с Харви и запускает лечение
+        /// </summary>
+        private void CheckStressTopicsAndStartTreatment(NPC harvey, string? dialogueKey = null)
+        {
+            Monitor.Log($"[Диалог] Проверка топиков. Dialogue key: {dialogueKey ?? "не указан"}", LogLevel.Debug);
+            
+            // ⭐ ИСПРАВЛЕНО: Если есть dialogueKey - нормализуем его и ищем в словаре
+            if (!string.IsNullOrEmpty(dialogueKey))
+            {
+                // Извлекаем имя топика из полного пути
+                // Например: "Characters\Dialogue\Harvey:topicStressSocial" -> "topicStressSocial"
+                string normalizedKey = dialogueKey;
+                
+                // Ищем двоеточие и берем часть после него
+                int colonIndex = dialogueKey.IndexOf(':');
+                if (colonIndex >= 0 && colonIndex < dialogueKey.Length - 1)
+                {
+                    normalizedKey = dialogueKey.Substring(colonIndex + 1);
+                    Monitor.Log($"[Диалог] Нормализованный ключ: '{normalizedKey}' (из '{dialogueKey}')", LogLevel.Debug);
+                }
+                
+                // Сначала пытаемся найти по нормализованному ключу
+                if (TopicMapping.TryGetValue(normalizedKey, out var mapping))
+                {
+                    Monitor.Log($"[Диалог] Dialogue key '{dialogueKey}' найден в словаре (как '{normalizedKey}'): {mapping.displayName}", LogLevel.Info);
+                    StartTreatmentForDialogue(mapping, dialogueKey);
+                    return;
+                }
+                
+                // Если не нашли - пытаемся по полному пути
+                if (TopicMapping.TryGetValue(dialogueKey, out mapping))
+                {
+                    Monitor.Log($"[Диалог] Dialogue key '{dialogueKey}' найден в словаре (полный путь): {mapping.displayName}", LogLevel.Info);
+                    StartTreatmentForDialogue(mapping, dialogueKey);
+                    return;
+                }
+                
+                Monitor.Log($"[Диалог] ⚠️ Dialogue key '{dialogueKey}' не найден в словаре", LogLevel.Debug);
+            }
+            
+            // Старая логика: проверяем топики
+            // var allTopics = TopicMapping;
+
+            // foreach (var (topic, (buffId, questId, displayName, isTreatmentTopic)) in allTopics)
+            // {
+            //     if (ConversationHelper.HasTopic(topic))
+            //     {
+            //         var topicType = isTreatmentTopic ? "начала лечения" : "стресса";
+            //         Monitor.Log($"[Диалог] Найден активный топик {topicType}: {topic} ({displayName})", LogLevel.Info);
+                    
+            //         // Удаляем топик-триггер (особенно важно для топиков начала лечения)
+            //         ConversationHelper.RemoveTopic(topic);
+                    
+            //         // Проверяем, можно ли начать лечение
+            //         bool shouldStart = CanStartTreatment(buffId);
+            //         if (!shouldStart)
+            //         {
+            //             Monitor.Log($"[Диалог] Невозможно начать лечение {displayName}: нет активного дебаффа", LogLevel.Debug);
+            //             continue;
+            //         }
+                    
+            //         // Проверяем, не активен ли уже квест для этого дебаффа
+            //         if (_data.StressState.HasActiveQuest(questId))
+            //         {
+            //             Monitor.Log($"[Диалог] Квест {questId} уже активен для {displayName}. Пропускаем.", LogLevel.Debug);
+            //             continue;
+            //         }
+                    
+            //         // Запускаем лечение
+            //         Monitor.Log($"[Диалог] ✅ Запуск лечения для {displayName}...", LogLevel.Info);
+            //         _treatmentService.StartTreatment(buffId, displayName);
+            //     }
+            // }
         }
 
         #endregion

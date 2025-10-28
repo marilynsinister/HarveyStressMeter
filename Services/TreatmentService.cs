@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using StardewModdingAPI;
 using StardewModdingAPI.Utilities;
 using StardewValley;
@@ -118,7 +119,9 @@ namespace HarveyStressMeter.Services
             // ⭐ УЛУЧШЕНО: Проверяем, не активен ли уже квест (поддерживает множественные лечения)
             if (_data.StressState.HasActiveQuest(questId))
             {
-                _monitor.Log($"[StartTreatment] Квест {questId} уже активен. Пропускаем.", LogLevel.Debug);
+                _monitor.Log($"[StartTreatment] Квест {questId} уже активен. Пропускаем.", LogLevel.Info);
+                _monitor.Log($"[StartTreatment] ═══ СТЕК ВЫЗОВОВ ═══", LogLevel.Info);
+                _monitor.Log($"[StartTreatment] {Environment.StackTrace}", LogLevel.Info);
                 return;
             }
 
@@ -296,43 +299,35 @@ namespace HarveyStressMeter.Services
 
         public void SyncQuestsAndBuffs()
         {
-            // ⭐ ИСПРАВЛЕНО: Проверяем АКТИВНЫЕ лечения с новой архитектурой
-            // Восстанавливаем квесты и баффы, если они потерялись
             foreach (var (treatmentKey, treatment) in _data.StressState.ActiveTreatments.ToList())
             {
                 var questId = treatment.QuestId;
                 var buffId = treatment.BuffId;
 
                 // Проверяем, есть ли квест в журнале
-                if (!string.IsNullOrEmpty(questId) && !_stateService.HasQuestInJournal(questId))
+                if (!string.IsNullOrEmpty(questId) && !_questService.HasQuest(questId))
                 {
-                    _monitor.Log($"[SyncQuestsAndBuffs] ⚠️ Квест '{questId}' потерян для дебаффа '{buffId}' (ключ: {treatmentKey}). Удаляем лечение.", LogLevel.Warn);
                     _buffService.RemoveBuff(buffId);
                     _data.StressState.RemoveTreatment(treatmentKey);
                     continue;
                 }
 
-                // Квест есть - проверяем, не завершен ли он
-                if (_questService.IsQuestCompleted(questId, out var quest) && quest != null)
+                // Проверяем, завершен ли квест
+                if (!string.IsNullOrEmpty(questId) && _questService.HasQuest(questId))
                 {
-                    bool completed = false;
-                    if (ReflectionHelper.TryGetMember<bool>(quest, "completed", out var c))
-                        completed = c;
-
-                    if (completed)
+                    var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == questId);
+                    if (quest?.completed.Value == true)
                     {
-                        _monitor.Log($"[SyncQuestsAndBuffs] Квест '{questId}' завершен. Удаляем лечение '{buffId}' (ключ: {treatmentKey}).", LogLevel.Info);
                         _buffService.RemoveBuff(buffId);
                         _data.StressState.RemoveTreatment(treatmentKey);
                         continue;
                     }
                 }
 
-                // Квест активен и не завершен - восстанавливаем бафф если потерялся
+                // Восстанавливаем бафф если потерялся
                 if (!_stateService.HasActiveBuffInGame(buffId))
                 {
                     _buffService.ApplyBuffFromData(buffId);
-                    _monitor.Log($"[SyncQuestsAndBuffs] Восстановлен дебафф '{buffId}' для активного квеста '{questId}' (ключ: {treatmentKey})", LogLevel.Debug);
                 }
 
                 // Гарантируем наличие прогресса
@@ -343,78 +338,28 @@ namespace HarveyStressMeter.Services
             }
         }
 
-        /// <summary>
-        /// Восстанавливает потерянные квесты по топикам стресса
-        /// Если есть топик, но нет квеста и записи - восстанавливаем квест
-        /// Проверяет актуальность топика по дате последней выдачи дебаффа
-        /// </summary>
         public void RestoreLostQuestsFromTopics()
         {
-            var today = SDate.Now();
-            const int MaxDaysForRestore = 3; // Максимум 3 дня для восстановления квеста
-
             foreach (var (buffId, topicData) in BuffToStressTopic)
             {
-                // Проверяем, есть ли топик стресса
                 if (!ConversationHelper.HasTopic(topicData.topic))
                     continue;
 
-                // Проверяем актуальность топика по дате
-                if (_data.StressState.LastIssuedDay.TryGetValue(buffId, out var lastIssued))
-                {
-                    int daysSinceIssued = today.DaysSinceStart - lastIssued.DaysSinceStart;
-
-                    // Если прошло слишком много времени - удаляем топик и не восстанавливаем квест
-                    if (daysSinceIssued > MaxDaysForRestore)
-                    {
-                        _monitor.Log($"Топик {topicData.topic} устарел ({daysSinceIssued} дней). Удаляем.", LogLevel.Debug);
-                        ConversationHelper.RemoveTopic(topicData.topic);
-                        _data.StressState.LastIssuedDay.Remove(buffId);
-                        continue;
-                    }
-                }
-                else
-                {
-                    // Нет записи о дате - это старый топик, удаляем
-                    _monitor.Log($"Топик {topicData.topic} без даты выдачи. Удаляем.", LogLevel.Debug);
-                    ConversationHelper.RemoveTopic(topicData.topic);
-                    continue;
-                }
-
-                // Если уже есть запись в ActiveTreatments - всё в порядке
                 if (_data.StressState.ActiveTreatments.ContainsKey(buffId))
                     continue;
 
-                // Получаем questId для этого баффа
                 if (!BuffToQuest.TryGetValue(buffId, out var questId))
                     continue;
 
-                // Если квест уже есть - всё в порядке
-                if (_stateService.HasQuestInJournal(questId))
+                if (_questService.HasQuest(questId))
                     continue;
 
-                // Топик есть, актуален, а квеста нет - восстанавливаем!
-                _monitor.Log($"Восстановление потерянного квеста {questId} по топику {topicData.topic}", LogLevel.Debug);
-
-                // Добавляем квест
                 _questService.AddQuest(questId);
-
-                // Создаем запись в ActiveBuffs и ActiveQuests через StateService
                 _stateService.ApplyStressBuff(buffId, BuffToDisplayName.GetValueOrDefault(buffId, buffId));
                 _stateService.StartTreatment(buffId, questId);
-
-                // Показываем сообщение игроку
-                if (BuffToDisplayName.TryGetValue(buffId, out var displayName))
-                {
-                    Game1.addHUDMessage(new HUDMessage($"Квест восстановлен: {displayName}", HUDMessage.newQuest_type));
-                }
             }
         }
 
-        /// <summary>
-        /// Очищает устаревшие топики стресса
-        /// Вызывается при загрузке игры и начале дня
-        /// </summary>
         public void CleanupOldStressTopics()
         {
             var today = SDate.Now();
@@ -422,154 +367,75 @@ namespace HarveyStressMeter.Services
 
             foreach (var (buffId, topicData) in BuffToStressTopic)
             {
-                // Пропускаем, если топика нет
                 if (!ConversationHelper.HasTopic(topicData.topic))
                     continue;
 
-                // Проверяем дату
                 if (_data.StressState.LastIssuedDay.TryGetValue(buffId, out var lastIssued))
                 {
                     int daysSinceIssued = today.DaysSinceStart - lastIssued.DaysSinceStart;
-
                     if (daysSinceIssued > MaxDaysToKeep)
                     {
-                        _monitor.Log($"Очистка устаревшего топика {topicData.topic} ({daysSinceIssued} дней)", LogLevel.Debug);
                         ConversationHelper.RemoveTopic(topicData.topic);
                         _data.StressState.LastIssuedDay.Remove(buffId);
                     }
                 }
                 else
                 {
-                    // Топик есть, но даты нет - удаляем
-                    _monitor.Log($"Очистка топика без даты {topicData.topic}", LogLevel.Debug);
                     ConversationHelper.RemoveTopic(topicData.topic);
                 }
             }
         }
 
-        /// <summary>
-        /// Восстанавливает активные невылеченные дебаффы стресса
-        /// Вызывается при начале дня для поддержания дебаффов до излечения
-        /// </summary>
         public void RestoreActiveStressBuffs()
         {
-            var today = SDate.Now();
-            int restoredCount = 0;
-            int totalTreatments = _data.StressState.TreatmentHistory.Count;
-
-            _monitor.Log($"[RestoreActiveStressBuffs] Начинаем восстановление. Всего лечений: {totalTreatments}", LogLevel.Debug);
-
             foreach (var (buffId, historyList) in _data.StressState.TreatmentHistory)
             {
                 if (historyList.Count == 0) continue;
                 
-                var treatment = historyList.Last(); // Берем последнее лечение
-                _monitor.Log($"[RestoreActiveStressBuffs] Проверяем {buffId}: выдан={treatment.IssuedDate}, лечение={treatment.TreatmentStarted}, вылечен={treatment.IsCured}", LogLevel.Debug);
+                var treatment = historyList.Last();
+                var today = SDate.Now();
+                int daysSince = today.DaysSinceStart - treatment.IssuedDate.DaysSinceStart;
 
-                // Проверяем, нужно ли восстанавливать этот дебафф
-                if (!treatment.ShouldRestore(today))
+                // Если устарел или вылечен - очищаем топики
+                if (treatment.IsCured || daysSince > 7)
                 {
-                    int daysSince = today.DaysSinceStart - treatment.IssuedDate.DaysSinceStart;
-                    _monitor.Log($"[RestoreActiveStressBuffs] {buffId} не нужно восстанавливать (вылечен={treatment.IsCured}, дней={daysSince})", LogLevel.Debug);
-
-                    // Если устарел или вылечен - очищаем топики
-                    if (treatment.IsCured || daysSince > 7)
+                    if (BuffToStressTopic.TryGetValue(buffId, out var topicData))
                     {
-                        if (BuffToStressTopic.TryGetValue(buffId, out var topicData))
-                        {
-                            ConversationHelper.RemoveTopic(topicData.topic);
-                            _monitor.Log($"[RestoreActiveStressBuffs] Удален топик {topicData.topic} для {buffId}", LogLevel.Debug);
-                        }
+                        ConversationHelper.RemoveTopic(topicData.topic);
                     }
                     continue;
                 }
 
-                _monitor.Log($"[RestoreActiveStressBuffs] {buffId} нужно восстановить", LogLevel.Debug);
-
-                // Если дебафф не вылечен и актуален
-                // Проверяем, есть ли уже бафф
+                // Восстанавливаем бафф если его нет
                 if (!_stateService.HasActiveBuffInGame(buffId))
                 {
                     _buffService.ApplyBuffFromData(buffId);
-                    restoredCount++;
-                    _monitor.Log($"[RestoreActiveStressBuffs] Восстановлен дебафф {buffId} (дата выдачи: {treatment.IssuedDate}, лечение начато: {treatment.TreatmentStarted})", LogLevel.Info);
-                }
-                else
-                {
-                    _monitor.Log($"[RestoreActiveStressBuffs] Дебафф {buffId} уже активен", LogLevel.Debug);
                 }
 
-                // Восстанавливаем топик для диалога с Харви, если лечение еще не начато
+                // Восстанавливаем топик если лечение не начато
                 if (!treatment.TreatmentStarted && BuffToStressTopic.TryGetValue(buffId, out var topic))
                 {
                     if (!ConversationHelper.HasTopic(topic.topic))
                     {
                         ConversationHelper.AddTopic(topic.topic, topic.days);
-                        _monitor.Log($"[RestoreActiveStressBuffs] Восстановлен топик {topic.topic} для незалеченного дебаффа {buffId}", LogLevel.Info);
-                    }
-                    else
-                    {
-                        _monitor.Log($"[RestoreActiveStressBuffs] Топик {topic.topic} для {buffId} уже существует", LogLevel.Debug);
                     }
                 }
 
-                // Если лечение начато - восстанавливаем квест, если потерян
+                // Восстанавливаем квест если лечение начато
                 if (treatment.TreatmentStarted && !string.IsNullOrEmpty(treatment.QuestId))
                 {
-                    if (!_stateService.HasQuestInJournal(treatment.QuestId))
+                    if (!_questService.HasQuest(treatment.QuestId))
                     {
                         _questService.AddQuest(treatment.QuestId);
-
-                        // Восстанавливаем запись в ActiveTreatments
                         if (!_data.StressState.ActiveTreatments.ContainsKey(buffId))
                         {
                             _data.StressState.ActiveTreatments[buffId] = treatment;
                         }
-
-                        if (BuffToDisplayName.TryGetValue(buffId, out var displayName))
-                        {
-                            _monitor.Log($"[RestoreActiveStressBuffs] Восстановлен квест {treatment.QuestId} для дебаффа {buffId} ({displayName})", LogLevel.Info);
-                        }
                     }
-                    else
-                    {
-                        _monitor.Log($"[RestoreActiveStressBuffs] Квест {treatment.QuestId} для {buffId} уже активен", LogLevel.Debug);
-                    }
-                }
-            }
-
-            if (restoredCount > 0)
-            {
-                _monitor.Log($"[RestoreActiveStressBuffs] Восстановлено дебаффов стресса: {restoredCount}", LogLevel.Info);
-            }
-            else
-            {
-                _monitor.Log($"[RestoreActiveStressBuffs] Дебаффы для восстановления не найдены", LogLevel.Debug);
-            }
-
-            // Очищаем устаревшие записи
-            var toRemove = _data.StressState.TreatmentHistory
-                .Where(kvp => kvp.Value.Count > 0 && !kvp.Value.Last().ShouldRestore(today))
-                .Select(kvp => kvp.Key)
-                .ToList();
-
-            _monitor.Log($"[RestoreActiveStressBuffs] Найдено устаревших записей для удаления: {toRemove.Count}", LogLevel.Debug);
-
-            foreach (var buffId in toRemove)
-            {
-                if (_data.StressState.TreatmentHistory.TryGetValue(buffId, out var historyList) && historyList.Count > 0)
-                {
-                    var treatment = historyList.Last();
-                    int daysSince = today.DaysSinceStart - treatment.IssuedDate.DaysSinceStart;
-                    _data.StressState.TreatmentHistory.Remove(buffId);
-                    _monitor.Log($"[RestoreActiveStressBuffs] Удалено устаревшее лечение {buffId} (вылечен={treatment.IsCured}, дней={daysSince})", LogLevel.Debug);
                 }
             }
         }
 
-        /// <summary>
-        /// Очищает старые топики начала лечения (если нет соответствующего дебаффа)
-        /// </summary>
         public void CleanupOrphanedTreatmentTopics()
         {
             var treatmentStartTopics = new Dictionary<string, string>
@@ -585,44 +451,21 @@ namespace HarveyStressMeter.Services
                 [TopicIds.TreatmentStartDarkness] = BuffIds.Darkness,
             };
 
-            _monitor.Log($"[CleanupOrphanedTreatmentTopics] Начинаем очистку топиков лечения", LogLevel.Debug);
-            int removedCount = 0;
-
             foreach (var (topic, buffId) in treatmentStartTopics)
             {
                 if (ConversationHelper.HasTopic(topic))
                 {
-                    _monitor.Log($"[CleanupOrphanedTreatmentTopics] Найден топик {topic} для дебаффа {buffId}", LogLevel.Debug);
-
-                    // Проверяем, есть ли соответствующий дебафф или состояние
                     bool hasActiveBuff = _stateService.HasActiveBuffInGame(buffId);
                     bool hasValidState = _data.StressState.TreatmentHistory.TryGetValue(buffId, out var historyList)
                                         && historyList.Count > 0
-                                        && !historyList.Last().IsCured 
-                                        && historyList.Last().ShouldRestore(SDate.Now());
-
-                    _monitor.Log($"[CleanupOrphanedTreatmentTopics] {topic}: активный бафф={hasActiveBuff}, валидное состояние={hasValidState}", LogLevel.Debug);
-
-                    if (hasValidState && historyList != null && historyList.Count > 0)
-                    {
-                        var treatment = historyList.Last();
-                        _monitor.Log($"[CleanupOrphanedTreatmentTopics] Лечение {buffId}: выдан={treatment.IssuedDate}, лечение={treatment.TreatmentStarted}, вылечен={treatment.IsCured}", LogLevel.Debug);
-                    }
+                                        && !historyList.Last().IsCured;
 
                     if (!hasActiveBuff && !hasValidState)
                     {
                         ConversationHelper.RemoveTopic(topic);
-                        removedCount++;
-                        _monitor.Log($"[CleanupOrphanedTreatmentTopics] УДАЛЕН топик {topic} без соответствующего дебаффа {buffId}", LogLevel.Info);
-                    }
-                    else
-                    {
-                        _monitor.Log($"[CleanupOrphanedTreatmentTopics] Оставляем топик {topic} - есть валидный дебафф", LogLevel.Debug);
                     }
                 }
             }
-
-            _monitor.Log($"[CleanupOrphanedTreatmentTopics] Очистка завершена. Удалено топиков: {removedCount}", LogLevel.Info);
         }
     }
 }

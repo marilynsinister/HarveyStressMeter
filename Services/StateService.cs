@@ -6,7 +6,6 @@ using StardewModdingAPI.Utilities;
 using StardewValley;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Models;
-using HarveyStressMeter.Helpers;
 
 namespace HarveyStressMeter.Services
 {
@@ -259,10 +258,44 @@ namespace HarveyStressMeter.Services
                 _monitor.Log($"[StateService.UpdateProgress] ⚠️ Progress был null для квеста '{questId}', инициализирован", LogLevel.Warn);
             }
 
+            // ⭐ НОВОЕ: Логируем состояние ПЕРЕД обновлением
+            _monitor.Log($"[StateService.UpdateProgress] ═══ ОБНОВЛЕНИЕ ПРОГРЕССА '{questId}' ═══", LogLevel.Debug);
+            LogProgressState(questId, treatment.Progress, "ПЕРЕД обновлением");
+
             // Вызываем делегат для обновления
             updateAction(treatment.Progress);
 
+            // ⭐ НОВОЕ: Логируем состояние ПОСЛЕ обновления
+            LogProgressState(questId, treatment.Progress, "ПОСЛЕ обновления");
+
             _monitor.Log($"[StateService.UpdateProgress] ✅ Прогресс квеста '{questId}' обновлен", LogLevel.Debug);
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Логирует состояние прогресса квеста
+        /// </summary>
+        private void LogProgressState(string questId, TreatmentProgress progress, string stage)
+        {
+            if (progress == null)
+            {
+                _monitor.Log($"[StateService.UpdateProgress] Progress == null на этапе {stage}", LogLevel.Warn);
+                return;
+            }
+
+            _monitor.Log($"[StateService.UpdateProgress] ─── Состояние {stage} ───", LogLevel.Debug);
+            
+            // Общие поля
+            _monitor.Log($"[StateService.UpdateProgress]   SecondsNearHarvey: {progress.SecondsNearHarvey}", LogLevel.Debug);
+            _monitor.Log($"[StateService.UpdateProgress]   EveningInLightSeconds: {progress.EveningInLightSeconds}", LogLevel.Debug);
+            _monitor.Log($"[StateService.UpdateProgress]   TalkedUniqueToday: {progress.TalkedUniqueToday}", LogLevel.Debug);
+            
+            // Поля для Social квеста
+            _monitor.Log($"[StateService.UpdateProgress]   SocialTalksAfterQuest: {progress.SocialTalksAfterQuest}", LogLevel.Debug);
+            
+            // Другие поля
+            _monitor.Log($"[StateService.UpdateProgress]   AteAnyFood: {progress.AteAnyFood}", LogLevel.Debug);
+            _monitor.Log($"[StateService.UpdateProgress]   WarmSeconds: {progress.WarmSeconds}", LogLevel.Debug);
+            _monitor.Log($"[StateService.UpdateProgress]   EarlySleepStreak: {progress.EarlySleepStreak}", LogLevel.Debug);
         }
 
         /// <summary>
@@ -320,60 +353,22 @@ namespace HarveyStressMeter.Services
 
         /// <summary>
         /// Синхронизирует состояние с игрой
-        /// Вызывается при загрузке сохранения и периодически для восстановления
         /// </summary>
         public void SyncWithGame()
         {
-            int restored = 0;
-            int removed = 0;
-
-            // Проверяем все активные лечения
             foreach (var (buffId, treatment) in _data.StressState.ActiveTreatments.ToList())
             {
                 var questId = treatment.QuestId;
 
-                // Если квест завершен в игре - завершаем его в нашем состоянии
-                if (!string.IsNullOrEmpty(questId) && _questService.IsQuestCompleted(questId, out var gameQuest) && gameQuest != null)
+                // Если квест завершен - завершаем лечение
+                if (!string.IsNullOrEmpty(questId) && _questService.HasQuest(questId))
                 {
-                    if (ReflectionHelper.TryGetMember<bool>(gameQuest, "completed", out var completed) && completed)
+                    var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == questId);
+                    if (quest?.completed.Value == true)
                     {
-                        _monitor.Log($"[StateService] Квест '{questId}' завершен в игре, завершаем в состоянии", LogLevel.Debug);
                         CompleteTreatment(questId);
-                        removed++;
                         continue;
                     }
-                }
-
-                // Если квест пропал из журнала - восстанавливаем или удаляем
-                // Используем флаг вместо проверки через QuestService
-                bool questInJournal = !string.IsNullOrEmpty(questId) && _questService.HasQuest(questId);
-                bool flagSaysAdded = !string.IsNullOrEmpty(questId) && _data.StressState.TreatmentFlags.IsQuestAddedToJournal(questId);
-                
-                if (!questInJournal && !string.IsNullOrEmpty(questId))
-                {
-                    if (flagSaysAdded)
-                    {
-                        _monitor.Log($"[StateService] ⚠️ Квест '{questId}' пропал из журнала (флаг говорит что был добавлен), удаляем из состояния", LogLevel.Warn);
-                        _data.StressState.ActiveTreatments.Remove(buffId);
-                        _buffService.RemoveBuff(buffId);
-                        _data.StressState.TreatmentFlags.SetQuestAddedToJournal(questId, false);
-                        removed++;
-                    }
-                    else
-                    {
-                        _monitor.Log($"[StateService] Квест '{questId}' не был добавлен в журнал (флаг подтверждает), повторная попытка", LogLevel.Debug);
-                        _questService.AddQuest(questId);
-                        treatment.AddedToGameLog = _questService.HasQuest(questId);
-                        _data.StressState.TreatmentFlags.SetQuestAddedToJournal(questId, treatment.AddedToGameLog);
-                    }
-                    continue;
-                }
-                else if (questInJournal && !flagSaysAdded && !string.IsNullOrEmpty(questId))
-                {
-                    // Квест есть в журнале, но флаг не установлен - синхронизируем
-                    _monitor.Log($"[StateService] Синхронизация: квест '{questId}' есть в журнале, но флаг не установлен", LogLevel.Debug);
-                    _data.StressState.TreatmentFlags.SetQuestAddedToJournal(questId, true);
-                    treatment.AddedToGameLog = true;
                 }
 
                 // Восстанавливаем бафф если он пропал
@@ -381,13 +376,7 @@ namespace HarveyStressMeter.Services
                 {
                     _monitor.Log($"[StateService] Восстанавливаем бафф '{buffId}' для квеста '{questId}'", LogLevel.Debug);
                     _buffService.ApplyBuffFromData(buffId);
-                    restored++;
                 }
-            }
-
-            if (restored > 0 || removed > 0)
-            {
-                _monitor.Log($"[StateService] Синхронизация: восстановлено {restored}, удалено {removed}", LogLevel.Info);
             }
         }
 
@@ -402,31 +391,11 @@ namespace HarveyStressMeter.Services
 
 
         /// <summary>
-        /// Проверяет существование квеста в журнале через флаги (более надежно чем QuestService)
+        /// Проверяет существование квеста в журнале
         /// </summary>
         public bool IsQuestInJournal(string questId)
         {
-            // Сначала проверяем флаг
-            bool flagSaysAdded = _data.StressState.TreatmentFlags.IsQuestAddedToJournal(questId);
-            
-            // Затем проверяем реальное состояние в журнале
-            bool actuallyInJournal = _questService.HasQuest(questId);
-            
-            // Если есть расхождение - синхронизируем
-            if (flagSaysAdded != actuallyInJournal)
-            {
-                _monitor.Log($"[StateService.IsQuestInJournal] Расхождение для квеста '{questId}': флаг={flagSaysAdded}, журнал={actuallyInJournal}", LogLevel.Warn);
-                _data.StressState.TreatmentFlags.SetQuestAddedToJournal(questId, actuallyInJournal);
-                
-                // Обновляем состояние квеста если он есть в ActiveTreatments
-                var treatment = _data.StressState.GetActiveTreatmentByQuest(questId);
-                if (treatment != null)
-                {
-                    treatment.AddedToGameLog = actuallyInJournal;
-                }
-            }
-            
-            return actuallyInJournal;
+            return _questService.HasQuest(questId);
         }
 
         /// <summary>
@@ -452,28 +421,20 @@ namespace HarveyStressMeter.Services
             return true;
         }
 
-        #region Централизованные проверки состояния
-
         /// <summary>
         /// Проверяет, есть ли активный бафф
-        /// ⭐ ИЗМЕНЕНО: Теперь использует внутреннее состояние мода вместо проверки игры
         /// </summary>
         public bool HasActiveBuffInGame(string buffId)
         {
-            // ⭐ НОВОЕ: Используем внутреннее состояние мода вместо проверки игры
             return _data.StressState.HasActiveBuff(buffId);
         }
 
         /// <summary>
         /// Проверяет, есть ли квест в журнале игры
-        /// ⭐ ИЗМЕНЕНО: Теперь использует внутреннее состояние мода вместо проверки журнала
         /// </summary>
         public bool HasQuestInJournal(string questId)
         {
-            // ⭐ НОВОЕ: Используем внутреннее состояние мода вместо проверки журнала
-            bool result = _data.StressState.HasActiveQuest(questId);
-            
-            return result;
+            return _data.StressState.HasActiveQuest(questId);
         }
 
         /// <summary>
@@ -493,38 +454,12 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// Проверяет, заблокировано ли лечение (есть в ActiveTreatments)
+        /// Проверяет, заблокировано ли лечение
         /// </summary>
         public bool IsTreatmentLocked(string buffId)
         {
             return _data.StressState.IsTreatmentLocked(buffId);
         }
-
-        /// <summary>
-        /// Проверяет, можно ли выдать новый бафф (учитывая кулдаун и активные лечения)
-        /// </summary>
-        public bool CanIssueNewBuff(string buffId, int cooldownDays = 7)
-        {
-            // Проверяем кулдаун
-            if (!_data.StressState.CanIssueNewBuff(buffId, cooldownDays))
-                return false;
-
-            // Проверяем, нет ли уже активного лечения
-            if (_data.StressState.HasActiveBuff(buffId))
-                return false;
-
-            return true;
-        }
-
-        /// <summary>
-        /// Проверяет, есть ли валидное лечение в истории
-        /// </summary>
-        public bool HasValidTreatmentInHistory(string buffId)
-        {
-            return _data.StressState.HasValidTreatmentInHistory(buffId, SDate.Now());
-        }
-
-        #endregion
     }
 }
 
