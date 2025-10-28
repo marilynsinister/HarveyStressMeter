@@ -1,8 +1,0 @@
-C:\Users\Admin\HarveyStressMeter\bin\Debug\net9.0\HarveyStressMeter.deps.json
-C:\Users\Admin\HarveyStressMeter\bin\Debug\net9.0\HarveyStressMeter.dll
-C:\Users\Admin\HarveyStressMeter\obj\Debug\net9.0\HarveyStressMeter.csproj.AssemblyReference.cache
-C:\Users\Admin\HarveyStressMeter\obj\Debug\net9.0\HarveyStressMeter.GeneratedMSBuildEditorConfig.editorconfig
-C:\Users\Admin\HarveyStressMeter\obj\Debug\net9.0\HarveyStressMeter.AssemblyInfoInputs.cache
-C:\Users\Admin\HarveyStressMeter\obj\Debug\net9.0\HarveyStressMeter.AssemblyInfo.cs
-C:\Users\Admin\HarveyStressMeter\obj\Debug\net9.0\HarveyStressMeter.csproj.CoreCompileInputs.cache
-C:\Users\Admin\HarveyStressMeter\obj\Debug\net9.0\HarveyStressMeter.dll
