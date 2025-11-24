@@ -282,17 +282,44 @@ namespace HarveyStressMeter.Services
         /// </summary>
         public void CheckQuestCompletion(TreatmentProgress progress)
         {
+            // ⭐ ИСПРАВЛЕНО: Проверяем, что квест еще активен перед завершением
+            // Это предотвращает повторные вызовы после завершения
+            if (!_stateService.HasQuestInJournal(QuestIds.Social))
+            {
+                return; // Квест уже завершен, ничего не делаем
+            }
+
             if (progress.SocialTalksAfterQuest >= 3 && progress.SecondsNearHarvey >= 60)
             {
+                _monitor.Log($"[Social Quest] ✅ Квест завершен: 3 разговора + 60 сек с Харви", LogLevel.Info);
                 Game1.addHUDMessage(new HUDMessage("✅ Социальная тренировка завершена! (3 разговора + время с Харви)", HUDMessage.achievement_type));
-                _treatmentService.CompleteTreatment(BuffIds.Social, "Социальный дискомфорт прошел! Ты отлично справилась с тренировкой.");
+
+                // Добавляем топик для реакции Харви на завершение
+                ConversationHelper.AddTopic("topicStressTreatmentSocialCured", 2);
+
+                // Завершаем квест и снимаем дебафф
+                _questService.CompleteQuest(QuestIds.Social);
+                _buffService.RemoveBuff(BuffIds.Social);
+                _stateService.CompleteTreatment(QuestIds.Social);
+
+                _monitor.Log($"[Social Quest] Квест завершен, дебафф снят, топик реакции добавлен", LogLevel.Info);
                 return;
             }
 
             if (progress.SocialTalksAfterQuest >= 5)
             {
+                _monitor.Log($"[Social Quest] ✅ Квест завершен: 5 разговоров", LogLevel.Info);
                 Game1.addHUDMessage(new HUDMessage("✅ Социальная тренировка завершена! (5 разговоров)", HUDMessage.achievement_type));
-                _treatmentService.CompleteTreatment(BuffIds.Social, "Социальный дискомфорт прошел! Ты стала увереннее в общении.");
+
+                // Добавляем топик для реакции Харви на завершение
+                ConversationHelper.AddTopic("topicStressTreatmentSocialCured", 2);
+
+                // Завершаем квест и снимаем дебафф
+                _questService.CompleteQuest(QuestIds.Social);
+                _buffService.RemoveBuff(BuffIds.Social);
+                _stateService.CompleteTreatment(QuestIds.Social);
+
+                _monitor.Log($"[Social Quest] Квест завершен, дебафф снят, топик реакции добавлен", LogLevel.Info);
                 return;
             }
 

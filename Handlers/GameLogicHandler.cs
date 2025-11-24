@@ -138,6 +138,9 @@ namespace HarveyStressMeter.Handlers
 
             // Keep locked buffs persistent
             _treatmentService.EnsureLockedBuffsPersist();
+
+            // ⭐ НОВОЕ: Обновление прогресса всех активных лечений (включая Social)
+            _triggerService.UpdateTreatmentProgress(harveyNearby);
         }
 
         public void HandleMenuChanged(MenuChangedEventArgs e)
