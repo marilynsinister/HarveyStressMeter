@@ -39,6 +39,7 @@ namespace HarveyStressMeter.Services
             CheckTiredRestTrigger();
             CheckThunderCalmingTrigger();
             CheckOverworkBreakCompleteTrigger();
+            CheckSocialQuestCompleteTrigger();  // ⭐ ДОБАВЛЕНО: проверка завершения Social квеста
         }
 
         private void CheckTiredRestTrigger()
@@ -85,6 +86,29 @@ namespace HarveyStressMeter.Services
                 Game1.playSound("reward");
                 Game1.addHUDMessage(new HUDMessage($"+1 отдых ({_data.OverworkBreaksToday}/3)", HUDMessage.achievement_type));
                 ConversationHelper.RemoveTopic(TopicIds.OverworkBreakActive);
+            }
+        }
+
+        private void CheckSocialQuestCompleteTrigger()
+        {
+            if (!_stateService.HasQuestInJournal(QuestIds.Social)) return;
+
+            var socialTreatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.Social);
+            if (socialTreatment?.Progress == null) return;
+
+            if (socialTreatment.Progress.IsSocialQuestCompleted())
+            {
+                var completionPath = socialTreatment.Progress.GetSocialCompletionPath();
+
+                _monitor.Log($"[Social Quest] Завершение квеста по пути: {completionPath}", LogLevel.Info);
+                _monitor.Log($"[Social Quest] Разговоры после квеста: {socialTreatment.Progress.SocialTalksAfterQuest}", LogLevel.Info);
+                _monitor.Log($"[Social Quest] Время с Харви: {socialTreatment.Progress.SecondsNearHarvey} сек", LogLevel.Info);
+
+                Game1.playSound("questcomplete");
+                _questService.CompleteQuest(QuestIds.Social);
+                _buffService.RemoveBuff(BuffIds.Social);
+                ConversationHelper.AddTopic("topicStressTreatmentSocialCured", 2);
+                _stateService.CompleteTreatment(QuestIds.Social);
             }
         }
 
@@ -143,7 +167,8 @@ namespace HarveyStressMeter.Services
             }
 
             // Обновляем прогресс через StateService
-            _stateService.UpdateProgress(questId, p => {
+            _stateService.UpdateProgress(questId, p =>
+            {
                 p.SecondsNearHarvey = progress.SecondsNearHarvey;
                 p.EveningInLightSeconds = progress.EveningInLightSeconds;
                 p.TalkedUniqueToday = progress.TalkedUniqueToday;
@@ -164,7 +189,7 @@ namespace HarveyStressMeter.Services
             {
                 //_monitor.Log($"[SocialAnxiety] Прогресс: время с Харви={progress.SecondsNearHarvey} сек, разговоров={progress.SocialTalksAfterQuest}", LogLevel.Debug);
             }
-            
+
             // ⭐ ИСПРАВЛЕНО: Проверяем завершение квеста каждый раз (CheckQuestCompletion сам проверит условия)
             CheckQuestCompletion(progress);
         }
@@ -212,7 +237,7 @@ namespace HarveyStressMeter.Services
 
             // Логирование убрано для оптимизации
 
-            _questService.UpdateQuest(QuestIds.Social, 
+            _questService.UpdateQuest(QuestIds.Social,
                 description: $"Харви предложил мягкую экспозицию: поговори с людьми и проведи время рядом с ним.\n\n{progressText}");
         }
 
@@ -270,7 +295,7 @@ namespace HarveyStressMeter.Services
                 _treatmentService.CompleteTreatment(BuffIds.Social, "Социальный дискомфорт прошел! Ты стала увереннее в общении.");
                 return;
             }
-            
+
             UpdateQuestDescription(progress);
         }
     }

@@ -128,7 +128,7 @@ namespace HarveyStressMeter.Services
             // ⭐ НОВОЕ: Генерируем уникальный ключ для нового лечения
             var instanceNumber = _data.StressState.GetNextInstanceNumber(buffId);
             var treatmentKey = TreatmentState.GenerateTreatmentKey(buffId, instanceNumber);
-            
+
             _monitor.Log($"[StartTreatment] Создаем новое лечение с ключом: {treatmentKey}", LogLevel.Info);
 
             // Удаляем исходный топик стресса при начале лечения
@@ -163,17 +163,17 @@ namespace HarveyStressMeter.Services
 
             // ⭐ ИСПРАВЛЕНО: Добавляем лечение в состояние с уникальным ключом
             _data.StressState.AddTreatment(treatment);
-            
+
             // ⭐ ИСПРАВЛЕНО: Устанавливаем флаги напрямую, без повторного вызова StartTreatment
             _data.StressState.TreatmentFlags.SetTreatmentActive(buffId, true);
-            
+
             // ⭐ ИСПРАВЛЕНО: Добавляем квест в журнал напрямую через QuestService
             _questService.AddQuest(questId);
             treatment.AddedToGameLog = _questService.HasQuest(questId);
-            
+
             // ⭐ ИСПРАВЛЕНО: Устанавливаем флаг добавления квеста в журнал
             _data.StressState.TreatmentFlags.SetQuestAddedToJournal(questId, treatment.AddedToGameLog);
-            
+
             if (treatment.AddedToGameLog)
             {
                 _monitor.Log($"[StartTreatment] ✅ Квест '{questId}' успешно добавлен в журнал", LogLevel.Info);
@@ -187,6 +187,7 @@ namespace HarveyStressMeter.Services
             if (buffId == BuffIds.Social)
             {
                 // ⭐ КРИТИЧНО: TalkedUniqueToday = базовое значение (сколько было разговоров ДО квеста)
+                // Это значение НЕ ДОЛЖНО сбрасываться каждый день в ResetDailyQuestCounters!
                 treatment.Progress.TalkedUniqueToday = _data.TalkedNpcsToday.Count;
 
                 // ⭐ КРИТИЧНО: SocialTalksAfterQuest = обнуляем счетчик разговоров ПОСЛЕ квеста
@@ -299,6 +300,10 @@ namespace HarveyStressMeter.Services
 
         public void SyncQuestsAndBuffs()
         {
+            int removedCount = 0;
+            int restoredCount = 0;
+            int fixedProgressCount = 0;
+
             foreach (var (treatmentKey, treatment) in _data.StressState.ActiveTreatments.ToList())
             {
                 var questId = treatment.QuestId;
@@ -309,6 +314,8 @@ namespace HarveyStressMeter.Services
                 {
                     _buffService.RemoveBuff(buffId);
                     _data.StressState.RemoveTreatment(treatmentKey);
+                    removedCount++;
+                    _monitor.Log($"[SyncQuestsAndBuffs] Удалено лечение {treatmentKey}: квест {questId} не найден в журнале", LogLevel.Info);
                     continue;
                 }
 
@@ -320,6 +327,8 @@ namespace HarveyStressMeter.Services
                     {
                         _buffService.RemoveBuff(buffId);
                         _data.StressState.RemoveTreatment(treatmentKey);
+                        removedCount++;
+                        _monitor.Log($"[SyncQuestsAndBuffs] Удалено лечение {treatmentKey}: квест {questId} завершен", LogLevel.Info);
                         continue;
                     }
                 }
@@ -328,18 +337,28 @@ namespace HarveyStressMeter.Services
                 if (!_stateService.HasActiveBuffInGame(buffId))
                 {
                     _buffService.ApplyBuffFromData(buffId);
+                    restoredCount++;
+                    _monitor.Log($"[SyncQuestsAndBuffs] Восстановлен дебафф {buffId} для лечения {treatmentKey}", LogLevel.Info);
                 }
 
                 // Гарантируем наличие прогресса
                 if (treatment.Progress == null)
                 {
                     treatment.Progress = new TreatmentProgress();
+                    fixedProgressCount++;
+                    _monitor.Log($"[SyncQuestsAndBuffs] Инициализирован прогресс для лечения {treatmentKey}", LogLevel.Info);
                 }
+            }
+
+            if (removedCount > 0 || restoredCount > 0 || fixedProgressCount > 0)
+            {
+                _monitor.Log($"[SyncQuestsAndBuffs] Синхронизация завершена: удалено={removedCount}, восстановлено={restoredCount}, исправлено={fixedProgressCount}", LogLevel.Info);
             }
         }
 
         public void RestoreLostQuestsFromTopics()
         {
+            int restoredCount = 0;
             foreach (var (buffId, topicData) in BuffToStressTopic)
             {
                 if (!ConversationHelper.HasTopic(topicData.topic))
@@ -357,13 +376,19 @@ namespace HarveyStressMeter.Services
                 _questService.AddQuest(questId);
                 _stateService.ApplyStressBuff(buffId, BuffToDisplayName.GetValueOrDefault(buffId, buffId));
                 _stateService.StartTreatment(buffId, questId);
+                restoredCount++;
+                _monitor.Log($"[RestoreLostQuestsFromTopics] Восстановлен квест для {BuffToDisplayName.GetValueOrDefault(buffId, buffId)} из топика {topicData.topic}", LogLevel.Info);
             }
+
+            if (restoredCount > 0)
+                _monitor.Log($"[RestoreLostQuestsFromTopics] Восстановлено квестов: {restoredCount}", LogLevel.Info);
         }
 
         public void CleanupOldStressTopics()
         {
             var today = SDate.Now();
             const int MaxDaysToKeep = 3;
+            int removedCount = 0;
 
             foreach (var (buffId, topicData) in BuffToStressTopic)
             {
@@ -377,13 +402,20 @@ namespace HarveyStressMeter.Services
                     {
                         ConversationHelper.RemoveTopic(topicData.topic);
                         _data.StressState.LastIssuedDay.Remove(buffId);
+                        removedCount++;
+                        _monitor.Log($"[CleanupOldStressTopics] Удален старый топик {topicData.topic} для {BuffToDisplayName.GetValueOrDefault(buffId, buffId)} ({daysSinceIssued} дней)", LogLevel.Info);
                     }
                 }
                 else
                 {
                     ConversationHelper.RemoveTopic(topicData.topic);
+                    removedCount++;
+                    _monitor.Log($"[CleanupOldStressTopics] Удален топик {topicData.topic} для {BuffToDisplayName.GetValueOrDefault(buffId, buffId)} (нет даты выдачи)", LogLevel.Info);
                 }
             }
+
+            if (removedCount > 0)
+                _monitor.Log($"[CleanupOldStressTopics] Удалено старых топиков: {removedCount}", LogLevel.Info);
         }
 
         public void RestoreActiveStressBuffs()
@@ -391,7 +423,7 @@ namespace HarveyStressMeter.Services
             foreach (var (buffId, historyList) in _data.StressState.TreatmentHistory)
             {
                 if (historyList.Count == 0) continue;
-                
+
                 var treatment = historyList.Last();
                 var today = SDate.Now();
                 int daysSince = today.DaysSinceStart - treatment.IssuedDate.DaysSinceStart;
@@ -451,6 +483,7 @@ namespace HarveyStressMeter.Services
                 [TopicIds.TreatmentStartDarkness] = BuffIds.Darkness,
             };
 
+            int removedCount = 0;
             foreach (var (topic, buffId) in treatmentStartTopics)
             {
                 if (ConversationHelper.HasTopic(topic))
@@ -463,9 +496,14 @@ namespace HarveyStressMeter.Services
                     if (!hasActiveBuff && !hasValidState)
                     {
                         ConversationHelper.RemoveTopic(topic);
+                        removedCount++;
+                        _monitor.Log($"[CleanupOrphanedTreatmentTopics] Удален сиротский топик {topic} для {BuffToDisplayName.GetValueOrDefault(buffId, buffId)}", LogLevel.Info);
                     }
                 }
             }
+
+            if (removedCount > 0)
+                _monitor.Log($"[CleanupOrphanedTreatmentTopics] Удалено сиротских топиков: {removedCount}", LogLevel.Info);
         }
     }
 }
