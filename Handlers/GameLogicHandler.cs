@@ -24,8 +24,25 @@ namespace HarveyStressMeter.Handlers
         private readonly TriggerService _triggerService;
         private readonly BuffService _buffService;
         private readonly StateService _stateService;
+        private readonly DarknessService _darknessService;
+        private readonly StressDialogueService _stressDialogueService;
 
         private string? _lastDialogueNpc;
+
+        // ⭐ ОПТИМИЗАЦИЯ: Кэширование и интервальные проверки
+        private bool _lastHarveyNearby = false;
+        private int _harveyCheckCounter = 0;
+        private const int HARVEY_CHECK_INTERVAL = 1; // Каждые 1 секунды
+
+        private int _progressUpdateCounter = 0;
+        private const int PROGRESS_UPDATE_INTERVAL = 1; // Каждые 1 секунд
+
+        private int _tiredCheckCounter = 0;
+        private const int TIRED_CHECK_INTERVAL = 10; // Каждые 10 секунд
+
+        private bool _hasAnyStressBuffCached = false;
+        private int _stressBuffCacheCounter = 0;
+        private const int STRESS_BUFF_CACHE_INTERVAL = 5; // Каждые 5 секунд
 
         // Static mapping to avoid recreating dictionary on each call (DRY principle)
         private static readonly Dictionary<string, (string buffId, string questId, string displayName, bool isTreatmentTopic)> TopicMapping = new()
@@ -57,7 +74,9 @@ namespace HarveyStressMeter.Handlers
             TreatmentService treatmentService,
             TriggerService triggerService,
             BuffService buffService,
-            StateService stateService)
+            StateService stateService,
+            DarknessService darknessService,
+            StressDialogueService stressDialogueService)
         {
             _data = data;
             _monitor = monitor;
@@ -65,10 +84,16 @@ namespace HarveyStressMeter.Handlers
             _triggerService = triggerService;
             _buffService = buffService;
             _stateService = stateService;
+            _darknessService = darknessService;
+            _stressDialogueService = stressDialogueService;
         }
 
         public void ResetDailyData()
         {
+            // ⭐ НОВОЕ: Проверяем топики вчерашнего дня ПЕРЕД очисткой
+            // Это нужно для подсчета дней без разговоров/еды
+            UpdateConsecutiveDaysCounters();
+
             _data.TalkedNpcsToday.Clear();
             _data.OverworkBreaksToday = 0;
             _data.OverworkBreakSeconds = 0;
@@ -76,24 +101,22 @@ namespace HarveyStressMeter.Handlers
             _data.TalkedToHarveyToday = false;
 
             ResetDailyQuestCounters();
+            
+            // Обновляем состояние страха темноты каждый день
+            _darknessService.UpdateDailyFearState();
         }
 
         public void CheckDayStartedStressTriggers()
         {
-            // Tired - low stamina at day start
-            if (Game1.stats.DaysPlayed >= 1
-                && Game1.player.Stamina >= 0 && Game1.player.Stamina <= 10
-                && !_stateService.HasActiveBuffInGame(BuffIds.Immunity)
-                && !_stateService.HasActiveBuffInGame(BuffIds.Tired))
-            {
-                _treatmentService.ApplyStressBuff(BuffIds.Tired, "Усталость");
-            }
+            // ⭐ ИСПРАВЛЕНО: Tired проверка убрана из начала дня
+            // В начале дня stamina всегда полная, поэтому проверка Stamina <= 10 никогда не сработает
+            // Проверка перенесена в CheckTiredStressTrigger() - вызывается в течение дня
 
             // Thunder - lightning
             if (Game1.stats.DaysPlayed >= 2
                 && Game1.isLightning
                 && !_stateService.HasActiveBuffInGame(BuffIds.Thunder)
-                && !_stateService.HasActiveBuffInGame(BuffIds.Immunity))
+                && !_stateService.HasImmunity(BuffIds.Thunder))
             {
                 _treatmentService.ApplyStressBuff(BuffIds.Thunder, "Страх грозы");
             }
@@ -104,7 +127,7 @@ namespace HarveyStressMeter.Handlers
                 && GameStateHelper.IsSeasonOneOf("spring", "fall", "winter")
                 && GameStateHelper.IsWeatherOneOf("Snow", "Rain", "Wind", "Storm")
                 && !_stateService.HasActiveBuffInGame(BuffIds.TooCold)
-                && !_stateService.HasActiveBuffInGame(BuffIds.Immunity))
+                && !_stateService.HasImmunity(BuffIds.TooCold))
             {
                 var loc = Game1.player.currentLocation?.NameOrUniqueName;
                 if (loc == "Mountain" || loc == "Forest" || loc == "Railroad" || loc == "Backwoods")
@@ -112,35 +135,157 @@ namespace HarveyStressMeter.Handlers
                     _treatmentService.ApplyStressBuff(BuffIds.TooCold, "Переохлаждение");
                 }
             }
+
+            // ⭐ НОВОЕ: Lonely - несколько дней без разговоров
+            if (Game1.stats.DaysPlayed >= 3
+                && _data.DaysWithoutTalking >= 3
+                && !_stateService.HasActiveBuffInGame(BuffIds.Lonely)
+                && !_stateService.HasImmunity(BuffIds.Lonely))
+            {
+                _treatmentService.ApplyStressBuff(BuffIds.Lonely, "Одиночество");
+                _monitor.Log($"[Lonely Stress] Триггер активирован: {_data.DaysWithoutTalking} дней без разговоров", LogLevel.Info);
+            }
+
+            // ⭐ НОВОЕ: Hunger - несколько дней без еды
+            if (Game1.stats.DaysPlayed >= 3
+                && _data.DaysWithoutEating >= 2
+                && !_stateService.HasActiveBuffInGame(BuffIds.Hunger)
+                && !_stateService.HasImmunity(BuffIds.Hunger))
+            {
+                _treatmentService.ApplyStressBuff(BuffIds.Hunger, "Слабость от голода");
+                _monitor.Log($"[Hunger Stress] Триггер активирован: {_data.DaysWithoutEating} дней без еды", LogLevel.Info);
+            }
+
+            // ⭐ НОВОЕ: NoSleep - несколько дней позднего сна
+            if (Game1.stats.DaysPlayed >= 3
+                && _data.DaysWithLateSleep >= 3
+                && !_stateService.HasActiveBuffInGame(BuffIds.NoSleep)
+                && !_stateService.HasImmunity(BuffIds.NoSleep))
+            {
+                _treatmentService.ApplyStressBuff(BuffIds.NoSleep, "Недосып");
+                _monitor.Log($"[NoSleep Stress] Триггер активирован: {_data.DaysWithLateSleep} дней позднего сна", LogLevel.Info);
+            }
         }
 
         public void ProcessGameTick(bool harveyNearby)
         {
-            // Harvey's care aura
+            // ⭐ ОПТИМИЗАЦИЯ: Интервальные счетчики
+            _harveyCheckCounter++;
+            _progressUpdateCounter++;
+            _tiredCheckCounter++;
+            _stressBuffCacheCounter++;
+
+            // === КАЖДЫЕ 3 СЕКУНДЫ: Harvey proximity (66% ⬇️) ===
+            if (_harveyCheckCounter >= HARVEY_CHECK_INTERVAL)
+            {
+                _harveyCheckCounter = 0;
+                UpdateHarveyCareAura(harveyNearby);
+                _lastHarveyNearby = harveyNearby;
+            }
+            else
+            {
+                // Используем кэшированное значение для других проверок
+                harveyNearby = _lastHarveyNearby;
+            }
+
+            // === КАЖДЫЕ 5 СЕКУНД: Основные обновления (80% ⬇️) ===
+            if (_progressUpdateCounter >= PROGRESS_UPDATE_INTERVAL)
+            {
+                _progressUpdateCounter = 0;
+
+                // Обновляем прогресс терапии темноты
+                _darknessService.UpdateTherapyProgress();
+
+                // Обновляем прогресс лечений (самый важный процесс)
+                if (_data.StressState.ActiveTreatments.Count > 0)
+                {
+                    _triggerService.UpdateTreatmentProgress(harveyNearby);
+                    _treatmentService.EnsureLockedBuffsPersist();
+                }
+
+                // Thunder calming buff (только если квест активен)
+                if (_stateService.HasQuestInJournal(QuestIds.Thunder))
+                {
+                    ApplyThunderCalmingBuff(harveyNearby);
+                }
+
+                // Natural buff removal (только если есть активные баффы)
+                if (_data.StressState.ActiveTreatments.Count > 0 || GetHasAnyStressBuff())
+                {
+                    NaturalBuffRemoval(harveyNearby);
+                }
+            }
+
+            // === КАЖДЫЕ 10 СЕКУНД: Медленные проверки (90% ⬇️) ===
+            if (_tiredCheckCounter >= TIRED_CHECK_INTERVAL)
+            {
+                _tiredCheckCounter = 0;
+
+                // Проверяем усталость в течение дня
+                if (!_stateService.HasActiveBuffInGame(BuffIds.Tired))
+                {
+                    CheckTiredStressTrigger();
+                }
+            }
+        }
+
+        /// <summary>
+        /// ⭐ ОПТИМИЗАЦИЯ: Отдельный метод для обновления Harvey care aura
+        /// </summary>
+        private void UpdateHarveyCareAura(bool harveyNearby)
+        {
             if (harveyNearby)
             {
                 _buffService.ApplyBuff(BuffIds.CareAura, "Рядом с Харви",
                     new StardewValley.Buffs.BuffEffects { Defense = { +1 }, MaxStamina = { +10 } }, 2000);
             }
-            else
+            else if (_stateService.HasActiveBuffInGame(BuffIds.CareAura))
             {
                 _buffService.RemoveBuff(BuffIds.CareAura);
             }
+        }
 
-            // Thunder quest calming buff
-            ApplyThunderCalmingBuff(harveyNearby);
+        /// <summary>
+        /// ⭐ ОПТИМИЗАЦИЯ: Кэшированная проверка наличия стрессовых баффов
+        /// Обновляется каждые 5 секунд вместо каждого вызова
+        /// </summary>
+        private bool GetHasAnyStressBuff()
+        {
+            // Обновляем кэш каждые N секунд
+            if (_stressBuffCacheCounter >= STRESS_BUFF_CACHE_INTERVAL)
+            {
+                _stressBuffCacheCounter = 0;
+                _hasAnyStressBuffCached = HasAnyStressBuff();
+            }
 
-            // Food consumption detection
-            DetectFoodConsumption();
+            return _hasAnyStressBuffCached;
+        }
 
-            // Natural buff removal
-            NaturalBuffRemoval(harveyNearby);
+        /// <summary>
+        /// Сбрасывает счетчики оптимизации (вызывается при смене дня)
+        /// </summary>
+        public void ResetOptimizationCounters()
+        {
+            _harveyCheckCounter = 0;
+            _progressUpdateCounter = 0;
+            _tiredCheckCounter = 0;
+            _stressBuffCacheCounter = 0;
+            _hasAnyStressBuffCached = false;
+            _lastHarveyNearby = false;
+        }
 
-            // Keep locked buffs persistent
-            _treatmentService.EnsureLockedBuffsPersist();
-
-            // ⭐ НОВОЕ: Обновление прогресса всех активных лечений (включая Social)
-            _triggerService.UpdateTreatmentProgress(harveyNearby);
+        /// <summary>
+        /// Быстрая проверка наличия любого стрессового баффа
+        /// </summary>
+        private bool HasAnyStressBuff()
+        {
+            return _stateService.HasActiveBuffInGame(BuffIds.Tired)
+                || _stateService.HasActiveBuffInGame(BuffIds.Lonely)
+                || _stateService.HasActiveBuffInGame(BuffIds.Thunder)
+                || _stateService.HasActiveBuffInGame(BuffIds.Hunger)
+                || _stateService.HasActiveBuffInGame(BuffIds.TooCold)
+                || _stateService.HasActiveBuffInGame(BuffIds.Darkness)
+                || _stateService.HasActiveBuffInGame(BuffIds.Social);
         }
 
         public void HandleMenuChanged(MenuChangedEventArgs e)
@@ -152,18 +297,24 @@ namespace HarveyStressMeter.Handlers
         {
             if (e.NewLocation == null) return;
 
-            CheckDarknessDebuff(e.NewLocation);
+            // Используем новую систему уровней страха темноты
+            _darknessService.CheckAndApplyDarknessBuff(e.NewLocation);
+            
+            // Обрабатываем посещение локации для терапии (Шаг 2)
+            _darknessService.HandleLocationVisit(e.NewLocation.NameOrUniqueName);
+            
             ApplyQuestLocationBuffs(e.NewLocation);
         }
 
         public void HandleTimeChanged(TimeChangedEventArgs e)
         {
             // Obmorok from tiredness (at 2:00)
-            if (e.NewTime == 200 && Game1.player.Stamina <= 0)
+            // ⭐ ИСПРАВЛЕНО: Проверяем stamina от 0 до 5 (критически низкая выносливость)
+            if (e.NewTime == 200 && Game1.player.Stamina >= 0 && Game1.player.Stamina <= 5)
             {
                 if (Game1.stats.DaysPlayed >= 1
                     && !_stateService.HasActiveBuffInGame(BuffIds.Overwork)
-                    && !_stateService.HasActiveBuffInGame(BuffIds.Immunity))
+                    && !_stateService.HasImmunity(BuffIds.Overwork))
                 {
                     _treatmentService.ApplyStressBuff(BuffIds.Overwork, "Переработка");
                 }
@@ -200,6 +351,46 @@ namespace HarveyStressMeter.Handlers
             }
         }
 
+        /// <summary>
+        /// ⭐ НОВОЕ: Отслеживает паттерн позднего отхода ко сну
+        /// Вызывается в конце дня перед сохранением
+        /// </summary>
+        public void CheckLateSleepPattern()
+        {
+            int currentTime = Game1.timeOfDay;
+            bool wentToSleepLate = false;
+
+            // Поздний сон: после 00:00 (2400) и до 02:00 (200)
+            // В Stardew Valley время 2400-2600 представлено как 0-200 следующего дня
+            // ⭐ ИСПРАВЛЕНО: Также проверяем критически низкую выносливость (0-5) как признак обморока
+            if (currentTime >= 0 && currentTime <= 200)
+            {
+                wentToSleepLate = true;
+                _monitor.Log($"[LateSleep] Игрок лег спать поздно: {currentTime}", LogLevel.Info);
+            }
+            // ⭐ ИСПРАВЛЕНО: Проверяем критически низкую выносливость (0-5) как признак обморока от усталости
+            else if (Game1.player.Stamina >= 0 && Game1.player.Stamina <= 5)
+            {
+                wentToSleepLate = true;
+                _monitor.Log($"[LateSleep] Игрок упал от усталости (stamina={Game1.player.Stamina})", LogLevel.Info);
+            }
+            
+            if (wentToSleepLate)
+            {
+                _data.DaysWithLateSleep++;
+                _monitor.Log($"[LateSleep] Счетчик: {_data.DaysWithLateSleep} дней позднего сна подряд", LogLevel.Info);
+            }
+            else
+            {
+                // Лег спать вовремя - сбрасываем счетчик
+                if (_data.DaysWithLateSleep > 0)
+                {
+                    _monitor.Log($"[LateSleep] Игрок лег спать вовремя ({currentTime}) - счетчик сброшен", LogLevel.Info);
+                }
+                _data.DaysWithLateSleep = 0;
+            }
+        }
+
         private void HandleDialogueEvents(MenuChangedEventArgs e)
         {
             if (e.NewMenu is DialogueBox && Game1.currentSpeaker is NPC npc && npc.Name != "Harvey")
@@ -228,28 +419,60 @@ namespace HarveyStressMeter.Handlers
             _monitor.Log($"[Диалог] Начался разговор с Харви. Текущие топики: {string.Join(", ", Game1.player.activeDialogueEvents.Keys.Where(k => k.Contains("Stress")))}", LogLevel.Info);
             _monitor.Log($"[Диалог] Дебафф Social активен: {_stateService.HasActiveBuffInGame(BuffIds.Social)}", LogLevel.Info);
 
-            if (e.NewMenu is DialogueBox dialogueBox)
+            // ⭐ НОВОЕ: Проверяем наличие активного дебаффа без лечения
+            // Если есть - показываем программный диалог вместо стандартного
+            if (_stressDialogueService.ShouldShowStressDialogue(out var buffId, out var dialogueText))
             {
-                _monitor.Log($"[Диалог] DialogueBox найдена. isOnFinalDialogue: {dialogueBox.characterDialogue?.isOnFinalDialogue()}", LogLevel.Info);
-
-                if (dialogueBox.characterDialogue?.isOnFinalDialogue() == true)
+                _monitor.Log($"[Диалог] Обнаружен активный дебафф {buffId} без лечения. Показываем программный диалог.", LogLevel.Info);
+                
+                // Закрываем текущий диалог если он есть
+                if (Game1.activeClickableMenu is DialogueBox)
                 {
-                    _monitor.Log($"[Диалог] Достигнут финальный диалог с Харви!", LogLevel.Info);
-
-                    // Проверяем, был ли активен топик, соответствующий дебаффу Social
-                    bool hasSocialStressTopic = ConversationHelper.HasTopic(TopicIds.StressSocial);
-                    _monitor.Log($"[Диалог] Топик topicStressSocial активен: {hasSocialStressTopic}", LogLevel.Info);
-
-                    CheckStressTopicsAndStartTreatment(harveyNpc, dialogueBox.characterDialogue.TranslationKey, hasSocialStressTopic);
+                    Game1.activeClickableMenu = null;
                 }
-                else
-                {
-                    _monitor.Log($"[Диалог] Диалог с Харви продолжается (не финальный)", LogLevel.Debug);
-                }
+                
+                // Показываем программный диалог стресса
+                _stressDialogueService.ShowStressDialogue(buffId!, dialogueText!);
+                return;
             }
-            else
+
+            // ⭐ FALLBACK: Если программный диалог не показан, используем старую систему топиков
+            CheckAllStressDebuffsAndAddTopics();
+
+            // ⭐ НОВОЕ: Проверяем дебаффы темноты и добавляем топики если их нет
+            CheckDarknessDebuffsAndAddTopics();
+
+            // ⭐ НОВОЕ: Проверяем топик начала терапии темноты
+            CheckDarknessTherapyStart();
+        }
+
+        /// <summary>
+        /// ⭐ ИСПРАВЛЕНИЕ: Проверяет все активные стрессовые дебаффы и принудительно добавляет топики
+        /// Это решает проблему повторного применения дебаффа, когда топик не добавляется
+        /// </summary>
+        private void CheckAllStressDebuffsAndAddTopics()
+        {
+            // Маппинг баффов на топики (из TreatmentService)
+            var buffToTopicMap = new Dictionary<string, (string topic, int days)>
             {
-                _monitor.Log($"[Диалог] Это не DialogueBox, а {e.NewMenu?.GetType().Name}", LogLevel.Warn);
+                [BuffIds.Tired] = (TopicIds.StressTired, 2),
+                [BuffIds.Lonely] = (TopicIds.StressLonely, 2),
+                [BuffIds.Thunder] = (TopicIds.StressThunder, 1),
+                [BuffIds.Hunger] = (TopicIds.StressHunger, 1),
+                [BuffIds.Overwork] = (TopicIds.StressOverwork, 4),
+                [BuffIds.NoSleep] = (TopicIds.StressNoSleep, 1),
+                [BuffIds.TooCold] = (TopicIds.StressTooCold, 1),
+                [BuffIds.Social] = (TopicIds.StressSocial, 1)
+            };
+
+            foreach (var (buffId, topicData) in buffToTopicMap)
+            {
+                // Если бафф активен, но топика нет - добавляем принудительно
+                if (_stateService.HasActiveBuffInGame(buffId) && !ConversationHelper.HasTopic(topicData.topic))
+                {
+                    ConversationHelper.AddTopic(topicData.topic, topicData.days);
+                    _monitor.Log($"[HandleHarveyDialogue] ✅ Принудительно добавлен топик {topicData.topic} для активного баффа {buffId}", LogLevel.Info);
+                }
             }
         }
 
@@ -257,12 +480,21 @@ namespace HarveyStressMeter.Handlers
         {
             _monitor.Log($"[Диалог] Завершен разговор с Харви", LogLevel.Info);
 
-            // Проверяем, был ли активен топик, соответствующий дебаффу Social
-            bool hasSocialStressTopic = ConversationHelper.HasTopic(TopicIds.StressSocial);
-            _monitor.Log($"[Диалог] При завершении диалога топик topicStressSocial активен: {hasSocialStressTopic}", LogLevel.Info);
+            // ⭐ НОВОЕ: Не засчитываем разговоры во время событий
+            if (Game1.CurrentEvent != null)
+            {
+                _monitor.Log($"[Диалог] Разговор во время события - не засчитывается", LogLevel.Debug);
+                return;
+            }
 
-            CheckStressTopicsAndStartTreatment(Game1.getCharacterFromName("Harvey"), null, hasSocialStressTopic);
+            // ⭐ НОВОЕ: Проверяем, был ли это программный диалог стресса
+            // Если да - запускаем лечение автоматически
+            _stressDialogueService.CheckAndStartTreatmentAfterDialogue();
 
+            // ⭐ НОВОЕ: Проверяем топики начала лечения (устанавливаются в диалогах через #$t)
+            CheckTreatmentStartTopics();
+
+            // Обновляем прогресс Social квеста
             UpdateSocialQuestProgress(showUiMessage: false);
 
             if (!ConversationHelper.HasTopic(TopicIds.SpokeToday))
@@ -271,8 +503,103 @@ namespace HarveyStressMeter.Handlers
             }
         }
 
+        /// <summary>
+        /// ⭐ НОВОЕ: Проверяет топики начала лечения и запускает соответствующее лечение
+        /// Топики устанавливаются в диалогах через #$t topicStressTreatmentXXXStarted 0
+        /// </summary>
+        private void CheckTreatmentStartTopics()
+        {
+            // Social - топик устанавливается в диалоге "topicStressSocial"
+            if (ConversationHelper.HasTopic("topicStressTreatmentSocialStarted") && _stateService.HasActiveBuffInGame(BuffIds.Social))
+            {
+                _treatmentService.StartTreatment(BuffIds.Social, "Социальная тревожность");
+                ConversationHelper.RemoveTopic("topicStressTreatmentSocialStarted");
+                ConversationHelper.RemoveTopic(TopicIds.StressSocial);
+                _monitor.Log($"[Treatment Start] Начато лечение Social (через топик)", LogLevel.Info);
+            }
+
+            // Tired - топик устанавливается в диалоге "topicStressTired"
+            if (ConversationHelper.HasTopic("topicStressTreatmentTiredStarted") && _stateService.HasActiveBuffInGame(BuffIds.Tired))
+            {
+                _treatmentService.StartTreatment(BuffIds.Tired, "Усталость");
+                ConversationHelper.RemoveTopic("topicStressTreatmentTiredStarted");
+                ConversationHelper.RemoveTopic(TopicIds.StressTired);
+                _monitor.Log($"[Treatment Start] Начато лечение Tired (через топик)", LogLevel.Info);
+            }
+
+            // Thunder - топик устанавливается в диалоге "topicStressThunder"
+            if (ConversationHelper.HasTopic("topicStressTreatmentThunderStarted") && _stateService.HasActiveBuffInGame(BuffIds.Thunder))
+            {
+                _treatmentService.StartTreatment(BuffIds.Thunder, "Страх грозы");
+                ConversationHelper.RemoveTopic("topicStressTreatmentThunderStarted");
+                ConversationHelper.RemoveTopic(TopicIds.StressThunder);
+                _monitor.Log($"[Treatment Start] Начато лечение Thunder (через топик)", LogLevel.Info);
+            }
+
+            // Hunger - топик устанавливается в диалоге "topicStressHunger"
+            if (ConversationHelper.HasTopic("topicStressTreatmentHungerStarted") && _stateService.HasActiveBuffInGame(BuffIds.Hunger))
+            {
+                _treatmentService.StartTreatment(BuffIds.Hunger, "Голод");
+                ConversationHelper.RemoveTopic("topicStressTreatmentHungerStarted");
+                ConversationHelper.RemoveTopic(TopicIds.StressHunger);
+                _monitor.Log($"[Treatment Start] Начато лечение Hunger (через топик)", LogLevel.Info);
+            }
+
+            // Overwork - топик устанавливается в диалоге "topicStressOverwork"
+            if (ConversationHelper.HasTopic("topicStressTreatmentOverworkStarted") && _stateService.HasActiveBuffInGame(BuffIds.Overwork))
+            {
+                _treatmentService.StartTreatment(BuffIds.Overwork, "Переутомление");
+                ConversationHelper.RemoveTopic("topicStressTreatmentOverworkStarted");
+                ConversationHelper.RemoveTopic(TopicIds.StressOverwork);
+                _monitor.Log($"[Treatment Start] Начато лечение Overwork (через топик)", LogLevel.Info);
+            }
+
+            // NoSleep - топик устанавливается в диалоге "topicStressNoSleep"
+            if (ConversationHelper.HasTopic("topicStressTreatmentNoSleepStarted") && _stateService.HasActiveBuffInGame(BuffIds.NoSleep))
+            {
+                _treatmentService.StartTreatment(BuffIds.NoSleep, "Недосып");
+                ConversationHelper.RemoveTopic("topicStressTreatmentNoSleepStarted");
+                ConversationHelper.RemoveTopic(TopicIds.StressNoSleep);
+                _monitor.Log($"[Treatment Start] Начато лечение NoSleep (через топик)", LogLevel.Info);
+            }
+
+            // TooCold - топик устанавливается в диалоге "topicStressTooCold"
+            if (ConversationHelper.HasTopic("topicStressTreatmentTooColdStarted") && _stateService.HasActiveBuffInGame(BuffIds.TooCold))
+            {
+                _treatmentService.StartTreatment(BuffIds.TooCold, "Переохлаждение");
+                ConversationHelper.RemoveTopic("topicStressTreatmentTooColdStarted");
+                ConversationHelper.RemoveTopic(TopicIds.StressTooCold);
+                _monitor.Log($"[Treatment Start] Начато лечение TooCold (через топик)", LogLevel.Info);
+            }
+
+            // Lonely - топик устанавливается в диалоге "topicStressLonely"
+            if (ConversationHelper.HasTopic("topicStressTreatmentLonelyStarted") && _stateService.HasActiveBuffInGame(BuffIds.Lonely))
+            {
+                _treatmentService.StartTreatment(BuffIds.Lonely, "Одиночество");
+                ConversationHelper.RemoveTopic("topicStressTreatmentLonelyStarted");
+                ConversationHelper.RemoveTopic(TopicIds.StressLonely);
+                _monitor.Log($"[Treatment Start] Начато лечение Lonely (через топик)", LogLevel.Info);
+            }
+
+            // Darkness - топик устанавливается в диалоге "topicStressDarkness" через DarknessService
+            if (ConversationHelper.HasTopic("topicStressTreatmentDarknessStarted"))
+            {
+                // Для Darkness используется специальная система через DarknessService
+                // Топик обрабатывается в CheckDarknessTherapyStart()
+                _monitor.Log($"[Treatment Start] Топик topicStressTreatmentDarknessStarted обнаружен (обрабатывается в DarknessService)", LogLevel.Debug);
+            }
+        }
+
         private void HandleDialogueEnd()
         {
+            // ⭐ НОВОЕ: Не засчитываем разговоры во время событий
+            if (Game1.CurrentEvent != null)
+            {
+                _monitor.Log($"[Диалог] Разговор во время события - не засчитывается", LogLevel.Debug);
+                _lastDialogueNpc = null;
+                return;
+            }
+
             if (_lastDialogueNpc != "Harvey")
             {
                 if (_lastDialogueNpc != null)
@@ -300,9 +627,12 @@ namespace HarveyStressMeter.Handlers
 
         private void CheckSocialStressTrigger(NPC npc)
         {
+            // ⭐ ИСПРАВЛЕНО: Не применяем дебафф во время событий
+            if (Game1.CurrentEvent != null) return;
+            
             if (Game1.stats.DaysPlayed < 5) return;
             if (_stateService.HasActiveBuffInGame(BuffIds.Social)) return;
-            if (_stateService.HasActiveBuffInGame(BuffIds.Immunity)) return;
+            if (_stateService.HasImmunity(BuffIds.Social)) return;
 
             if (Game1.player.friendshipData.TryGetValue(npc.Name, out var friendship))
             {
@@ -312,77 +642,6 @@ namespace HarveyStressMeter.Handlers
                     _monitor.Log($"[Social Stress] Триггер активирован при разговоре с {npc.Name} (дружба: {friendship.Points}/750)", LogLevel.Info);
                 }
             }
-        }
-
-        private void CheckStressTopicsAndStartTreatment(NPC harvey, string? dialogueKey = null, bool hasSocialStressTopic = false)
-        {
-            _monitor.Log($"[CheckStressTopicsAndStartTreatment] Начат анализ диалога с Харви. DialogueKey: '{dialogueKey}', hasSocialStressTopic: {hasSocialStressTopic}", LogLevel.Info);
-            _monitor.Log($"[CheckStressTopicsAndStartTreatment] Активные дебаффы: Tired={_stateService.HasActiveBuffInGame(BuffIds.Tired)}, Lonely={_stateService.HasActiveBuffInGame(BuffIds.Lonely)}, Thunder={_stateService.HasActiveBuffInGame(BuffIds.Thunder)}, Social={_stateService.HasActiveBuffInGame(BuffIds.Social)}", LogLevel.Info);
-
-            // First, try the original topic-based approach (for Content Patcher compatibility)
-            if (!string.IsNullOrEmpty(dialogueKey))
-            {
-                string normalizedKey = dialogueKey;
-                int colonIndex = dialogueKey.IndexOf(':');
-                if (colonIndex >= 0 && colonIndex < dialogueKey.Length - 1)
-                {
-                    normalizedKey = dialogueKey.Substring(colonIndex + 1);
-                }
-
-                _monitor.Log($"[CheckStressTopicsAndStartTreatment] Исходный ключ: '{dialogueKey}', нормализованный: '{normalizedKey}'", LogLevel.Info);
-
-                if (TopicMapping.TryGetValue(normalizedKey, out var mapping) && mapping.isTreatmentTopic)
-                {
-                    _monitor.Log($"[CheckStressTopicsAndStartTreatment] ✅ Найден маппинг для ключа '{normalizedKey}': {mapping.buffId}, isTreatmentTopic={mapping.isTreatmentTopic}", LogLevel.Info);
-
-                    if (_stateService.HasActiveBuffInGame(mapping.buffId))
-                    {
-                        _monitor.Log($"[CheckStressTopicsAndStartTreatment] Дебафф {mapping.buffId} активен. Начинаем лечение через topic mapping...", LogLevel.Info);
-                        _treatmentService.StartTreatment(mapping.buffId, mapping.displayName);
-                    }
-                    else
-                    {
-                        _monitor.Log($"[CheckStressTopicsAndStartTreatment] ❌ Дебафф {mapping.buffId} НЕ активен!", LogLevel.Error);
-                    }
-                    return;
-                }
-            }
-
-            // Special handling for Social stress: only start treatment if the social stress topic was active during this dialogue
-            if (hasSocialStressTopic && _stateService.HasActiveBuffInGame(BuffIds.Social))
-            {
-                _monitor.Log($"[CheckStressTopicsAndStartTreatment] ✅ Диалог был по топику topicStressSocial и дебафф Social активен. Начинаем лечение Social!", LogLevel.Info);
-                _treatmentService.StartTreatment(BuffIds.Social, "Социальный дискомфорт");
-                return;
-            }
-
-            // Fallback: Check for other active stress topics and start treatment
-            // This handles the case where Content Patcher isn't used but other topics are set
-            _monitor.Log($"[CheckStressTopicsAndStartTreatment] Topic mapping и Social stress check не сработали, проверяем другие активные топики стресса...", LogLevel.Info);
-
-            foreach (var kvp in TopicMapping.Where(x => !x.Value.isTreatmentTopic && x.Key != TopicIds.StressSocial))
-            {
-                var topicId = kvp.Key;
-                var mapping = kvp.Value;
-
-                if (ConversationHelper.HasTopic(topicId))
-                {
-                    _monitor.Log($"[CheckStressTopicsAndStartTreatment] ✅ Найден активный топик стресса: {topicId} -> {mapping.buffId}", LogLevel.Info);
-
-                    if (_stateService.HasActiveBuffInGame(mapping.buffId))
-                    {
-                        _monitor.Log($"[CheckStressTopicsAndStartTreatment] Дебафф {mapping.buffId} активен. Начинаем лечение через fallback логику...", LogLevel.Info);
-                        _treatmentService.StartTreatment(mapping.buffId, mapping.displayName);
-                        return;
-                    }
-                    else
-                    {
-                        _monitor.Log($"[CheckStressTopicsAndStartTreatment] Дебафф {mapping.buffId} не активен для топика {topicId}", LogLevel.Warn);
-                    }
-                }
-            }
-
-            _monitor.Log($"[CheckStressTopicsAndStartTreatment] Не найдено подходящих условий для начала лечения", LogLevel.Info);
         }
 
         private void UpdateLonelyQuestProgress()
@@ -430,53 +689,61 @@ namespace HarveyStressMeter.Handlers
 
         private void ApplyThunderCalmingBuff(bool harveyNearby)
         {
-            if (_stateService.HasQuestInJournal(QuestIds.Thunder)
-                && Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
-                && (Game1.isLightning || Game1.isRaining)
-                && harveyNearby)
+            // Быстрый выход если не в больнице или Харви не рядом
+            if (!harveyNearby || Game1.player.currentLocation?.NameOrUniqueName != "Hospital")
+                return;
+
+            if ((Game1.isLightning || Game1.isRaining))
             {
                 _buffService.ApplyBuff(BuffIds.CalmingAtHospital, "Успокоение с Харви",
                     new StardewValley.Buffs.BuffEffects { }, -2);
             }
         }
 
-        private void DetectFoodConsumption()
+        /// <summary>
+        /// ⭐ УЛУЧШЕНО: Обрабатывает потребление еды игроком
+        /// Вызывается из EventHandler при использовании съедобного предмета
+        /// </summary>
+        public void OnFoodConsumed()
         {
-            // Note: Simplified food detection - stamina tracking moved to EventHandler
-            bool inSpa = Game1.currentLocation is StardewValley.Locations.BathHousePool;
+            // ⭐ ОПТИМИЗАЦИЯ: Проверка топика AteToday - если уже есть, выходим
+            // Это означает что игрок уже поел сегодня
+            if (ConversationHelper.HasTopic(TopicIds.AteToday))
+                return;
 
-            if (!inSpa && Game1.player.Stamina >= 10f)
+            _monitor.Log("[FoodConsumption] Игрок съел еду", LogLevel.Debug);
+
+            // Добавляем топик (игрок поел)
+            ConversationHelper.AddTopic(TopicIds.AteToday, 1);
+
+            // Обновляем прогресс Hunger квеста если активен
+            var hungerTreatment = GetTreatmentByQuest(QuestIds.Hunger);
+            if (hungerTreatment?.Progress != null)
             {
-                var hungerTreatment = GetTreatmentByQuest(QuestIds.Hunger);
-                if (hungerTreatment?.Progress != null)
-                {
-                    hungerTreatment.Progress.AteAnyFood = true;
-                }
+                hungerTreatment.Progress.AteAnyFood = true;
+            }
 
-                if (!ConversationHelper.HasTopic(TopicIds.AteToday))
-                {
-                    ConversationHelper.AddTopic(TopicIds.AteToday, 1);
-                }
+            // Завершаем Hunger квест если активен
+            if (_stateService.HasQuestInJournal(QuestIds.Hunger))
+            {
+                Game1.playSound("questcomplete");
+                _stateService.CompleteTreatment(QuestIds.Hunger);
+                ConversationHelper.AddTopic("topicStressTreatmentHungerCured", 2);
+            }
 
-                if (_stateService.HasQuestInJournal(QuestIds.Hunger))
-                {
-                    Game1.playSound("questcomplete");
-                    _stateService.CompleteTreatment(QuestIds.Hunger);
-                    ConversationHelper.AddTopic("topicStressTreatmentHungerCured", 2);
-                }
+            // Завершаем TooCold квест если активен
+            if (_stateService.HasQuestInJournal(QuestIds.TooCold))
+            {
+                Game1.playSound("questcomplete");
+                _stateService.CompleteTreatment(QuestIds.TooCold);
+                ConversationHelper.AddTopic("topicStressTreatmentTooColdCured", 2);
+            }
 
-                if (_stateService.HasQuestInJournal(QuestIds.TooCold))
-                {
-                    Game1.playSound("questcomplete");
-                    _stateService.CompleteTreatment(QuestIds.TooCold);
-                    ConversationHelper.AddTopic("topicStressTreatmentTooColdCured", 2);
-                }
-
-                if (_stateService.HasActiveBuffInGame(BuffIds.Hunger) && !_data.StressState.IsTreatmentLocked(BuffIds.Hunger))
-                {
-                    _buffService.RemoveBuff(BuffIds.Hunger);
-                    Game1.addHUDMessage(new HUDMessage("Голод утолён", HUDMessage.newQuest_type));
-                }
+            // Снимаем Hunger бафф если он не заблокирован (natural removal)
+            if (_stateService.HasActiveBuffInGame(BuffIds.Hunger) && !_data.StressState.IsTreatmentLocked(BuffIds.Hunger))
+            {
+                _buffService.RemoveBuff(BuffIds.Hunger);
+                Game1.addHUDMessage(new HUDMessage("Голод утолён", HUDMessage.newQuest_type));
             }
         }
 
@@ -533,12 +800,17 @@ namespace HarveyStressMeter.Handlers
             }
         }
 
+        // УСТАРЕВШИЙ МЕТОД - Теперь используется DarknessService.CheckAndApplyDarknessBuff
+        // Оставлен для обратной совместимости, но больше не вызывается
+        [Obsolete("Используйте DarknessService.CheckAndApplyDarknessBuff")]
         private void CheckDarknessDebuff(GameLocation newLocation)
         {
+            // Старая логика закомментирована - используйте DarknessService
+            /*
             if (Game1.stats.DaysPlayed >= 3
                 && Game1.timeOfDay >= 2200 && Game1.timeOfDay <= 2600
                 && !_stateService.HasActiveBuffInGame(BuffIds.Darkness)
-                && !_stateService.HasActiveBuffInGame(BuffIds.Immunity))
+                && !_stateService.HasImmunity(BuffIds.Darkness))
             {
                 var n = newLocation.NameOrUniqueName;
                 if (n == "Backwoods" || n == "Forest" || n == "Mountain")
@@ -546,6 +818,7 @@ namespace HarveyStressMeter.Handlers
                     _treatmentService.ApplyStressBuff(BuffIds.Darkness, "Темнота");
                 }
             }
+            */
         }
 
         private void ApplyQuestLocationBuffs(GameLocation newLocation)
@@ -607,11 +880,74 @@ namespace HarveyStressMeter.Handlers
         {
             if (Game1.stats.DaysPlayed < 2) return;
             if (_stateService.HasActiveBuffInGame(BuffIds.Thunder)) return;
-            if (_stateService.HasActiveBuffInGame(BuffIds.Immunity)) return;
+            if (_stateService.HasImmunity(BuffIds.Thunder)) return;
 
             if (Game1.random.NextDouble() < 0.3)
             {
                 _treatmentService.ApplyStressBuff(BuffIds.Thunder, "Страх грозы");
+            }
+        }
+
+        /// <summary>
+        /// ⭐ ИСПРАВЛЕНО: Проверяет усталость в течение дня
+        /// Вызывается из ProcessGameTick, когда stamina падает до низкого уровня
+        /// </summary>
+        private void CheckTiredStressTrigger()
+        {
+            // Проверяем только раз в минуту (каждые 60 тиков) для оптимизации
+            if (Game1.ticks % 60 != 0) return;
+
+            // Базовые проверки
+            if (Game1.stats.DaysPlayed < 1) return;
+            if (_stateService.HasImmunity(BuffIds.Tired)) return;
+            if (_stateService.HasActiveBuffInGame(BuffIds.Tired)) return;
+
+            // Проверяем, что stamina низкая (<= 10) и игрок не в событии
+            if (Game1.CurrentEvent != null) return;
+            
+            if (Game1.player.Stamina >= 0 && Game1.player.Stamina <= 10)
+            {
+                _treatmentService.ApplyStressBuff(BuffIds.Tired, "Усталость");
+                _monitor.Log($"[Tired Stress] Триггер активирован: stamina={Game1.player.Stamina}/270", LogLevel.Info);
+            }
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Обновляет счетчики дней без разговоров/еды в начале нового дня
+        /// Вызывается ПЕРЕД очисткой топиков
+        /// </summary>
+        private void UpdateConsecutiveDaysCounters()
+        {
+            // Проверяем, разговаривал ли игрок вчера (топик SpokeToday НЕ истекает в конце дня)
+            bool spokeYesterday = ConversationHelper.HasTopic(TopicIds.SpokeToday);
+            
+            if (spokeYesterday)
+            {
+                // Разговаривал - сбрасываем счетчик
+                _data.DaysWithoutTalking = 0;
+                _monitor.Log("[DaysCounter] Игрок разговаривал вчера - счетчик Lonely сброшен", LogLevel.Debug);
+            }
+            else
+            {
+                // Не разговаривал - увеличиваем счетчик
+                _data.DaysWithoutTalking++;
+                _monitor.Log($"[DaysCounter] Игрок НЕ разговаривал вчера - счетчик Lonely: {_data.DaysWithoutTalking} дней", LogLevel.Info);
+            }
+
+            // Проверяем, ел ли игрок вчера (топик AteToday НЕ истекает в конце дня)
+            bool ateYesterday = ConversationHelper.HasTopic(TopicIds.AteToday);
+            
+            if (ateYesterday)
+            {
+                // Ел - сбрасываем счетчик
+                _data.DaysWithoutEating = 0;
+                _monitor.Log("[DaysCounter] Игрок ел вчера - счетчик Hunger сброшен", LogLevel.Debug);
+            }
+            else
+            {
+                // Не ел - увеличиваем счетчик
+                _data.DaysWithoutEating++;
+                _monitor.Log($"[DaysCounter] Игрок НЕ ел вчера - счетчик Hunger: {_data.DaysWithoutEating} дней", LogLevel.Info);
             }
         }
 
@@ -655,6 +991,77 @@ namespace HarveyStressMeter.Handlers
         private TreatmentState? GetTreatmentByQuest(string questId)
         {
             return _data.StressState.GetActiveTreatmentByQuest(questId);
+        }
+
+        // ===== МЕТОДЫ ДЛЯ ТЕРАПИИ СТРАХА ТЕМНОТЫ =====
+
+        /// <summary>
+        /// Проверить наличие дебаффов темноты и добавить соответствующие топики
+        /// </summary>
+        private void CheckDarknessDebuffsAndAddTopics()
+        {
+            // Проверяем, не идёт ли уже терапия
+            if (_data.Darkness.IsTherapyActive) return;
+
+            // Проверяем уровень 3 (фобия) - приоритет
+            if (_stateService.HasActiveBuffInGame("buffDarknessLevel3"))
+            {
+                if (!ConversationHelper.HasTopic("topicStressDarknessLevel3"))
+                {
+                    ConversationHelper.AddTopic("topicStressDarknessLevel3", 0); // Не истекает
+                    _monitor.Log("[DarknessTherapy] Добавлен топик для Уровня 3 (фобия)", LogLevel.Info);
+                }
+                return; // Не проверяем дальше
+            }
+
+            // Проверяем уровень 2 (сильный страх)
+            if (_stateService.HasActiveBuffInGame("buffDarknessLevel2"))
+            {
+                if (!ConversationHelper.HasTopic("topicStressDarknessLevel2"))
+                {
+                    ConversationHelper.AddTopic("topicStressDarknessLevel2", 7); // 7 дней
+                    _monitor.Log("[DarknessTherapy] Добавлен топик для Уровня 2 (сильный страх)", LogLevel.Info);
+                }
+                return;
+            }
+
+            // Проверяем уровень 1 (легкий страх) - старый топик уже должен быть
+            if (_stateService.HasActiveBuffInGame("buffDarknessLevel1") || _stateService.HasActiveBuffInGame(BuffIds.Darkness))
+            {
+                if (!ConversationHelper.HasTopic(TopicIds.StressDarkness))
+                {
+                    ConversationHelper.AddTopic(TopicIds.StressDarkness, 7); // 7 дней
+                    _monitor.Log("[DarknessTherapy] Добавлен топик для Уровня 1 (легкий страх)", LogLevel.Info);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Проверить топик начала терапии и запустить терапию
+        /// </summary>
+        private void CheckDarknessTherapyStart()
+        {
+            // Если топик начала терапии активен и терапия еще не начата
+            if (ConversationHelper.HasTopic("topicDarknessTherapyStart") && !_data.Darkness.IsTherapyActive)
+            {
+                // Запускаем терапию
+                _darknessService.StartTherapy();
+                
+                // Добавляем квест первого шага
+                var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == "HarveyMod_DarknessStep1");
+                if (quest == null)
+                {
+                    Game1.player.addQuest("HarveyMod_DarknessStep1");
+                    _monitor.Log("[DarknessTherapy] Добавлен квест Шага 1", LogLevel.Info);
+                }
+                
+                // Удаляем топики уровней страха
+                ConversationHelper.RemoveTopic(TopicIds.StressDarkness);
+                ConversationHelper.RemoveTopic("topicStressDarknessLevel2");
+                ConversationHelper.RemoveTopic("topicStressDarknessLevel3");
+                
+                _monitor.Log("[DarknessTherapy] ✅ Терапия начата через диалог!", LogLevel.Info);
+            }
         }
 
     }

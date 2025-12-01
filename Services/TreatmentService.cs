@@ -20,6 +20,7 @@ namespace HarveyStressMeter.Services
         private readonly QuestService _questService;
         private readonly StateService _stateService;
         private readonly IMonitor _monitor;
+        private GameDataService? _gameDataService;
 
         // Карты связей buff -> quest/topic/mail
         private static readonly Dictionary<string, string> BuffToQuest = new()
@@ -71,6 +72,15 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
+        /// Устанавливает GameDataService для получения данных из JSON
+        /// </summary>
+        public void SetGameDataService(GameDataService gameDataService)
+        {
+            _gameDataService = gameDataService;
+            _monitor.Log("[TreatmentService] GameDataService установлен", LogLevel.Debug);
+        }
+
+        /// <summary>
         /// Применяет простой (незалоченный) бафф стресса при срабатывании триггера
         /// НЕ выдает квест - только бафф и топик для диалога с Харви
         /// </summary>
@@ -78,10 +88,14 @@ namespace HarveyStressMeter.Services
         {
             _monitor.Log($"[ApplyStressBuff] Попытка применить дебафф {buffId} ({displayName})", LogLevel.Debug);
 
+            // ⭐ ИСПРАВЛЕНО: Разный кулдаун для разных типов стресса
+            // Социальная тревожность имеет более длинный кулдаун, так как срабатывает чаще
+            int cooldownDays = buffId == BuffIds.Social ? 7 : 1;
+            
             // Проверяем через StateService, можно ли выдать бафф
-            if (!_stateService.CanIssueBuff(buffId, cooldownDays: 1))
+            if (!_stateService.CanIssueBuff(buffId, cooldownDays: cooldownDays))
             {
-                _monitor.Log($"[ApplyStressBuff] Дебафф {buffId} нельзя выдать (активен или на кулдауне)", LogLevel.Debug);
+                _monitor.Log($"[ApplyStressBuff] Дебафф {buffId} нельзя выдать (активен или на кулдауне {cooldownDays} дней)", LogLevel.Debug);
                 return;
             }
 
@@ -103,9 +117,42 @@ namespace HarveyStressMeter.Services
         {
             _monitor.Log($"[StartTreatment] Попытка начать лечение для {buffId} ({displayName})", LogLevel.Debug);
 
-            if (!BuffToQuest.TryGetValue(buffId, out var questId))
+            // ⭐ НОВОЕ: Получаем данные квеста из GameDataService
+            string? questId = null;
+            QuestData? questData = null;
+            
+            if (_gameDataService != null)
             {
-                _monitor.Log($"[StartTreatment] ОШИБКА: Не найден ID квеста для баффа {buffId}", LogLevel.Error);
+                // Пробуем получить квест из новой системы
+                var quests = _gameDataService.GetQuestsForBuff(buffId);
+                questData = quests.FirstOrDefault();
+                
+                if (questData != null)
+                {
+                    questId = questData.Id;
+                    _monitor.Log($"[StartTreatment] ✅ Квест найден через GameDataService: {questId}", LogLevel.Debug);
+                }
+                else if (BuffToQuest.TryGetValue(buffId, out var fallbackQuestId))
+                {
+                    questId = fallbackQuestId;
+                    _monitor.Log($"[StartTreatment] Квест найден через BuffToQuest (fallback): {questId}", LogLevel.Debug);
+                }
+                else
+                {
+                    _monitor.Log($"[StartTreatment] ОШИБКА: Не найден ID квеста для баффа {buffId}", LogLevel.Error);
+                    return;
+                }
+            }
+            else if (!BuffToQuest.TryGetValue(buffId, out questId))
+            {
+                _monitor.Log($"[StartTreatment] ОШИБКА: Не найден ID квеста для баффа {buffId} (GameDataService не установлен)", LogLevel.Error);
+                return;
+            }
+            
+            // Проверка что questId не null
+            if (questId == null)
+            {
+                _monitor.Log($"[StartTreatment] ОШИБКА: questId оказался null для баффа {buffId}", LogLevel.Error);
                 return;
             }
 
@@ -183,6 +230,21 @@ namespace HarveyStressMeter.Services
                 _monitor.Log($"[StartTreatment] ❌ КРИТИЧЕСКАЯ ОШИБКА: Квест '{questId}' не добавлен в журнал!", LogLevel.Error);
             }
 
+            // ⭐ НОВОЕ: Отправляем письмо о начале лечения
+            if (_gameDataService != null)
+            {
+                var mailData = _gameDataService.GetMailForBuff(buffId);
+                if (mailData != null)
+                {
+                    _questService.AddMailForTomorrow(mailData.Id);
+                    _monitor.Log($"[StartTreatment] ✅ Письмо '{mailData.Id}' добавлено на завтра", LogLevel.Info);
+                }
+                else
+                {
+                    _monitor.Log($"[StartTreatment] ⚠️ Письмо для {buffId} не найдено в GameDataService", LogLevel.Warn);
+                }
+            }
+
             // ⭐ УЛУЧШЕНО: Инициализируем прогресс для нового лечения
             if (buffId == BuffIds.Social)
             {
@@ -250,6 +312,16 @@ namespace HarveyStressMeter.Services
                 latestTreatment.CompletedDate = SDate.Now();
             }
 
+            // ⭐ НОВОЕ: Удаляем топик стресса при завершении лечения
+            if (BuffToStressTopic.TryGetValue(buffId, out var stressTopic))
+            {
+                if (ConversationHelper.HasTopic(stressTopic.topic))
+                {
+                    ConversationHelper.RemoveTopic(stressTopic.topic);
+                    _monitor.Log($"[CompleteTreatment] Удален топик {stressTopic.topic} после завершения лечения", LogLevel.Debug);
+                }
+            }
+
             // Удаляем из активных баффов и квестов через StateService
             if (BuffToQuest.TryGetValue(buffId, out var questId))
             {
@@ -259,6 +331,15 @@ namespace HarveyStressMeter.Services
             {
                 // Если нет квеста, просто удаляем бафф
                 _buffService.RemoveBuff(buffId);
+            }
+
+            // ⭐ НОВОЕ: Применяем индивидуальный иммунитет после завершения лечения
+            // Используем запись в состоянии вместо баффа
+            int immunityDays = GetImmunityDaysForDebuff(buffId);
+            if (immunityDays > 0)
+            {
+                _stateService.SetImmunity(buffId, immunityDays);
+                _monitor.Log($"[CompleteTreatment] ✅ Установлен индивидуальный иммунитет на {immunityDays} дней после лечения {buffId}", LogLevel.Info);
             }
 
             Game1.playSound("discoverMineral");
@@ -282,8 +363,19 @@ namespace HarveyStressMeter.Services
             if (!_stateService.HasActiveBuffInGame(buffId))
                 return;
 
-            if (BuffToStressTopic.TryGetValue(buffId, out var topic) && !ConversationHelper.HasTopic(topic.topic))
+            if (BuffToStressTopic.TryGetValue(buffId, out var topic))
+            {
+                // ⭐ ИСПРАВЛЕНО: Обновляем топик даже если он уже есть (для повторного применения баффа)
+                // Это решает проблему, когда после первого лечения топик не удалился полностью
+                if (ConversationHelper.HasTopic(topic.topic))
+                {
+                    ConversationHelper.RemoveTopic(topic.topic);
+                    _monitor.Log($"[AddTopicForBuff] Удален старый топик {topic.topic} для повторного применения баффа {buffId}", LogLevel.Debug);
+                }
+                
                 ConversationHelper.AddTopic(topic.topic, topic.days);
+                _monitor.Log($"[AddTopicForBuff] Добавлен топик {topic.topic} для баффа {buffId} ({topic.days} дней)", LogLevel.Debug);
+            }
         }
 
         public void EnsureLockedBuffsPersist()
@@ -292,7 +384,10 @@ namespace HarveyStressMeter.Services
             {
                 if (!treatment.IsCured && !_stateService.HasActiveBuffInGame(treatment.BuffId))
                 {
-                    _buffService.ApplyBuffFromData(treatment.BuffId);
+                    if (!_buffService.ApplyBuffFromData(treatment.BuffId))
+                    {
+                        _monitor.Log($"[EnsureLockedBuffsPersist] ⚠️ Не удалось восстановить бафф '{treatment.BuffId}' для лечения {treatmentKey}", LogLevel.Warn);
+                    }
                     AddTopicForBuff(treatment.BuffId);
                 }
             }
@@ -336,9 +431,15 @@ namespace HarveyStressMeter.Services
                 // Восстанавливаем бафф если потерялся
                 if (!_stateService.HasActiveBuffInGame(buffId))
                 {
-                    _buffService.ApplyBuffFromData(buffId);
-                    restoredCount++;
-                    _monitor.Log($"[SyncQuestsAndBuffs] Восстановлен дебафф {buffId} для лечения {treatmentKey}", LogLevel.Info);
+                    if (_buffService.ApplyBuffFromData(buffId))
+                    {
+                        restoredCount++;
+                        _monitor.Log($"[SyncQuestsAndBuffs] Восстановлен дебафф {buffId} для лечения {treatmentKey}", LogLevel.Info);
+                    }
+                    else
+                    {
+                        _monitor.Log($"[SyncQuestsAndBuffs] ⚠️ Не удалось восстановить дебафф {buffId} для лечения {treatmentKey}", LogLevel.Warn);
+                    }
                 }
 
                 // Гарантируем наличие прогресса
@@ -418,6 +519,54 @@ namespace HarveyStressMeter.Services
                 _monitor.Log($"[CleanupOldStressTopics] Удалено старых топиков: {removedCount}", LogLevel.Info);
         }
 
+        /// <summary>
+        /// ⭐ НОВОЕ: Восстанавливает потерянные баффы для активных лечений
+        /// Используется только при ручном вызове через консольную команду
+        /// </summary>
+        public int RestoreMissingBuffsForActiveTreatments()
+        {
+            int restoredCount = 0;
+
+            _monitor.Log("[RestoreMissingBuffs] Проверка активных лечений...", LogLevel.Info);
+
+            foreach (var (treatmentKey, treatment) in _data.StressState.ActiveTreatments)
+            {
+                // Пропускаем завершенные лечения
+                if (treatment.IsCured || treatment.IsCompleted)
+                {
+                    _monitor.Log($"[RestoreMissingBuffs] Пропускаем завершенное лечение: {treatmentKey}", LogLevel.Debug);
+                    continue;
+                }
+
+                var buffId = treatment.BuffId;
+
+                // Проверяем, есть ли бафф в игре
+                if (!_stateService.HasActiveBuffInGame(buffId))
+                {
+                    _monitor.Log($"[RestoreMissingBuffs] Восстанавливаем потерянный бафф '{buffId}' для лечения {treatmentKey}", LogLevel.Info);
+                    if (_buffService.ApplyBuffFromData(buffId))
+                    {
+                        restoredCount++;
+                    }
+                    else
+                    {
+                        _monitor.Log($"[RestoreMissingBuffs] ⚠️ Не удалось восстановить бафф '{buffId}' для лечения {treatmentKey}", LogLevel.Warn);
+                    }
+                }
+            }
+
+            if (restoredCount == 0)
+            {
+                _monitor.Log("[RestoreMissingBuffs] Все баффы на месте, восстановление не требуется", LogLevel.Info);
+            }
+            else
+            {
+                _monitor.Log($"[RestoreMissingBuffs] ✅ Восстановлено баффов: {restoredCount}", LogLevel.Info);
+            }
+
+            return restoredCount;
+        }
+
         public void RestoreActiveStressBuffs()
         {
             foreach (var (buffId, historyList) in _data.StressState.TreatmentHistory)
@@ -441,7 +590,10 @@ namespace HarveyStressMeter.Services
                 // Восстанавливаем бафф если его нет
                 if (!_stateService.HasActiveBuffInGame(buffId))
                 {
-                    _buffService.ApplyBuffFromData(buffId);
+                    if (!_buffService.ApplyBuffFromData(buffId))
+                    {
+                        _monitor.Log($"[RestoreActiveStressBuffs] ⚠️ Не удалось восстановить бафф '{buffId}' для лечения {treatment.TreatmentKey}", LogLevel.Warn);
+                    }
                 }
 
                 // Восстанавливаем топик если лечение не начато
@@ -466,6 +618,19 @@ namespace HarveyStressMeter.Services
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Получает количество дней иммунитета для дебаффа после лечения
+        /// </summary>
+        private int GetImmunityDaysForDebuff(string buffId)
+        {
+            // Social имеет иммунитет на 3 дня после лечения
+            if (buffId == BuffIds.Social)
+                return 3;
+            
+            // Остальные дебаффы не имеют иммунитета (достаточно кулдауна)
+            return 0;
         }
 
         public void CleanupOrphanedTreatmentTopics()

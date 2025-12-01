@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using StardewModdingAPI;
 using StardewModdingAPI.Utilities;
 using StardewValley;
@@ -91,6 +92,13 @@ namespace HarveyStressMeter.Handlers
                 _monitor.Log("✅ Восстановление квестов из топиков завершено.", LogLevel.Info);
             });
 
+            // ⭐ НОВОЕ: Команда для ручного восстановления баффов активных лечений
+            _helper.ConsoleCommands.Add("hs.restore-buffs", "Восстановить потерянные дебаффы для активных лечений (если баффы исчезли).", (_, __) =>
+            {
+                int restoredCount = _treatmentService.RestoreMissingBuffsForActiveTreatments();
+                _monitor.Log($"✅ Восстановлено {restoredCount} потерянных баффов.", LogLevel.Info);
+            });
+
             _helper.ConsoleCommands.Add("hs.restore-all", "Выполнить полное восстановление: дебаффы, квесты из истории и из топиков.", (_, __) =>
             {
                 _monitor.Log("🔄 Начало полного восстановления...", LogLevel.Info);
@@ -135,6 +143,86 @@ namespace HarveyStressMeter.Handlers
                 _monitor.Log($"  ✓ Синхронизация завершена (лечений: {before} → {after})", LogLevel.Info);
 
                 _monitor.Log("✅ Комплексная очистка завершена.", LogLevel.Info);
+            });
+
+            _helper.ConsoleCommands.Add("hs.emergency-reset", "🚨 АВАРИЙНЫЙ СБРОС: Удалить ВСЕ баффы, топики, лечения и квесты стресса.", (_, __) =>
+            {
+                _monitor.Log("🚨 ================================", LogLevel.Warn);
+                _monitor.Log("🚨 АВАРИЙНЫЙ СБРОС НАЧАТ", LogLevel.Warn);
+                _monitor.Log("🚨 ================================", LogLevel.Warn);
+
+                // 1. Удаляем все стрессовые баффы
+                var stressBuffIds = new[] { 
+                    "buffStressSocial",
+                    "buffStressTired", "buffStressThunder", "buffStressTooCold", 
+                    "buffStressOverwork", "buffStressDarkness", "buffDarknessLevel1", "buffDarknessLevel2", "buffDarknessLevel3",
+                    "buffStressLonely", "buffStressHunger", "buffStressNoSleep",
+                    "buffImmunity", "buffCareAura", "buffRestingAtHome", "buffDimLight", 
+                    "buffOverworkBreak", "buffThunderCalming", "buffLightAndSafe"
+                };
+                
+                int removedBuffs = 0;
+                foreach (var buffId in stressBuffIds)
+                {
+                    if (Game1.player.hasBuff(buffId))
+                    {
+                        Game1.player.buffs.Remove(buffId);
+                        removedBuffs++;
+                    }
+                }
+                _monitor.Log($"  ✓ Удалено баффов: {removedBuffs}", LogLevel.Info);
+
+                // 2. Удаляем все квесты стресса
+                var questIds = new[] {
+                    "HarveyMod_SocialRecovery", "HarveyMod_RestAndRecovery", "HarveyMod_ThunderTherapy",
+                    "HarveyMod_WarmthTherapy", "HarveyMod_OverworkBreaks", "HarveyMod_DarknessStep1",
+                    "HarveyMod_DarknessStep2", "HarveyMod_NoSleepTherapy", "HarveyMod_LonelyTherapy",
+                    "HarveyMod_HungerTherapy"
+                };
+
+                int removedQuests = 0;
+                foreach (var questId in questIds)
+                {
+                    var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == questId);
+                    if (quest != null)
+                    {
+                        Game1.player.questLog.Remove(quest);
+                        removedQuests++;
+                    }
+                }
+                _monitor.Log($"  ✓ Удалено квестов: {removedQuests}", LogLevel.Info);
+
+                // 3. Очищаем все топики стресса
+                var topicPrefixes = new[] { "topic", "Stress", "Treatment", "Harvey" };
+                int removedTopics = 0;
+                var topicsToRemove = Game1.player.activeDialogueEvents.Keys
+                    .Where(k => topicPrefixes.Any(p => k.Contains(p)))
+                    .ToList();
+                
+                foreach (var topic in topicsToRemove)
+                {
+                    Game1.player.activeDialogueEvents.Remove(topic);
+                    removedTopics++;
+                }
+                _monitor.Log($"  ✓ Удалено топиков: {removedTopics}", LogLevel.Info);
+
+                // 4. Очищаем состояние мода
+                _data.StressState.ActiveTreatments.Clear();
+                _data.TalkedNpcsToday.Clear();
+                _data.DaysWithoutTalking = 0;
+                _data.DaysWithoutEating = 0;
+                _data.DaysWithLateSleep = 0;
+                _data.OverworkBreaksToday = 0;
+                _data.OverworkBreakSeconds = 0;
+                _data.OverworkBreakActive = false;
+                _data.Darkness = new DarknessProgress();
+                _monitor.Log($"  ✓ Состояние мода очищено", LogLevel.Info);
+
+                _monitor.Log("🚨 ================================", LogLevel.Warn);
+                _monitor.Log("✅ АВАРИЙНЫЙ СБРОС ЗАВЕРШЕН", LogLevel.Warn);
+                _monitor.Log("🚨 ================================", LogLevel.Warn);
+                _monitor.Log("ℹ️  Все стрессовые дебаффы, квесты, топики и лечения удалены.", LogLevel.Info);
+                _monitor.Log("ℹ️  Игра вернулась в начальное состояние.", LogLevel.Info);
             });
         }
 

@@ -23,8 +23,7 @@ namespace HarveyStressMeter.Handlers
         private readonly StateService _stateService;
         private readonly GameLogicHandler _gameLogicHandler;
         private readonly UIHandler _uiHandler;
-
-        private float _prevStamina;
+        private readonly DarknessService _darknessService;
 
         public EventHandler(
             IMonitor monitor,
@@ -32,7 +31,8 @@ namespace HarveyStressMeter.Handlers
             SaveData data,
             StateService stateService,
             GameLogicHandler gameLogicHandler,
-            UIHandler uiHandler)
+            UIHandler uiHandler,
+            DarknessService darknessService)
         {
             _monitor = monitor;
             _helper = helper;
@@ -40,6 +40,7 @@ namespace HarveyStressMeter.Handlers
             _stateService = stateService;
             _gameLogicHandler = gameLogicHandler;
             _uiHandler = uiHandler;
+            _darknessService = darknessService;
         }
 
         public void SubscribeToEvents()
@@ -79,10 +80,20 @@ namespace HarveyStressMeter.Handlers
         private void OnDayStarted(object? s, DayStartedEventArgs e)
         {
             _monitor.Log("[OnDayStarted] Starting new day", LogLevel.Debug);
-
-            _prevStamina = Game1.player.Stamina;
+            
             _gameLogicHandler.ResetDailyData();
+            
+            // ⭐ ОПТИМИЗАЦИЯ: Сбрасываем счетчики оптимизации
+            _gameLogicHandler.ResetOptimizationCounters();
+            
+            // ⭐ НОВОЕ: Очищаем истекшие иммунитеты
+            _stateService.CleanupExpiredImmunities();
+            
             _stateService.SyncWithGame();
+            
+            // ⭐ НОВОЕ: Восстанавливаем бафф страха темноты если он был активен
+            _darknessService.RestoreFearBuff();
+            
             _gameLogicHandler.CheckDayStartedStressTriggers();
 
             _monitor.Log($"[OnDayStarted] New day initialized: active treatments={_data.StressState.ActiveTreatments.Count}", LogLevel.Info);
@@ -91,12 +102,15 @@ namespace HarveyStressMeter.Handlers
         private void OnDayEnding(object? s, DayEndingEventArgs e)
         {
             _gameLogicHandler.CheckDayEndingQuestCompletion();
+            _gameLogicHandler.CheckLateSleepPattern();  // ⭐ НОВОЕ: Отслеживание позднего сна
             SaveData();
         }
 
         private void OnUpdateTicked(object? s, UpdateTickedEventArgs e)
         {
             if (!Context.IsWorldReady) return;
+
+            // ⭐ НОВОЕ: Harmony патч обрабатывает еду, больше не нужна проверка isEating
 
             if (e.IsMultipleOf(60))
             {
@@ -123,6 +137,9 @@ namespace HarveyStressMeter.Handlers
         private void OnButtonPressed(object? s, ButtonPressedEventArgs e)
         {
             _uiHandler.HandleButtonPressed(e);
+            
+            // ⭐ УДАЛЕНО: Больше не нужна проверка еды через ButtonPressed
+            // Harmony патч обрабатывает это автоматически
         }
 
         private void OnButtonsChanged(object? s, ButtonsChangedEventArgs e)

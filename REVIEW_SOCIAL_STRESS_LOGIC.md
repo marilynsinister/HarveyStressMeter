@@ -43,7 +43,7 @@ private void CheckSocialStressTrigger(NPC npc)
 **Статус:** ✅ **Корректно работает**
 
 **Проверенные компоненты:**
-- Генерация уникального ключа лечения (`buffStressSocial_1`, `buffStressSocial_2`, etc.)
+- Генерация уникального ключа лечения (`buffStressSocial`)
 - Создание `TreatmentState` с уникальным ключом
 - Добавление в `ActiveTreatments` и `ActiveTreatmentsByBuff`
 - Инициализация прогресса для Social квеста
@@ -208,14 +208,13 @@ _data.StressState.RemoveTreatment(treatmentKey);
 ```csharp
 // Основная коллекция: TreatmentKey -> TreatmentState
 Dictionary<string, TreatmentState> ActiveTreatments = {
-    "buffStressSocial_1" -> TreatmentState { BuffId = "buffStressSocial", InstanceNumber = 1, ... },
-    "buffStressSocial_2" -> TreatmentState { BuffId = "buffStressSocial", InstanceNumber = 2, ... },
-    "buffStressTired_1" -> TreatmentState { BuffId = "buffStressTired", InstanceNumber = 1, ... }
+    "buffStressSocial" -> TreatmentState { BuffId = "buffStressSocial", InstanceNumber = 1, ... },
+   
 }
 
 // Индекс по типу баффа: BuffId -> List<TreatmentKey>
 Dictionary<string, List<string>> ActiveTreatmentsByBuff = {
-    "buffStressSocial" -> ["buffStressSocial_1", "buffStressSocial_2"],
+    "buffStressSocial" -> ["buffStressSocial"],
     "buffStressTired" -> ["buffStressTired_1"]
 }
 ```

@@ -125,7 +125,13 @@ namespace HarveyStressMeter.Services
             _data.StressState.LastIssuedDay[buffId] = SDate.Now();
 
             // Применяем бафф в игре
-            _buffService.ApplyBuffFromData(buffId);
+            bool buffApplied = _buffService.ApplyBuffFromData(buffId);
+            
+            if (!buffApplied)
+            {
+                _monitor.Log($"[StateService] ❌ Не удалось применить дебафф '{buffId}'. Лечение создано, но бафф не применен в игре.", LogLevel.Error);
+                return;
+            }
 
             _monitor.Log($"[StateService] ✅ Применен дебафф '{buffId}': {description}", LogLevel.Info);
         }
@@ -238,16 +244,17 @@ namespace HarveyStressMeter.Services
         /// </summary>
         public void UpdateProgress(string questId, Action<TreatmentProgress> updateAction)
         {
+            // ⭐ ИСПРАВЛЕНО: Изменен уровень лога на Trace чтобы не спамить
             if (!_data.StressState.HasActiveQuest(questId))
             {
-                _monitor.Log($"[StateService.UpdateProgress] ⚠️ Квест '{questId}' не активен", LogLevel.Warn);
+                _monitor.Log($"[StateService.UpdateProgress] Квест '{questId}' не активен", LogLevel.Trace);
                 return;
             }
 
             var treatment = _data.StressState.GetActiveTreatmentByQuest(questId);
             if (treatment == null)
             {
-                _monitor.Log($"[StateService.UpdateProgress] ⚠️ Лечение для квеста '{questId}' не найдено", LogLevel.Warn);
+                _monitor.Log($"[StateService.UpdateProgress] Лечение для квеста '{questId}' не найдено", LogLevel.Trace);
                 return;
             }
 
@@ -345,38 +352,79 @@ namespace HarveyStressMeter.Services
 
             _monitor.Log($"[StateService] Бафф активен ПОСЛЕ снятия: {_buffService.HasBuff(buffId)}", LogLevel.Info);
 
-            // Удаляем из активных
-            _data.StressState.ActiveTreatments.Remove(buffId);
+            // ⭐ ИСПРАВЛЕНО: Удаляем из активных по правильному ключу (TreatmentKey, а не buffId)
+            bool removed = _data.StressState.RemoveTreatment(treatment.TreatmentKey);
+            if (removed)
+            {
+                _monitor.Log($"[StateService] ✅ Лечение удалено из ActiveTreatments: {treatment.TreatmentKey}", LogLevel.Info);
+            }
+            else
+            {
+                _monitor.Log($"[StateService] ⚠️ Не удалось удалить лечение {treatment.TreatmentKey} из ActiveTreatments", LogLevel.Warn);
+            }
 
             _monitor.Log($"[StateService] ✅ Лечение завершено: квест='{questId}', бафф='{buffId}'", LogLevel.Info);
         }
 
         /// <summary>
-        /// Синхронизирует состояние с игрой
+        /// ⭐ ИСПРАВЛЕНО: Синхронизирует состояние с игрой
+        /// - Очищает завершенные лечения
+        /// - Восстанавливает потерянные баффы для АКТИВНЫХ лечений
         /// </summary>
         public void SyncWithGame()
         {
-            foreach (var (buffId, treatment) in _data.StressState.ActiveTreatments.ToList())
+            int cleanedCount = 0;
+            int restoredCount = 0;
+
+            foreach (var (treatmentKey, treatment) in _data.StressState.ActiveTreatments.ToList())
             {
                 var questId = treatment.QuestId;
+                var buffId = treatment.BuffId;
 
-                // Если квест завершен - завершаем лечение
+                // ⭐ ИСПРАВЛЕНО: Сначала очищаем завершенные лечения
+                if (treatment.IsCured || treatment.IsCompleted)
+                {
+                    _data.StressState.RemoveTreatment(treatmentKey);
+                    cleanedCount++;
+                    _monitor.Log($"[StateService] Очищено завершенное лечение: {treatmentKey}", LogLevel.Debug);
+                    continue;
+                }
+
+                // Если квест завершен в игре - завершаем лечение
                 if (!string.IsNullOrEmpty(questId) && _questService.HasQuest(questId))
                 {
                     var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == questId);
                     if (quest?.completed.Value == true)
                     {
                         CompleteTreatment(questId);
+                        cleanedCount++;
                         continue;
                     }
                 }
 
-                // Восстанавливаем бафф если он пропал
+                // ⭐ ИСПРАВЛЕНО: Восстанавливаем баффы ТОЛЬКО для активных (незавершенных) лечений
                 if (!_buffService.HasBuff(buffId))
                 {
-                    _monitor.Log($"[StateService] Восстанавливаем бафф '{buffId}' для квеста '{questId}'", LogLevel.Debug);
-                    _buffService.ApplyBuffFromData(buffId);
+                    _monitor.Log($"[StateService] 🔄 Восстанавливаем потерянный бафф '{buffId}' для активного лечения {treatmentKey}", LogLevel.Info);
+                    if (_buffService.ApplyBuffFromData(buffId))
+                    {
+                        restoredCount++;
+                    }
+                    else
+                    {
+                        _monitor.Log($"[StateService] ⚠️ Не удалось восстановить бафф '{buffId}' для лечения {treatmentKey}", LogLevel.Warn);
+                    }
                 }
+            }
+
+            if (cleanedCount > 0)
+            {
+                _monitor.Log($"[StateService] SyncWithGame: очищено {cleanedCount} завершенных лечений", LogLevel.Info);
+            }
+            
+            if (restoredCount > 0)
+            {
+                _monitor.Log($"[StateService] SyncWithGame: восстановлено {restoredCount} потерянных баффов", LogLevel.Info);
             }
         }
 
@@ -389,6 +437,13 @@ namespace HarveyStressMeter.Services
             return treatment?.Progress;
         }
 
+        /// <summary>
+        /// ⭐ НОВОЕ: Получает активное лечение для баффа
+        /// </summary>
+        public TreatmentState? GetActiveTreatment(string buffId)
+        {
+            return _data.StressState.GetActiveTreatment(buffId);
+        }
 
         /// <summary>
         /// Проверяет существование квеста в журнале
@@ -399,13 +454,21 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// Проверяет, можно ли выдать бафф (с учетом кулдауна)
+        /// Проверяет, можно ли выдать бафф (с учетом кулдауна и иммунитета)
         /// </summary>
         public bool CanIssueBuff(string buffId, int cooldownDays = 7)
         {
             // Есть ли уже активный бафф
             if (_data.StressState.HasActiveBuff(buffId))
                 return false;
+
+            // ⭐ НОВОЕ: Проверяем индивидуальный иммунитет
+            if (_data.StressState.HasImmunity(buffId))
+            {
+                var endDate = _data.StressState.GetImmunityEndDate(buffId);
+                _monitor.Log($"[StateService] Бафф '{buffId}' заблокирован иммунитетом до {endDate}", LogLevel.Debug);
+                return false;
+            }
 
             // Проверяем кулдаун
             if (_data.StressState.LastIssuedDay.TryGetValue(buffId, out var lastIssued))
@@ -459,6 +522,42 @@ namespace HarveyStressMeter.Services
         public bool IsTreatmentLocked(string buffId)
         {
             return _data.StressState.IsTreatmentLocked(buffId);
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Проверяет, есть ли иммунитет для дебаффа
+        /// </summary>
+        public bool HasImmunity(string buffId)
+        {
+            return _data.StressState.HasImmunity(buffId);
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Устанавливает иммунитет для дебаффа на указанное количество дней
+        /// </summary>
+        public void SetImmunity(string buffId, int days)
+        {
+            _data.StressState.SetImmunity(buffId, days);
+            var endDate = _data.StressState.GetImmunityEndDate(buffId);
+            _monitor.Log($"[StateService] ✅ Установлен иммунитет для '{buffId}' на {days} дней (до {endDate})", LogLevel.Info);
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Удаляет иммунитет для дебаффа
+        /// </summary>
+        public void RemoveImmunity(string buffId)
+        {
+            _data.StressState.RemoveImmunity(buffId);
+            _monitor.Log($"[StateService] Иммунитет для '{buffId}' удален", LogLevel.Debug);
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Очищает истекшие иммунитеты
+        /// Вызывается каждый день
+        /// </summary>
+        public void CleanupExpiredImmunities()
+        {
+            _data.StressState.CleanupExpiredImmunities();
         }
     }
 }

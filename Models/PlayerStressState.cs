@@ -40,6 +40,13 @@ namespace HarveyStressMeter.Models
         public TreatmentFlags TreatmentFlags { get; set; } = new();
 
         /// <summary>
+        /// ⭐ НОВОЕ: Индивидуальные иммунитеты для каждого дебаффа
+        /// BuffId -> дата окончания иммунитета (SDate)
+        /// Иммунитет предотвращает повторное применение дебаффа до указанной даты
+        /// </summary>
+        public Dictionary<string, SDate> DebuffImmunities { get; set; } = new();
+
+        /// <summary>
         /// ⭐ УЛУЧШЕНО: Проверяет, есть ли активный дебафф (поддерживает множественные лечения)
         /// </summary>
         public bool HasActiveBuff(string buffId)
@@ -291,6 +298,63 @@ namespace HarveyStressMeter.Models
                 "HarveyMod_Tired", "HarveyMod_Lonely", "HarveyMod_Thunder", "HarveyMod_Hunger",
                 "HarveyMod_Overwork", "HarveyMod_NoSleep", "HarveyMod_TooCold", "HarveyMod_Social", "HarveyMod_Darkness"
             };
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Проверяет, есть ли активный иммунитет для дебаффа
+        /// </summary>
+        public bool HasImmunity(string buffId)
+        {
+            if (!DebuffImmunities.TryGetValue(buffId, out var immunityEndDate))
+                return false;
+
+            var today = SDate.Now();
+            // Иммунитет активен, если сегодняшняя дата меньше или равна дате окончания
+            return today.DaysSinceStart <= immunityEndDate.DaysSinceStart;
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Устанавливает иммунитет для дебаффа на указанное количество дней
+        /// </summary>
+        public void SetImmunity(string buffId, int days)
+        {
+            var today = SDate.Now();
+            var endDate = today.AddDays(days);
+            DebuffImmunities[buffId] = endDate;
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Удаляет иммунитет для дебаффа (если есть)
+        /// </summary>
+        public void RemoveImmunity(string buffId)
+        {
+            DebuffImmunities.Remove(buffId);
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Очищает истекшие иммунитеты
+        /// Вызывается каждый день для очистки устаревших записей
+        /// </summary>
+        public void CleanupExpiredImmunities()
+        {
+            var today = SDate.Now();
+            var expiredKeys = DebuffImmunities
+                .Where(kvp => today.DaysSinceStart > kvp.Value.DaysSinceStart)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in expiredKeys)
+            {
+                DebuffImmunities.Remove(key);
+            }
+        }
+
+        /// <summary>
+        /// ⭐ НОВОЕ: Получает дату окончания иммунитета (если есть)
+        /// </summary>
+        public SDate? GetImmunityEndDate(string buffId)
+        {
+            return DebuffImmunities.TryGetValue(buffId, out var endDate) ? endDate : null;
         }
     }
 }

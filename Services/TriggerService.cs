@@ -119,6 +119,10 @@ namespace HarveyStressMeter.Services
         {
             foreach (var treatment in _data.StressState.ActiveTreatments.Values)
             {
+                // ⭐ ИСПРАВЛЕНО: Пропускаем завершенные лечения
+                if (treatment.IsCured || treatment.IsCompleted)
+                    continue;
+
                 if (treatment.Progress == null || string.IsNullOrEmpty(treatment.QuestId))
                     continue;
 
@@ -181,17 +185,21 @@ namespace HarveyStressMeter.Services
 
         private void UpdateSocialAnxietyProgress(TreatmentProgress progress, bool harveyNearby)
         {
-            // Обновляем время с Харви (возвращает true если были изменения)
-            bool timeChanged = UpdateHarveyTimeProgress(progress, harveyNearby);
-
-            // Отладка: логируем только при изменении времени (не каждую секунду)
-            if (timeChanged)
+            // ⭐ ИСПРАВЛЕНО: Обновляем время с Харви ТОЛЬКО если квест Social активен
+            if (_stateService.HasQuestInJournal(QuestIds.Social))
             {
-                //_monitor.Log($"[SocialAnxiety] Прогресс: время с Харви={progress.SecondsNearHarvey} сек, разговоров={progress.SocialTalksAfterQuest}", LogLevel.Debug);
-            }
+                // Обновляем время с Харви (возвращает true если были изменения)
+                bool timeChanged = UpdateHarveyTimeProgress(progress, harveyNearby);
 
-            // ⭐ ИСПРАВЛЕНО: Проверяем завершение квеста каждый раз (CheckQuestCompletion сам проверит условия)
-            CheckQuestCompletion(progress);
+                // Отладка: логируем только при изменении времени (не каждую секунду)
+                if (timeChanged)
+                {
+                    //_monitor.Log($"[SocialAnxiety] Прогресс: время с Харви={progress.SecondsNearHarvey} сек, разговоров={progress.SocialTalksAfterQuest}", LogLevel.Debug);
+                }
+
+                // ⭐ ИСПРАВЛЕНО: Проверяем завершение квеста каждый раз (CheckQuestCompletion сам проверит условия)
+                CheckQuestCompletion(progress);
+            }
         }
 
         /// <summary>
@@ -207,22 +215,18 @@ namespace HarveyStressMeter.Services
             switch (progress.SecondsNearHarvey)
             {
                 case 15:
-                    _monitor.Log($"[SocialAnxiety] Достигнуто 15 сек с Харви", LogLevel.Debug);
                     Game1.addHUDMessage(new HUDMessage("Время с Харви: 15/60 сек", HUDMessage.newQuest_type));
                     UpdateQuestDescription(progress);
                     return true;
                 case 30:
-                    _monitor.Log($"[SocialAnxiety] Достигнуто 30 сек с Харви", LogLevel.Debug);
                     Game1.addHUDMessage(new HUDMessage("Время с Харви: 30/60 сек", HUDMessage.newQuest_type));
                     UpdateQuestDescription(progress);
                     return true;
                 case 45:
-                    _monitor.Log($"[SocialAnxiety] Достигнуто 45 сек с Харви", LogLevel.Debug);
                     Game1.addHUDMessage(new HUDMessage("Время с Харви: 45/60 сек", HUDMessage.newQuest_type));
                     UpdateQuestDescription(progress);
                     return true;
                 case 60:
-                    _monitor.Log($"[SocialAnxiety] Достигнуто 60 сек с Харви - лечение времени завершено", LogLevel.Debug);
                     Game1.addHUDMessage(new HUDMessage("✅ Время с Харви: 60/60 сек!", HUDMessage.achievement_type));
                     UpdateQuestDescription(progress);
                     return true;

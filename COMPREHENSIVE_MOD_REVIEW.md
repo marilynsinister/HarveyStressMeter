@@ -232,15 +232,13 @@ _data.StressState.AddTreatment(treatment);
 ```csharp
 // Основная коллекция: TreatmentKey -> TreatmentState
 Dictionary<string, TreatmentState> ActiveTreatments = {
-    "buffStressSocial_1" -> TreatmentState { BuffId = "buffStressSocial", InstanceNumber = 1, ... },
-    "buffStressSocial_2" -> TreatmentState { BuffId = "buffStressSocial", InstanceNumber = 2, ... },
-    "buffStressTired_1" -> TreatmentState { BuffId = "buffStressTired", InstanceNumber = 1, ... }
+    "buffStressSocial" -> TreatmentState { BuffId = "buffStressSocial", InstanceNumber = 1, ... },
 }
 
 // Индекс по типу баффа: BuffId -> List<TreatmentKey>
 Dictionary<string, List<string>> ActiveTreatmentsByBuff = {
-    "buffStressSocial" -> ["buffStressSocial_1", "buffStressSocial_2"],
-    "buffStressTired" -> ["buffStressTired_1"]
+    "buffStressSocial" -> ["buffStressSocial"],
+    "buffStressTired" -> ["buffStressTired"]
 }
 ```
 

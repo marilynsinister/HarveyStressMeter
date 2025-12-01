@@ -1,10 +1,12 @@
 using System;
 using StardewModdingAPI;
 using StardewModdingAPI.Utilities;
+using HarmonyLib;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Services;
 using HarveyStressMeter.Handlers;
 using HarveyStressMeter.Helpers;
+using HarveyStressMeter.Patches;
 
 namespace HarveyStressMeter
 {
@@ -25,6 +27,9 @@ namespace HarveyStressMeter
         private StateService _stateService = null!;
         private TreatmentService _treatmentService = null!;
         private TriggerService _triggerService = null!;
+        private DarknessService _darknessService = null!;
+        private StressDialogueService _stressDialogueService = null!;
+        private GameDataService _gameDataService = null!;
 
         // Handlers (following SRP)
         private Handlers.EventHandler _eventHandler = null!;
@@ -37,6 +42,9 @@ namespace HarveyStressMeter
         {
             _helper = helper;
             _config = helper.ReadConfig<ModConfig>();
+
+            // ⭐ НОВОЕ: Инициализация Harmony для патчей
+            InitializeHarmony();
 
             // Initialize services (following DIP - depend on abstractions)
             InitializeServices();
@@ -51,26 +59,63 @@ namespace HarveyStressMeter
             _consoleCommandHandler.RegisterCommands();
         }
 
+        /// <summary>
+        /// ⭐ НОВОЕ: Инициализирует Harmony патчи для отслеживания игровых событий
+        /// </summary>
+        private void InitializeHarmony()
+        {
+            try
+            {
+                var harmony = new Harmony(ModManifest.UniqueID);
+                
+                // Инициализируем патч для отслеживания еды
+                // Callback будет установлен позже после создания GameLogicHandler
+                FoodConsumptionPatch.Initialize(Monitor, () => { });
+                
+                // Применяем все патчи
+                harmony.PatchAll();
+                
+                Monitor.Log("✅ Harmony патчи успешно применены", LogLevel.Info);
+            }
+            catch (Exception ex)
+            {
+                Monitor.Log($"❌ Ошибка при применении Harmony патчей: {ex.Message}\n{ex.StackTrace}", LogLevel.Error);
+            }
+        }
+
         private void InitializeServices()
         {
             // Initialize helpers
             ConversationHelper.Initialize(Monitor);
 
             // Create services (low-level modules)
-            _buffService = new BuffService();
+            _buffService = new BuffService(Monitor);
             _questService = new QuestService(Monitor);
             _stateService = new StateService(_data, Monitor, _buffService, _questService);
             _treatmentService = new TreatmentService(_data, _buffService, _questService, _stateService, Monitor);
             _triggerService = new TriggerService(_data, _buffService, _questService, _stateService, _treatmentService, Monitor);
+            _darknessService = new DarknessService(_data, _buffService, _stateService, Monitor);
+            _stressDialogueService = new StressDialogueService(Monitor, _helper, _stateService, _treatmentService);
+            _gameDataService = new GameDataService(Monitor, _helper);
+            
+            // ⭐ НОВОЕ: Загружаем данные из JSON
+            _stressDialogueService.LoadDialogues();
+            _gameDataService.LoadAllData();
+            
+            // ⭐ НОВОЕ: Связываем GameDataService с TreatmentService
+            _treatmentService.SetGameDataService(_gameDataService);
         }
 
         private void InitializeHandlers()
         {
             // Create handlers (high-level modules that depend on services)
             _uiHandler = new UIHandler(Monitor, _data, _helper);
-            _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService);
-            _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _gameLogicHandler, _uiHandler);
+            _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _stressDialogueService);
+            _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _gameLogicHandler, _uiHandler, _darknessService);
             _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler);
+            
+            // ⭐ НОВОЕ: Устанавливаем callback для Harmony патча после создания GameLogicHandler
+            FoodConsumptionPatch.Initialize(Monitor, () => _gameLogicHandler.OnFoodConsumed());
         }
     }
 }

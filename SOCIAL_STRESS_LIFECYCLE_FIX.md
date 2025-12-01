@@ -209,7 +209,7 @@ CompleteTreatment():
 [CheckStressTopicsAndStartTreatment] Начат анализ диалога с Харви...
 [CheckStressTopicsAndStartTreatment] ✅ Диалог был по топику topicStressSocial и дебафф Social активен. Начинаем лечение Social!
 [StartTreatment] Попытка начать лечение для buffStressSocial (Социальный дискомфорт)
-[StartTreatment] Создаем новое лечение с ключом: buffStressSocial_1
+[StartTreatment] Создаем новое лечение с ключом: buffStressSocial
 [StartTreatment] ═══ ИНИЦИАЛИЗАЦИЯ ПРОГРЕССА SOCIAL ═══
 [StartTreatment] TalkedUniqueToday (база): 3
 [StartTreatment] SocialTalksAfterQuest (счетчик): 0

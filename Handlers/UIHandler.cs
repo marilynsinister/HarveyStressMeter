@@ -7,7 +7,8 @@ using StardewValley;
 using StardewValley.Menus;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.UI;
-using StardewUI.Framework;
+// ⭐ ВРЕМЕННО ОТКЛЮЧЕНО: StardewUI
+// using StardewUI.Framework;
 
 namespace HarveyStressMeter.Handlers
 {
@@ -35,6 +36,11 @@ namespace HarveyStressMeter.Handlers
 
         public void Initialize()
         {
+            // ⭐ ВРЕМЕННО ОТКЛЮЧЕНО: StardewUI
+            _monitor.Log("Справочник временно отключён (StardewUI закомментирован)", LogLevel.Info);
+            return;
+            
+            /*
             var viewEngine = _helper.ModRegistry.GetApi<IViewEngine>("focustense.StardewUI");
             if (viewEngine == null)
             {
@@ -57,6 +63,7 @@ namespace HarveyStressMeter.Handlers
             viewEngine.RegisterSprites("Mods/marilynsinister.HarveyStressMeter/Sprites", "assets/sprites");
 
             _handbookManager = new HandbookManager(_iconsTex);
+            */
         }
 
         public void HandleRenderedActiveMenu(RenderedActiveMenuEventArgs e)
@@ -118,6 +125,11 @@ namespace HarveyStressMeter.Handlers
 
         public void OpenHandbook()
         {
+            // ⭐ ВРЕМЕННО ОТКЛЮЧЕНО: StardewUI
+            _monitor.Log("Справочник временно отключён", LogLevel.Info);
+            return;
+            
+            /*
             if (_handbookManager == null) return;
 
             var viewEngine = _helper.ModRegistry.GetApi<IViewEngine>("focustense.StardewUI");
@@ -126,6 +138,7 @@ namespace HarveyStressMeter.Handlers
             var vm = _handbookManager.BuildViewModel(_data);
             Game1.activeClickableMenu = viewEngine.CreateMenuFromAsset(
                 $"Mods/marilynsinister.HarveyStressMeter/Views/Handbook", vm);
+            */
         }
 
         private bool IsInventoryPage(GameMenu gm) => gm.currentTab == GameMenu.inventoryTab;

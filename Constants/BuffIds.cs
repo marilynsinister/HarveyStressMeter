@@ -9,7 +9,7 @@ namespace HarveyStressMeter.Constants
         public const string Tired = "buffStressTired";
         public const string Lonely = "buffStressLonely";
         public const string Thunder = "buffStressThunder";
-        public const string Darkness = "buffStressDarkness";
+        public const string Darkness = "buffStressDarkness"; // Устаревший, теперь используются уровни
         public const string Hunger = "buffStressHunger";
         public const string Overwork = "buffStressOverwork";
         public const string NoSleep = "buffStressNoSleep";
@@ -29,9 +29,19 @@ namespace HarveyStressMeter.Constants
         public const string Numbness = "buffStressNumbness";
         public const string Despair = "buffStressDespair";
 
+        // Новые баффы темноты (система уровней)
+        public const string DarknessLevel1 = "buffDarknessLevel1"; // Defense -1
+        public const string DarknessLevel2 = "buffDarknessLevel2"; // Defense -2
+        public const string DarknessLevel3 = "buffDarknessLevel3"; // Defense -3
+
         // Специальные баффы
         public const string Immunity = "buffStressImmunity";
         public const string CareAura = "HarveyStress.CareAura";
+
+        // Баффы терапии темноты
+        public const string DimLight = "buffDimLight"; // Приглушенный свет (Шаг 1)
+        public const string HarveyLantern = "buffHarveyLantern"; // Фонарь от Харви: Defense +2 (Шаг 3)
+        public const string DarknessOvercome = "buffDarknessOvercome"; // Перманентный: Defense +1 ночью
 
         // Баффы для квестов лечения
         public const string RestingAtHome = "buffRestingAtHome";

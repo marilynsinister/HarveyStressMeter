@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Buffs;
 using StardewValley.GameData.Buffs;
@@ -12,6 +13,13 @@ namespace HarveyStressMeter.Services
     /// </summary>
     public class BuffService
     {
+        private readonly IMonitor _monitor;
+
+        public BuffService(IMonitor monitor)
+        {
+            _monitor = monitor;
+        }
+
         public void ApplyBuff(string buffId, string displayName, BuffEffects effects, int durationMs)
         {
             if (Game1.player.hasBuff(buffId))
@@ -22,27 +30,56 @@ namespace HarveyStressMeter.Services
             { visible = true };
             
             Game1.player.applyBuff(buff);
+            
+            // Проверяем, что бафф действительно применен
+            if (!Game1.player.hasBuff(buffId))
+            {
+                _monitor.Log($"[BuffService] ⚠️ Бафф '{buffId}' не был применен после вызова applyBuff", LogLevel.Warn);
+            }
         }
 
-        public void ApplyBuffFromData(string buffId)
+        public bool ApplyBuffFromData(string buffId)
         {
-            var dict = Game1.content.Load<Dictionary<string, BuffData>>("Data/Buffs");
+            try
+            {
+                var dict = Game1.content.Load<Dictionary<string, BuffData>>("Data/Buffs");
 
-            if (!dict.TryGetValue(buffId, out var data))
-                return;
+                if (!dict.TryGetValue(buffId, out var data))
+                {
+                    _monitor.Log($"[BuffService] ❌ Бафф '{buffId}' не найден в Data/Buffs. Проверьте, что Content Patcher мод загружает buffsStress.json", LogLevel.Error);
+                    return false;
+                }
 
-            int duration = Buff.ENDLESS;
+                int duration = Buff.ENDLESS;
 
-            if (Game1.player.hasBuff(buffId))
-                Game1.player.buffs.Remove(buffId);
+                if (Game1.player.hasBuff(buffId))
+                    Game1.player.buffs.Remove(buffId);
 
-            var effects = data.Effects != null ? ConvertToEffects(data.Effects) : new BuffEffects();
+                var effects = data.Effects != null ? ConvertToEffects(data.Effects) : new BuffEffects();
 
-            var buff = new Buff(buffId, data.DisplayName, iconTexture: null, iconSheetIndex: 0, 
-                duration: duration, effects: effects)
-            { visible = true };
+                var buff = new Buff(buffId, data.DisplayName, iconTexture: null, iconSheetIndex: 0, 
+                    duration: duration, effects: effects)
+                { visible = true };
 
-            Game1.player.applyBuff(buff);
+                Game1.player.applyBuff(buff);
+                
+                // Проверяем, что бафф действительно применен
+                if (Game1.player.hasBuff(buffId))
+                {
+                    _monitor.Log($"[BuffService] ✅ Бафф '{buffId}' ({data.DisplayName}) успешно применен", LogLevel.Debug);
+                    return true;
+                }
+                else
+                {
+                    _monitor.Log($"[BuffService] ⚠️ Бафф '{buffId}' не был применен после вызова applyBuff", LogLevel.Warn);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _monitor.Log($"[BuffService] ❌ Ошибка при применении баффа '{buffId}': {ex.Message}", LogLevel.Error);
+                return false;
+            }
         }
 
         public void RemoveBuff(string buffId)

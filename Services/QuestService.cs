@@ -49,25 +49,26 @@ namespace HarveyStressMeter.Services
             if (description != null)
             {
                 quest.questDescription = description;
-                _monitor?.Log($"[QuestService.UpdateQuest] ✅ Описание квеста '{questId}' обновлено", LogLevel.Debug);
+                // Логирование убрано для оптимизации (вызывается часто)
                 updated = true;
             }
 
             if (objective != null)
             {
                 quest.currentObjective = objective;
-                _monitor?.Log($"[QuestService.UpdateQuest] ✅ Цель квеста '{questId}' обновлена: {objective}", LogLevel.Debug);
+                // Логирование убрано для оптимизации (вызывается часто)
                 updated = true;
             }
 
             if (!updated)
             {
-                _monitor?.Log($"[QuestService.UpdateQuest] ⚠️ Нечего обновлять для квеста '{questId}'", LogLevel.Warn);
+                // Логирование убрано - это нормальная ситуация, не ошибка
             }
         }
 
         /// <summary>
         /// Добавляет квест в журнал игрока
+        /// ⭐ ИСПРАВЛЕНО: Добавлена защита от конфликтов с другими модами (HelpWanted и др.)
         /// </summary>
         public void AddQuest(string questId)
         {
@@ -77,8 +78,21 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
-            Game1.player.addQuest(questId);
-            _monitor?.Log($"[QuestService.AddQuest] ✅ Квест '{questId}' добавлен", LogLevel.Info);
+            try
+            {
+                Game1.player.addQuest(questId);
+                _monitor?.Log($"[QuestService.AddQuest] ✅ Квест '{questId}' добавлен", LogLevel.Info);
+            }
+            catch (NullReferenceException ex)
+            {
+                _monitor?.Log($"[QuestService.AddQuest] ❌ Ошибка при добавлении квеста '{questId}': NullReferenceException. Возможно конфликт с другим модом (HelpWanted?) или квест не найден в Data/Quests.", LogLevel.Error);
+                _monitor?.Log($"[QuestService.AddQuest] Stack trace: {ex.StackTrace}", LogLevel.Debug);
+            }
+            catch (Exception ex)
+            {
+                _monitor?.Log($"[QuestService.AddQuest] ❌ Непредвиденная ошибка при добавлении квеста '{questId}': {ex.Message}", LogLevel.Error);
+                _monitor?.Log($"[QuestService.AddQuest] Stack trace: {ex.StackTrace}", LogLevel.Debug);
+            }
         }
 
         /// <summary>
@@ -88,7 +102,7 @@ namespace HarveyStressMeter.Services
         {
             if (!HasQuest(questId))
             {
-                _monitor?.Log($"[QuestService.CompleteQuest] ⚠️ Квест '{questId}' не найден", LogLevel.Warn);
+                //_monitor?.Log($"[QuestService.CompleteQuest] ⚠️ Квест '{questId}' не найден", LogLevel.Warn);
                 return;
             }
 
