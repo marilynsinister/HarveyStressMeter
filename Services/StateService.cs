@@ -429,6 +429,59 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
+        /// ⭐ НОВОЕ: Восстанавливает все активные баффы из сохраненных данных
+        /// Вызывается при загрузке игры и в начале дня для восстановления потерянных баффов
+        /// </summary>
+        public void RestoreAllActiveBuffs()
+        {
+            if (!Context.IsWorldReady)
+            {
+                _monitor.Log("[StateService] RestoreAllActiveBuffs: игра еще не готова, пропускаем восстановление", LogLevel.Debug);
+                return;
+            }
+
+            int restoredCount = 0;
+            int skippedCount = 0;
+
+            // Получаем все уникальные активные баффы из активных лечений
+            var activeBuffIds = _data.StressState.ActiveTreatments.Values
+                .Where(t => !t.IsCured && !t.IsCompleted)
+                .Select(t => t.BuffId)
+                .Distinct()
+                .ToList();
+
+            _monitor.Log($"[StateService] RestoreAllActiveBuffs: найдено {activeBuffIds.Count} активных баффов для восстановления", LogLevel.Info);
+
+            foreach (var buffId in activeBuffIds)
+            {
+                // Проверяем, есть ли уже бафф в игре
+                if (_buffService.HasBuff(buffId))
+                {
+                    skippedCount++;
+                    _monitor.Log($"[StateService] Бафф '{buffId}' уже активен в игре, пропускаем", LogLevel.Debug);
+                    continue;
+                }
+
+                // Восстанавливаем бафф
+                _monitor.Log($"[StateService] 🔄 Восстанавливаем бафф '{buffId}' из сохраненных данных", LogLevel.Info);
+                if (_buffService.ApplyBuffFromData(buffId))
+                {
+                    restoredCount++;
+                    _monitor.Log($"[StateService] ✅ Бафф '{buffId}' успешно восстановлен", LogLevel.Info);
+                }
+                else
+                {
+                    _monitor.Log($"[StateService] ⚠️ Не удалось восстановить бафф '{buffId}'", LogLevel.Warn);
+                }
+            }
+
+            if (restoredCount > 0 || skippedCount > 0)
+            {
+                _monitor.Log($"[StateService] RestoreAllActiveBuffs: восстановлено {restoredCount} баффов, пропущено {skippedCount} (уже активны)", LogLevel.Info);
+            }
+        }
+
+        /// <summary>
         /// Получает прогресс лечения для квеста
         /// </summary>
         public TreatmentProgress? GetProgress(string questId)

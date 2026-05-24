@@ -172,44 +172,57 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
-            // ⭐ НОВОЕ: Генерируем уникальный ключ для нового лечения
-            var instanceNumber = _data.StressState.GetNextInstanceNumber(buffId);
-            var treatmentKey = TreatmentState.GenerateTreatmentKey(buffId, instanceNumber);
+            // ⭐ ИСПРАВЛЕНО: Используем существующее лечение (созданное при ApplyStressBuff), а не дублируем
+            var existingTreatment = _data.StressState.GetActiveTreatmentsByBuff(buffId)
+                .FirstOrDefault(t => !t.IsCured && !t.TreatmentStarted);
 
-            _monitor.Log($"[StartTreatment] Создаем новое лечение с ключом: {treatmentKey}", LogLevel.Info);
+            TreatmentState treatment;
+            string treatmentKey;
+
+            if (existingTreatment != null)
+            {
+                treatment = existingTreatment;
+                treatmentKey = treatment.TreatmentKey;
+                treatment.EnsureTreatmentKey();
+                _monitor.Log($"[StartTreatment] Продолжаем существующее лечение: {treatmentKey}", LogLevel.Info);
+            }
+            else
+            {
+                var instanceNumber = _data.StressState.GetNextInstanceNumber(buffId);
+                treatmentKey = TreatmentState.GenerateTreatmentKey(buffId, instanceNumber);
+                _monitor.Log($"[StartTreatment] Создаем новое лечение с ключом: {treatmentKey}", LogLevel.Info);
+
+                treatment = new TreatmentState
+                {
+                    BuffId = buffId,
+                    TreatmentKey = treatmentKey,
+                    InstanceNumber = instanceNumber,
+                    IssuedDate = SDate.Now(),
+                    IsCured = false,
+                    IsCompleted = false,
+                    Progress = new TreatmentProgress()
+                };
+
+                _data.StressState.AddTreatment(treatment);
+            }
+
+            treatment.QuestId = questId;
+            treatment.TreatmentStartedDate = SDate.Now();
+            treatment.TreatmentStarted = true;
+            treatment.AddedToGameLog = false;
+            treatment.Progress ??= new TreatmentProgress();
 
             // Удаляем исходный топик стресса при начале лечения
             if (BuffToStressTopic.TryGetValue(buffId, out var stressTopic))
             {
                 if (ConversationHelper.HasTopic(stressTopic.topic))
-                {
                     ConversationHelper.RemoveTopic(stressTopic.topic);
-                }
             }
 
             // ⭐ НОВОЕ: Логируем состояние ПЕРЕД началом лечения
             _monitor.Log($"[StartTreatment] ═══ СОСТОЯНИЕ ПЕРЕД НАЧАЛОМ ЛЕЧЕНИЯ ═══", LogLevel.Info);
             _monitor.Log($"[StartTreatment] Разговоров сегодня до начала лечения: {_data.TalkedNpcsToday.Count}", LogLevel.Info);
             _monitor.Log($"[StartTreatment] NPC, с которыми уже говорили: {string.Join(", ", _data.TalkedNpcsToday)}", LogLevel.Info);
-
-            // ⭐ ИСПРАВЛЕНО: Создаем TreatmentState с уникальным ключом
-            var treatment = new TreatmentState
-            {
-                BuffId = buffId,
-                QuestId = questId,
-                TreatmentKey = treatmentKey,
-                InstanceNumber = instanceNumber,
-                IssuedDate = SDate.Now(),
-                TreatmentStartedDate = SDate.Now(),
-                TreatmentStarted = true,
-                AddedToGameLog = false,
-                IsCured = false,
-                IsCompleted = false,
-                Progress = new TreatmentProgress()
-            };
-
-            // ⭐ ИСПРАВЛЕНО: Добавляем лечение в состояние с уникальным ключом
-            _data.StressState.AddTreatment(treatment);
 
             // ⭐ ИСПРАВЛЕНО: Устанавливаем флаги напрямую, без повторного вызова StartTreatment
             _data.StressState.TreatmentFlags.SetTreatmentActive(buffId, true);
@@ -280,7 +293,7 @@ namespace HarveyStressMeter.Services
             // ⭐ УЛУЧШЕНО: Детальное логирование после старта
             _monitor.Log($"[StartTreatment] ═══ СОСТОЯНИЕ ПОСЛЕ НАЧАЛА ЛЕЧЕНИЯ ═══", LogLevel.Info);
             _monitor.Log($"[StartTreatment] TreatmentKey: {treatmentKey}", LogLevel.Info);
-            _monitor.Log($"[StartTreatment] InstanceNumber: {instanceNumber}", LogLevel.Info);
+            _monitor.Log($"[StartTreatment] InstanceNumber: {treatment.InstanceNumber}", LogLevel.Info);
             _monitor.Log($"[StartTreatment] HasBuff({buffId}): {_stateService.HasActiveBuffInGame(buffId)}", LogLevel.Info);
             _monitor.Log($"[StartTreatment] HasQuest({questId}): {_stateService.HasQuestInJournal(questId)}", LogLevel.Info);
             _monitor.Log($"[StartTreatment] ActiveTreatments.Count: {_data.StressState.ActiveTreatments.Count}", LogLevel.Info);

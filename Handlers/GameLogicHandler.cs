@@ -28,6 +28,7 @@ namespace HarveyStressMeter.Handlers
         private readonly StressDialogueService _stressDialogueService;
 
         private string? _lastDialogueNpc;
+        private bool _suppressNextHarveyDialogueEnd;
 
         // ⭐ ОПТИМИЗАЦИЯ: Кэширование и интервальные проверки
         private bool _lastHarveyNearby = false;
@@ -409,6 +410,13 @@ namespace HarveyStressMeter.Handlers
             }
             else if (e.OldMenu is DialogueBox && _lastDialogueNpc == "Harvey")
             {
+                // Закрытие CP-диалога при перехвате — не считаем завершением разговора
+                if (_suppressNextHarveyDialogueEnd)
+                {
+                    _suppressNextHarveyDialogueEnd = false;
+                    return;
+                }
+
                 HandleHarveyDialogueEnd();
                 _lastDialogueNpc = null;
             }
@@ -424,15 +432,15 @@ namespace HarveyStressMeter.Handlers
             if (_stressDialogueService.ShouldShowStressDialogue(out var buffId, out var dialogueText))
             {
                 _monitor.Log($"[Диалог] Обнаружен активный дебафф {buffId} без лечения. Показываем программный диалог.", LogLevel.Info);
-                
-                // Закрываем текущий диалог если он есть
+
+                // Закрытие CP-диалога вызовет MenuChanged — подавляем ложное завершение разговора
+                _suppressNextHarveyDialogueEnd = true;
+
                 if (Game1.activeClickableMenu is DialogueBox)
-                {
                     Game1.activeClickableMenu = null;
-                }
-                
-                // Показываем программный диалог стресса
+
                 _stressDialogueService.ShowStressDialogue(buffId!, dialogueText!);
+                _lastDialogueNpc = "Harvey";
                 return;
             }
 
@@ -706,22 +714,16 @@ namespace HarveyStressMeter.Handlers
         /// </summary>
         public void OnFoodConsumed()
         {
-            // ⭐ ОПТИМИЗАЦИЯ: Проверка топика AteToday - если уже есть, выходим
-            // Это означает что игрок уже поел сегодня
-            if (ConversationHelper.HasTopic(TopicIds.AteToday))
-                return;
-
             _monitor.Log("[FoodConsumption] Игрок съел еду", LogLevel.Debug);
 
-            // Добавляем топик (игрок поел)
-            ConversationHelper.AddTopic(TopicIds.AteToday, 1);
+            // Топик «ел сегодня» — только для счётчика дней без еды, не блокирует квесты
+            if (!ConversationHelper.HasTopic(TopicIds.AteToday))
+                ConversationHelper.AddTopic(TopicIds.AteToday, 1);
 
             // Обновляем прогресс Hunger квеста если активен
             var hungerTreatment = GetTreatmentByQuest(QuestIds.Hunger);
             if (hungerTreatment?.Progress != null)
-            {
                 hungerTreatment.Progress.AteAnyFood = true;
-            }
 
             // Завершаем Hunger квест если активен
             if (_stateService.HasQuestInJournal(QuestIds.Hunger))
@@ -739,11 +741,16 @@ namespace HarveyStressMeter.Handlers
                 ConversationHelper.AddTopic("topicStressTreatmentTooColdCured", 2);
             }
 
-            // Снимаем Hunger бафф если он не заблокирован (natural removal)
-            if (_stateService.HasActiveBuffInGame(BuffIds.Hunger) && !_data.StressState.IsTreatmentLocked(BuffIds.Hunger))
+            // Снимаем Hunger бафф только если лечение ещё не начато (нет активного квеста)
+            if (_stateService.HasActiveBuffInGame(BuffIds.Hunger))
             {
-                _buffService.RemoveBuff(BuffIds.Hunger);
-                Game1.addHUDMessage(new HUDMessage("Голод утолён", HUDMessage.newQuest_type));
+                var activeHunger = GetTreatmentByQuest(QuestIds.Hunger)
+                    ?? _data.StressState.GetActiveTreatment(BuffIds.Hunger);
+                if (activeHunger == null || !activeHunger.TreatmentStarted)
+                {
+                    _buffService.RemoveBuff(BuffIds.Hunger);
+                    Game1.addHUDMessage(new HUDMessage("Голод утолён", HUDMessage.newQuest_type));
+                }
             }
         }
 

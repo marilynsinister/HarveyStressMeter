@@ -89,7 +89,10 @@ namespace HarveyStressMeter.Models
         /// </summary>
         public TreatmentState? GetActiveTreatment(string buffId)
         {
-            return GetActiveTreatmentsByBuff(buffId).FirstOrDefault();
+            return GetActiveTreatmentsByBuff(buffId)
+                .OrderByDescending(t => t.TreatmentStarted)
+                .ThenByDescending(t => t.IssuedDate.DaysSinceStart)
+                .FirstOrDefault();
         }
 
         /// <summary>

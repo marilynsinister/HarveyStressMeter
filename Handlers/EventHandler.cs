@@ -68,6 +68,9 @@ namespace HarveyStressMeter.Handlers
 
             _stateService.MigrateOldData();
             _stateService.SyncWithGame();
+            
+            // ⭐ НОВОЕ: Восстанавливаем все активные баффы после загрузки сохранения
+            _stateService.RestoreAllActiveBuffs();
 
             _monitor.Log($"[OnSaveLoaded] ✅ Save loaded: active treatments={_data.StressState.ActiveTreatments.Count}", LogLevel.Info);
         }
@@ -90,6 +93,9 @@ namespace HarveyStressMeter.Handlers
             _stateService.CleanupExpiredImmunities();
             
             _stateService.SyncWithGame();
+            
+            // ⭐ НОВОЕ: Восстанавливаем все активные баффы в начале дня
+            _stateService.RestoreAllActiveBuffs();
             
             // ⭐ НОВОЕ: Восстанавливаем бафф страха темноты если он был активен
             _darknessService.RestoreFearBuff();

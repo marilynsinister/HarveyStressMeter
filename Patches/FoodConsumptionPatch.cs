@@ -6,43 +6,59 @@ using System;
 namespace HarveyStressMeter.Patches
 {
     /// <summary>
-    /// Harmony патч для отслеживания потребления еды
-    /// Патчит метод Farmer.eatObject для точного определения когда игрок съел еду
+    /// Harmony-патч для отслеживания потребления еды.
+    /// Патчит Farmer.doneEating — вызывается после завершения анимации поедания/питья.
     /// </summary>
-    [HarmonyPatch(typeof(Farmer), "eatObject")]
-    public class FoodConsumptionPatch
+    public static class FoodConsumptionPatch
     {
         private static IMonitor? _monitor;
         private static Action? _onFoodConsumed;
 
-        /// <summary>
-        /// Инициализирует патч с monitor и callback
-        /// </summary>
         public static void Initialize(IMonitor monitor, Action onFoodConsumed)
         {
             _monitor = monitor;
             _onFoodConsumed = onFoodConsumed;
         }
 
-        /// <summary>
-        /// Postfix патч - вызывается ПОСЛЕ того как игрок съел еду
-        /// </summary>
-        public static void Postfix(Farmer __instance, StardewValley.Object o)
+        public static void Apply(Harmony harmony)
         {
+            var method = AccessTools.Method(typeof(Farmer), nameof(Farmer.doneEating));
+            if (method == null)
+            {
+                _monitor?.Log("[FoodConsumptionPatch] ❌ Метод Farmer.doneEating не найден", LogLevel.Error);
+                return;
+            }
+
+            harmony.Patch(
+                method,
+                prefix: new HarmonyMethod(typeof(FoodConsumptionPatch), nameof(DoneEatingPrefix)),
+                postfix: new HarmonyMethod(typeof(FoodConsumptionPatch), nameof(DoneEatingPostfix))
+            );
+
+            _monitor?.Log("[FoodConsumptionPatch] ✅ Патч Farmer.doneEating применён", LogLevel.Info);
+        }
+
+        /// <summary>
+        /// Сохраняет, было ли это реальное поедание локального игрока.
+        /// </summary>
+        public static void DoneEatingPrefix(Farmer __instance, ref bool __state)
+        {
+            __state = __instance.IsLocalPlayer
+                && __instance.mostRecentlyGrabbedItem != null
+                && __instance.itemToEat is StardewValley.Object o
+                && o.Edibility != -300;
+        }
+
+        public static void DoneEatingPostfix(Farmer __instance, bool __state)
+        {
+            if (!__state)
+                return;
+
             try
             {
-                // Проверяем что это локальный игрок
-                if (__instance != Game1.player)
-                    return;
-
-                // Проверяем что предмет съедобный (Edibility > 0)
-                if (o.Edibility > 0)
-                {
-                    _monitor?.Log($"[FoodConsumptionPatch] ✅ Игрок съел: {o.Name} (Edibility: {o.Edibility})", LogLevel.Debug);
-                    
-                    // Вызываем callback для обработки потребления еды
-                    _onFoodConsumed?.Invoke();
-                }
+                var consumed = __instance.itemToEat as StardewValley.Object;
+                _monitor?.Log($"[FoodConsumptionPatch] ✅ Игрок съел: {consumed?.DisplayName ?? consumed?.Name}", LogLevel.Debug);
+                _onFoodConsumed?.Invoke();
             }
             catch (Exception ex)
             {
@@ -51,4 +67,3 @@ namespace HarveyStressMeter.Patches
         }
     }
 }
-

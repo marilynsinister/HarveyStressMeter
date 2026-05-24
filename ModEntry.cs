@@ -37,6 +37,7 @@ namespace HarveyStressMeter
         private ConsoleCommandHandler _consoleCommandHandler = null!;
         private UIHandler _uiHandler = null!;
         private IModHelper _helper = null!;
+        private Harmony? _harmony;
 
         public override void Entry(IModHelper helper)
         {
@@ -66,20 +67,12 @@ namespace HarveyStressMeter
         {
             try
             {
-                var harmony = new Harmony(ModManifest.UniqueID);
-                
-                // Инициализируем патч для отслеживания еды
-                // Callback будет установлен позже после создания GameLogicHandler
-                FoodConsumptionPatch.Initialize(Monitor, () => { });
-                
-                // Применяем все патчи
-                harmony.PatchAll();
-                
-                Monitor.Log("✅ Harmony патчи успешно применены", LogLevel.Info);
+                _harmony = new Harmony(ModManifest.UniqueID);
+                Monitor.Log("✅ Harmony инициализирован", LogLevel.Info);
             }
             catch (Exception ex)
             {
-                Monitor.Log($"❌ Ошибка при применении Harmony патчей: {ex.Message}\n{ex.StackTrace}", LogLevel.Error);
+                Monitor.Log($"❌ Ошибка при инициализации Harmony: {ex.Message}\n{ex.StackTrace}", LogLevel.Error);
             }
         }
 
@@ -114,8 +107,12 @@ namespace HarveyStressMeter
             _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _gameLogicHandler, _uiHandler, _darknessService);
             _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler);
             
-            // ⭐ НОВОЕ: Устанавливаем callback для Harmony патча после создания GameLogicHandler
+            // Патч еды применяется после создания GameLogicHandler, когда callback уже известен
             FoodConsumptionPatch.Initialize(Monitor, () => _gameLogicHandler.OnFoodConsumed());
+            if (_harmony != null)
+                FoodConsumptionPatch.Apply(_harmony);
+            else
+                Monitor.Log("❌ Harmony не инициализирован — отслеживание еды отключено", LogLevel.Error);
         }
     }
 }
