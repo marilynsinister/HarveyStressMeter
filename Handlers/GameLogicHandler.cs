@@ -89,6 +89,9 @@ namespace HarveyStressMeter.Handlers
             _stressDialogueService = stressDialogueService;
         }
 
+        /// <summary>Сбрасывает RAM-состояние programmatic stress-диалога (pending/consent).</summary>
+        public void ClearStressDialoguePending() => _stressDialogueService.ClearPendingTreatment();
+
         public void ResetDailyData()
         {
             // ⭐ НОВОЕ: Проверяем топики вчерашнего дня ПЕРЕД очисткой
@@ -116,31 +119,18 @@ namespace HarveyStressMeter.Handlers
             // Thunder - lightning
             if (Game1.stats.DaysPlayed >= 2
                 && Game1.isLightning
-                && !_stateService.HasActiveBuffInGame(BuffIds.Thunder)
+                && !_stateService.HasActiveTreatmentState(BuffIds.Thunder)
                 && !_stateService.HasImmunity(BuffIds.Thunder))
             {
                 _treatmentService.ApplyStressBuff(BuffIds.Thunder, "Страх грозы");
             }
 
-            // TooCold - cold weather in cold locations
-            if (Game1.stats.DaysPlayed >= 2
-                && Game1.timeOfDay >= 2100 && Game1.timeOfDay <= 2600
-                && GameStateHelper.IsSeasonOneOf("spring", "fall", "winter")
-                && GameStateHelper.IsWeatherOneOf("Snow", "Rain", "Wind", "Storm")
-                && !_stateService.HasActiveBuffInGame(BuffIds.TooCold)
-                && !_stateService.HasImmunity(BuffIds.TooCold))
-            {
-                var loc = Game1.player.currentLocation?.NameOrUniqueName;
-                if (loc == "Mountain" || loc == "Forest" || loc == "Railroad" || loc == "Backwoods")
-                {
-                    _treatmentService.ApplyStressBuff(BuffIds.TooCold, "Переохлаждение");
-                }
-            }
+            // TooCold — проверяется при смене времени (вечер) и warp (см. TryApplyTooColdStressTrigger)
 
             // ⭐ НОВОЕ: Lonely - несколько дней без разговоров
             if (Game1.stats.DaysPlayed >= 3
                 && _data.DaysWithoutTalking >= 3
-                && !_stateService.HasActiveBuffInGame(BuffIds.Lonely)
+                && !_stateService.HasActiveTreatmentState(BuffIds.Lonely)
                 && !_stateService.HasImmunity(BuffIds.Lonely))
             {
                 _treatmentService.ApplyStressBuff(BuffIds.Lonely, "Одиночество");
@@ -150,7 +140,7 @@ namespace HarveyStressMeter.Handlers
             // ⭐ НОВОЕ: Hunger - несколько дней без еды
             if (Game1.stats.DaysPlayed >= 3
                 && _data.DaysWithoutEating >= 2
-                && !_stateService.HasActiveBuffInGame(BuffIds.Hunger)
+                && !_stateService.HasActiveTreatmentState(BuffIds.Hunger)
                 && !_stateService.HasImmunity(BuffIds.Hunger))
             {
                 _treatmentService.ApplyStressBuff(BuffIds.Hunger, "Слабость от голода");
@@ -160,7 +150,7 @@ namespace HarveyStressMeter.Handlers
             // ⭐ НОВОЕ: NoSleep - несколько дней позднего сна
             if (Game1.stats.DaysPlayed >= 3
                 && _data.DaysWithLateSleep >= 3
-                && !_stateService.HasActiveBuffInGame(BuffIds.NoSleep)
+                && !_stateService.HasActiveTreatmentState(BuffIds.NoSleep)
                 && !_stateService.HasImmunity(BuffIds.NoSleep))
             {
                 _treatmentService.ApplyStressBuff(BuffIds.NoSleep, "Недосып");
@@ -170,6 +160,9 @@ namespace HarveyStressMeter.Handlers
 
         public void ProcessGameTick(bool harveyNearby)
         {
+            if (!Context.IsWorldReady)
+                return;
+
             // ⭐ ОПТИМИЗАЦИЯ: Интервальные счетчики
             _harveyCheckCounter++;
             _progressUpdateCounter++;
@@ -189,7 +182,7 @@ namespace HarveyStressMeter.Handlers
                 harveyNearby = _lastHarveyNearby;
             }
 
-            // === КАЖДЫЕ 5 СЕКУНД: Основные обновления (80% ⬇️) ===
+            // === КАЖДУЮ СЕКУНДУ: прогресс лечения + manual triggers ===
             if (_progressUpdateCounter >= PROGRESS_UPDATE_INTERVAL)
             {
                 _progressUpdateCounter = 0;
@@ -204,8 +197,12 @@ namespace HarveyStressMeter.Handlers
                     _treatmentService.EnsureLockedBuffsPersist();
                 }
 
+                // Manual triggers (Tired/Thunder/Overwork/Social complete paths) — раз в секунду, как в backup
+                if (ShouldRunManualTriggers())
+                    _triggerService.CheckManualTriggers();
+
                 // Thunder calming buff (только если квест активен)
-                if (_stateService.HasQuestInJournal(QuestIds.Thunder))
+                if (_stateService.HasActiveQuestState(QuestIds.Thunder))
                 {
                     ApplyThunderCalmingBuff(harveyNearby);
                 }
@@ -223,11 +220,23 @@ namespace HarveyStressMeter.Handlers
                 _tiredCheckCounter = 0;
 
                 // Проверяем усталость в течение дня
-                if (!_stateService.HasActiveBuffInGame(BuffIds.Tired))
+                if (!_stateService.HasActiveTreatmentState(BuffIds.Tired))
                 {
                     CheckTiredStressTrigger();
                 }
             }
+        }
+
+        /// <summary>
+        /// Manual triggers не должны срабатывать во время event script или с открытым меню.
+        /// </summary>
+        private static bool ShouldRunManualTriggers()
+        {
+            if (Game1.CurrentEvent != null)
+                return false;
+            if (Game1.activeClickableMenu != null)
+                return false;
+            return true;
         }
 
         /// <summary>
@@ -237,10 +246,13 @@ namespace HarveyStressMeter.Handlers
         {
             if (harveyNearby)
             {
-                _buffService.ApplyBuff(BuffIds.CareAura, "Рядом с Харви",
-                    new StardewValley.Buffs.BuffEffects { Defense = { +1 }, MaxStamina = { +10 } }, 2000);
+                if (!_buffService.HasBuff(BuffIds.CareAura))
+                {
+                    _buffService.ApplyBuff(BuffIds.CareAura, "Рядом с Харви",
+                        new StardewValley.Buffs.BuffEffects { Defense = { +1 }, MaxStamina = { +10 } }, 2000);
+                }
             }
-            else if (_stateService.HasActiveBuffInGame(BuffIds.CareAura))
+            else if (_buffService.HasBuff(BuffIds.CareAura))
             {
                 _buffService.RemoveBuff(BuffIds.CareAura);
             }
@@ -280,13 +292,13 @@ namespace HarveyStressMeter.Handlers
         /// </summary>
         private bool HasAnyStressBuff()
         {
-            return _stateService.HasActiveBuffInGame(BuffIds.Tired)
-                || _stateService.HasActiveBuffInGame(BuffIds.Lonely)
-                || _stateService.HasActiveBuffInGame(BuffIds.Thunder)
-                || _stateService.HasActiveBuffInGame(BuffIds.Hunger)
-                || _stateService.HasActiveBuffInGame(BuffIds.TooCold)
-                || _stateService.HasActiveBuffInGame(BuffIds.Darkness)
-                || _stateService.HasActiveBuffInGame(BuffIds.Social);
+            return _stateService.HasBuffInGame(BuffIds.Tired)
+                || _stateService.HasBuffInGame(BuffIds.Lonely)
+                || _stateService.HasBuffInGame(BuffIds.Thunder)
+                || _stateService.HasBuffInGame(BuffIds.Hunger)
+                || _stateService.HasBuffInGame(BuffIds.TooCold)
+                || _stateService.HasBuffInGame(BuffIds.Darkness)
+                || _stateService.HasBuffInGame(BuffIds.Social);
         }
 
         public void HandleMenuChanged(MenuChangedEventArgs e)
@@ -305,21 +317,24 @@ namespace HarveyStressMeter.Handlers
             _darknessService.HandleLocationVisit(e.NewLocation.NameOrUniqueName);
             
             ApplyQuestLocationBuffs(e.NewLocation);
+            TryApplyTooColdStressTrigger();
         }
 
         public void HandleTimeChanged(TimeChangedEventArgs e)
         {
-            // Obmorok from tiredness (at 2:00)
-            // ⭐ ИСПРАВЛЕНО: Проверяем stamina от 0 до 5 (критически низкая выносливость)
-            if (e.NewTime == 200 && Game1.player.Stamina >= 0 && Game1.player.Stamina <= 5)
+            // Obmorok from tiredness (at 2:00 am = 2600 in 26-hour time)
+            if (e.NewTime == 2600 && Game1.player.Stamina >= 0 && Game1.player.Stamina <= 5)
             {
                 if (Game1.stats.DaysPlayed >= 1
-                    && !_stateService.HasActiveBuffInGame(BuffIds.Overwork)
+                    && !_stateService.HasActiveTreatmentState(BuffIds.Overwork)
                     && !_stateService.HasImmunity(BuffIds.Overwork))
                 {
                     _treatmentService.ApplyStressBuff(BuffIds.Overwork, "Переработка");
                 }
             }
+
+            if (e.NewTime >= 2100 && e.OldTime < 2100)
+                TryApplyTooColdStressTrigger();
 
             // Lightning check every 10 minutes during storm
             if (Game1.isLightning && e.NewTime % 100 == 0)
@@ -331,7 +346,7 @@ namespace HarveyStressMeter.Handlers
         public void CheckDayEndingQuestCompletion()
         {
             // NoSleep - completion at early bedtime
-            if (_stateService.HasQuestInJournal(QuestIds.NoSleep)
+            if (_stateService.HasActiveQuestState(QuestIds.NoSleep)
                 && Game1.timeOfDay >= 600 && Game1.timeOfDay <= 2200)
             {
                 _stateService.CompleteTreatment(QuestIds.NoSleep);
@@ -340,9 +355,9 @@ namespace HarveyStressMeter.Handlers
             }
 
             // Darkness - completion when spending evening in light
-            if (_stateService.HasQuestInJournal(QuestIds.Darkness)
-                && Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 200
-                && _stateService.HasActiveBuffInGame(BuffIds.LightAndSafe)
+            if (_stateService.HasActiveQuestState(QuestIds.Darkness)
+                && GameStateHelper.IsEveningNight(2000, 2600)
+                && _buffService.HasBuff(BuffIds.LightAndSafe)
                 && Game1.player.currentLocation is StardewValley.Locations.FarmHouse)
             {
                 _buffService.RemoveBuff(BuffIds.LightAndSafe);
@@ -361,10 +376,8 @@ namespace HarveyStressMeter.Handlers
             int currentTime = Game1.timeOfDay;
             bool wentToSleepLate = false;
 
-            // Поздний сон: после 00:00 (2400) и до 02:00 (200)
-            // В Stardew Valley время 2400-2600 представлено как 0-200 следующего дня
-            // ⭐ ИСПРАВЛЕНО: Также проверяем критически низкую выносливость (0-5) как признак обморока
-            if (currentTime >= 0 && currentTime <= 200)
+            // Поздний сон: после полуночи до 2:00 (2400–2600 в 26-hour time)
+            if (GameStateHelper.IsAfterMidnightUntilTwoAm())
             {
                 wentToSleepLate = true;
                 _monitor.Log($"[LateSleep] Игрок лег спать поздно: {currentTime}", LogLevel.Info);
@@ -425,7 +438,7 @@ namespace HarveyStressMeter.Handlers
         private void HandleHarveyDialogue(NPC harveyNpc, MenuChangedEventArgs e)
         {
             _monitor.Log($"[Диалог] Начался разговор с Харви. Текущие топики: {string.Join(", ", Game1.player.activeDialogueEvents.Keys.Where(k => k.Contains("Stress")))}", LogLevel.Info);
-            _monitor.Log($"[Диалог] Дебафф Social активен: {_stateService.HasActiveBuffInGame(BuffIds.Social)}", LogLevel.Info);
+            _monitor.Log($"[Диалог] Дебафф Social активен: {_stateService.HasActiveTreatmentState(BuffIds.Social)}", LogLevel.Info);
 
             // ⭐ НОВОЕ: Проверяем наличие активного дебаффа без лечения
             // Если есть - показываем программный диалог вместо стандартного
@@ -476,7 +489,7 @@ namespace HarveyStressMeter.Handlers
             foreach (var (buffId, topicData) in buffToTopicMap)
             {
                 // Если бафф активен, но топика нет - добавляем принудительно
-                if (_stateService.HasActiveBuffInGame(buffId) && !ConversationHelper.HasTopic(topicData.topic))
+                if (_stateService.HasActiveTreatmentState(buffId) && !ConversationHelper.HasTopic(topicData.topic))
                 {
                     ConversationHelper.AddTopic(topicData.topic, topicData.days);
                     _monitor.Log($"[HandleHarveyDialogue] ✅ Принудительно добавлен топик {topicData.topic} для активного баффа {buffId}", LogLevel.Info);
@@ -492,11 +505,11 @@ namespace HarveyStressMeter.Handlers
             if (Game1.CurrentEvent != null)
             {
                 _monitor.Log($"[Диалог] Разговор во время события - не засчитывается", LogLevel.Debug);
+                _stressDialogueService.ClearPendingTreatment();
                 return;
             }
 
-            // ⭐ НОВОЕ: Проверяем, был ли это программный диалог стресса
-            // Если да - запускаем лечение автоматически
+            // Programmatic stress-диалог: StartTreatment только после явного согласия (#$y)
             _stressDialogueService.CheckAndStartTreatmentAfterDialogue();
 
             // ⭐ НОВОЕ: Проверяем топики начала лечения (устанавливаются в диалогах через #$t)
@@ -518,7 +531,7 @@ namespace HarveyStressMeter.Handlers
         private void CheckTreatmentStartTopics()
         {
             // Social - топик устанавливается в диалоге "topicStressSocial"
-            if (ConversationHelper.HasTopic("topicStressTreatmentSocialStarted") && _stateService.HasActiveBuffInGame(BuffIds.Social))
+            if (ConversationHelper.HasTopic("topicStressTreatmentSocialStarted") && _stateService.HasActiveTreatmentState(BuffIds.Social))
             {
                 _treatmentService.StartTreatment(BuffIds.Social, "Социальная тревожность");
                 ConversationHelper.RemoveTopic("topicStressTreatmentSocialStarted");
@@ -527,7 +540,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // Tired - топик устанавливается в диалоге "topicStressTired"
-            if (ConversationHelper.HasTopic("topicStressTreatmentTiredStarted") && _stateService.HasActiveBuffInGame(BuffIds.Tired))
+            if (ConversationHelper.HasTopic("topicStressTreatmentTiredStarted") && _stateService.HasActiveTreatmentState(BuffIds.Tired))
             {
                 _treatmentService.StartTreatment(BuffIds.Tired, "Усталость");
                 ConversationHelper.RemoveTopic("topicStressTreatmentTiredStarted");
@@ -536,7 +549,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // Thunder - топик устанавливается в диалоге "topicStressThunder"
-            if (ConversationHelper.HasTopic("topicStressTreatmentThunderStarted") && _stateService.HasActiveBuffInGame(BuffIds.Thunder))
+            if (ConversationHelper.HasTopic("topicStressTreatmentThunderStarted") && _stateService.HasActiveTreatmentState(BuffIds.Thunder))
             {
                 _treatmentService.StartTreatment(BuffIds.Thunder, "Страх грозы");
                 ConversationHelper.RemoveTopic("topicStressTreatmentThunderStarted");
@@ -545,7 +558,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // Hunger - топик устанавливается в диалоге "topicStressHunger"
-            if (ConversationHelper.HasTopic("topicStressTreatmentHungerStarted") && _stateService.HasActiveBuffInGame(BuffIds.Hunger))
+            if (ConversationHelper.HasTopic("topicStressTreatmentHungerStarted") && _stateService.HasActiveTreatmentState(BuffIds.Hunger))
             {
                 _treatmentService.StartTreatment(BuffIds.Hunger, "Голод");
                 ConversationHelper.RemoveTopic("topicStressTreatmentHungerStarted");
@@ -554,7 +567,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // Overwork - топик устанавливается в диалоге "topicStressOverwork"
-            if (ConversationHelper.HasTopic("topicStressTreatmentOverworkStarted") && _stateService.HasActiveBuffInGame(BuffIds.Overwork))
+            if (ConversationHelper.HasTopic("topicStressTreatmentOverworkStarted") && _stateService.HasActiveTreatmentState(BuffIds.Overwork))
             {
                 _treatmentService.StartTreatment(BuffIds.Overwork, "Переутомление");
                 ConversationHelper.RemoveTopic("topicStressTreatmentOverworkStarted");
@@ -563,7 +576,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // NoSleep - топик устанавливается в диалоге "topicStressNoSleep"
-            if (ConversationHelper.HasTopic("topicStressTreatmentNoSleepStarted") && _stateService.HasActiveBuffInGame(BuffIds.NoSleep))
+            if (ConversationHelper.HasTopic("topicStressTreatmentNoSleepStarted") && _stateService.HasActiveTreatmentState(BuffIds.NoSleep))
             {
                 _treatmentService.StartTreatment(BuffIds.NoSleep, "Недосып");
                 ConversationHelper.RemoveTopic("topicStressTreatmentNoSleepStarted");
@@ -572,7 +585,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // TooCold - топик устанавливается в диалоге "topicStressTooCold"
-            if (ConversationHelper.HasTopic("topicStressTreatmentTooColdStarted") && _stateService.HasActiveBuffInGame(BuffIds.TooCold))
+            if (ConversationHelper.HasTopic("topicStressTreatmentTooColdStarted") && _stateService.HasActiveTreatmentState(BuffIds.TooCold))
             {
                 _treatmentService.StartTreatment(BuffIds.TooCold, "Переохлаждение");
                 ConversationHelper.RemoveTopic("topicStressTreatmentTooColdStarted");
@@ -581,7 +594,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // Lonely - топик устанавливается в диалоге "topicStressLonely"
-            if (ConversationHelper.HasTopic("topicStressTreatmentLonelyStarted") && _stateService.HasActiveBuffInGame(BuffIds.Lonely))
+            if (ConversationHelper.HasTopic("topicStressTreatmentLonelyStarted") && _stateService.HasActiveTreatmentState(BuffIds.Lonely))
             {
                 _treatmentService.StartTreatment(BuffIds.Lonely, "Одиночество");
                 ConversationHelper.RemoveTopic("topicStressTreatmentLonelyStarted");
@@ -639,7 +652,7 @@ namespace HarveyStressMeter.Handlers
             if (Game1.CurrentEvent != null) return;
             
             if (Game1.stats.DaysPlayed < 5) return;
-            if (_stateService.HasActiveBuffInGame(BuffIds.Social)) return;
+            if (_stateService.HasActiveTreatmentState(BuffIds.Social)) return;
             if (_stateService.HasImmunity(BuffIds.Social)) return;
 
             if (Game1.player.friendshipData.TryGetValue(npc.Name, out var friendship))
@@ -655,7 +668,7 @@ namespace HarveyStressMeter.Handlers
         private void UpdateLonelyQuestProgress()
         {
             var lonelyTreatment = GetTreatmentByQuest(QuestIds.Lonely);
-            if (_stateService.HasQuestInJournal(QuestIds.Lonely) && lonelyTreatment?.Progress != null)
+            if (_stateService.HasActiveQuestState(QuestIds.Lonely) && lonelyTreatment?.Progress != null)
             {
                 lonelyTreatment.Progress.TalkedUniqueToday = _data.TalkedNpcsToday.Count;
 
@@ -697,59 +710,94 @@ namespace HarveyStressMeter.Handlers
 
         private void ApplyThunderCalmingBuff(bool harveyNearby)
         {
-            // Быстрый выход если не в больнице или Харви не рядом
-            if (!harveyNearby || Game1.player.currentLocation?.NameOrUniqueName != "Hospital")
-                return;
+            bool shouldApply = harveyNearby
+                && Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
+                && (Game1.isLightning || Game1.isRaining);
 
-            if ((Game1.isLightning || Game1.isRaining))
+            if (shouldApply)
             {
-                _buffService.ApplyBuff(BuffIds.CalmingAtHospital, "Успокоение с Харви",
-                    new StardewValley.Buffs.BuffEffects { }, -2);
+                if (!_buffService.HasBuff(BuffIds.CalmingAtHospital))
+                {
+                    _buffService.ApplyBuff(BuffIds.CalmingAtHospital, "Успокоение с Харви",
+                        new StardewValley.Buffs.BuffEffects { }, -2);
+                }
+            }
+            else if (_buffService.HasBuff(BuffIds.CalmingAtHospital))
+            {
+                _buffService.RemoveBuff(BuffIds.CalmingAtHospital);
             }
         }
 
         /// <summary>
         /// ⭐ УЛУЧШЕНО: Обрабатывает потребление еды игроком
-        /// Вызывается из EventHandler при использовании съедобного предмета
+        /// Вызывается из FoodConsumptionPatch после Farmer.doneEating
         /// </summary>
-        public void OnFoodConsumed()
+        public void OnFoodConsumed(StardewValley.Object consumed)
         {
-            _monitor.Log("[FoodConsumption] Игрок съел еду", LogLevel.Debug);
+            _monitor.Log($"[FoodConsumption] Игрок съел: {consumed.DisplayName ?? consumed.Name} ({consumed.QualifiedItemId})", LogLevel.Debug);
 
             // Топик «ел сегодня» — только для счётчика дней без еды, не блокирует квесты
             if (!ConversationHelper.HasTopic(TopicIds.AteToday))
                 ConversationHelper.AddTopic(TopicIds.AteToday, 1);
 
-            // Обновляем прогресс Hunger квеста если активен
-            var hungerTreatment = GetTreatmentByQuest(QuestIds.Hunger);
-            if (hungerTreatment?.Progress != null)
-                hungerTreatment.Progress.AteAnyFood = true;
+            var activeHunger = GetTreatmentByQuest(QuestIds.Hunger)
+                ?? _data.StressState.GetActiveTreatment(BuffIds.Hunger);
 
-            // Завершаем Hunger квест если активен
-            if (_stateService.HasQuestInJournal(QuestIds.Hunger))
+            // Завершаем Hunger квест если активен (лечение уже начато)
+            if (_stateService.HasActiveQuestState(QuestIds.Hunger))
             {
+                if (activeHunger?.Progress != null)
+                    activeHunger.Progress.AteAnyFood = true;
+
                 Game1.playSound("questcomplete");
                 _stateService.CompleteTreatment(QuestIds.Hunger);
                 ConversationHelper.AddTopic("topicStressTreatmentHungerCured", 2);
             }
-
-            // Завершаем TooCold квест если активен
-            if (_stateService.HasQuestInJournal(QuestIds.TooCold))
+            else if (activeHunger != null && !activeHunger.TreatmentStarted)
             {
-                Game1.playSound("questcomplete");
-                _stateService.CompleteTreatment(QuestIds.TooCold);
-                ConversationHelper.AddTopic("topicStressTreatmentTooColdCured", 2);
+                // M-02: естественное решение до разговора с Harvey — полная очистка state
+                _monitor.Log("[FoodConsumption] Hunger resolved naturally before treatment started", LogLevel.Info);
+
+                _buffService.RemoveBuff(BuffIds.Hunger);
+                ConversationHelper.RemoveTopic(TopicIds.StressHunger);
+                ConversationHelper.RemoveTopic(TopicIds.TreatmentStartHunger);
+
+                activeHunger.IsCured = true;
+                activeHunger.CompletedDate = SDate.Now();
+
+                if (_data.StressState.RemoveTreatment(activeHunger.TreatmentKey))
+                {
+                    _monitor.Log($"[FoodConsumption] ActiveTreatment removed: {activeHunger.TreatmentKey}", LogLevel.Debug);
+                }
+                else
+                {
+                    _monitor.Log($"[FoodConsumption] Failed to remove ActiveTreatment: {activeHunger.TreatmentKey}", LogLevel.Warn);
+                }
+
+                Game1.addHUDMessage(new HUDMessage("Голод утолён", HUDMessage.newQuest_type));
+            }
+            else if (_stateService.HasBuffInGame(BuffIds.Hunger))
+            {
+                // Edge case: game buff без TreatmentState
+                _buffService.RemoveBuff(BuffIds.Hunger);
+                Game1.addHUDMessage(new HUDMessage("Голод утолён", HUDMessage.newQuest_type));
             }
 
-            // Снимаем Hunger бафф только если лечение ещё не начато (нет активного квеста)
-            if (_stateService.HasActiveBuffInGame(BuffIds.Hunger))
+            // Завершаем TooCold квест если активен — только горячий напиток (C-08)
+            if (_stateService.HasActiveQuestState(QuestIds.TooCold))
             {
-                var activeHunger = GetTreatmentByQuest(QuestIds.Hunger)
-                    ?? _data.StressState.GetActiveTreatment(BuffIds.Hunger);
-                if (activeHunger == null || !activeHunger.TreatmentStarted)
+                if (HotDrinkHelper.IsHotDrinkOrWarmingFood(consumed))
                 {
-                    _buffService.RemoveBuff(BuffIds.Hunger);
-                    Game1.addHUDMessage(new HUDMessage("Голод утолён", HUDMessage.newQuest_type));
+                    Game1.playSound("questcomplete");
+                    _stateService.CompleteTreatment(QuestIds.TooCold);
+                    ConversationHelper.AddTopic("topicStressTreatmentTooColdCured", 2);
+                }
+                else
+                {
+                    _monitor.Log(
+                        $"[FoodConsumption] TooCold: {consumed.QualifiedItemId} is not a hot drink — quest not completed",
+                        LogLevel.Debug);
+                    Game1.addHUDMessage(new HUDMessage("Нужно что-то горячее: чай или кофе", HUDMessage.newQuest_type));
                 }
             }
         }
@@ -757,54 +805,87 @@ namespace HarveyStressMeter.Handlers
         private void NaturalBuffRemoval(bool harveyNearby)
         {
             // Tired - rest at home late evening
-            if (_stateService.HasActiveBuffInGame(BuffIds.Tired)
-                && !_data.StressState.IsTreatmentLocked(BuffIds.Tired)
+            if (CanNaturallyRemoveDebuff(BuffIds.Tired)
                 && Game1.player.currentLocation is StardewValley.Locations.FarmHouse
-                && Game1.timeOfDay >= 2200 && Game1.timeOfDay <= 200)
+                && GameStateHelper.IsEveningNight(2200, 2600))
             {
-                _buffService.RemoveBuff(BuffIds.Tired);
-                ConversationHelper.RemoveTopic(TopicIds.StressTired);
+                NaturallyResolveBeforeTreatment(BuffIds.Tired, TopicIds.StressTired, TopicIds.TreatmentStartTired);
             }
 
             // Lonely - removal when talking to Harvey
-            if (_stateService.HasActiveBuffInGame(BuffIds.Lonely)
-                && !_data.StressState.IsTreatmentLocked(BuffIds.Lonely)
-                && harveyNearby)
+            if (CanNaturallyRemoveDebuff(BuffIds.Lonely) && harveyNearby)
             {
-                _buffService.RemoveBuff(BuffIds.Lonely);
-                ConversationHelper.RemoveTopic(TopicIds.StressLonely);
-                Game1.getCharacterFromName("Harvey")?.showTextAboveHead("Я всегда рядом.");
+                NaturallyResolveBeforeTreatment(
+                    BuffIds.Lonely,
+                    TopicIds.StressLonely,
+                    TopicIds.TreatmentStartLonely,
+                    () => Game1.getCharacterFromName("Harvey")?.showTextAboveHead("Я всегда рядом."));
             }
 
             // Thunder - removal indoors with Harvey
-            if (_stateService.HasActiveBuffInGame(BuffIds.Thunder)
-                && !_data.StressState.IsTreatmentLocked(BuffIds.Thunder)
+            if (CanNaturallyRemoveDebuff(BuffIds.Thunder)
                 && harveyNearby
                 && Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
                 && (Game1.isLightning || Game1.isRaining))
             {
-                _buffService.RemoveBuff(BuffIds.Thunder);
-                ConversationHelper.RemoveTopic(TopicIds.StressThunder);
+                NaturallyResolveBeforeTreatment(BuffIds.Thunder, TopicIds.StressThunder, TopicIds.TreatmentStartThunder);
             }
 
             // TooCold - removal in warm zones
-            if (_stateService.HasActiveBuffInGame(BuffIds.TooCold)
-                && !_data.StressState.IsTreatmentLocked(BuffIds.TooCold)
+            if (CanNaturallyRemoveDebuff(BuffIds.TooCold)
                 && GameStateHelper.IsInWarmZone())
             {
-                _buffService.RemoveBuff(BuffIds.TooCold);
-                ConversationHelper.RemoveTopic(TopicIds.StressTooCold);
+                NaturallyResolveBeforeTreatment(BuffIds.TooCold, TopicIds.StressTooCold, TopicIds.TreatmentStartTooCold);
             }
 
-            // Darkness - removal in light
-            if (_stateService.HasActiveBuffInGame(BuffIds.Darkness)
-                && !_data.StressState.IsTreatmentLocked(BuffIds.Darkness)
-                && GameStateHelper.IsInWarmZone()
-                && Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 200)
+            // Hunger — OnFoodConsumed (M-02). Darkness — DarknessService therapy (не менять).
+        }
+
+        /// <summary>
+        /// Natural removal только до StartTreatment: реальный game buff + лечение не начато.
+        /// </summary>
+        private bool CanNaturallyRemoveDebuff(string buffId)
+        {
+            if (!_stateService.HasBuffInGame(buffId))
+                return false;
+
+            var activeTreatment = _data.StressState.GetActiveTreatment(buffId);
+            return activeTreatment == null || !activeTreatment.TreatmentStarted;
+        }
+
+        /// <summary>
+        /// Снимает debuff естественно до начала лечения: buff, topics, ActiveTreatment, history.
+        /// Не завершает квест и не выдаёт награды.
+        /// </summary>
+        private void NaturallyResolveBeforeTreatment(
+            string buffId,
+            string stressTopic,
+            string? treatmentStartTopic = null,
+            Action? afterRemove = null)
+        {
+            var activeTreatment = _data.StressState.GetActiveTreatment(buffId);
+
+            _monitor.Log($"[NaturalBuffRemoval] {buffId} naturally resolved before treatment started", LogLevel.Info);
+
+            _buffService.RemoveBuff(buffId);
+            ConversationHelper.RemoveTopic(stressTopic);
+            if (!string.IsNullOrEmpty(treatmentStartTopic))
+                ConversationHelper.RemoveTopic(treatmentStartTopic);
+
+            if (activeTreatment != null)
             {
-                _buffService.RemoveBuff(BuffIds.Darkness);
-                ConversationHelper.RemoveTopic(TopicIds.StressDarkness);
+                activeTreatment.IsCured = true;
+                activeTreatment.CompletedDate = SDate.Now();
+
+                if (!_data.StressState.RemoveTreatment(activeTreatment.TreatmentKey))
+                {
+                    _monitor.Log(
+                        $"[NaturalBuffRemoval] Failed to remove ActiveTreatment: {activeTreatment.TreatmentKey}",
+                        LogLevel.Warn);
+                }
             }
+
+            afterRemove?.Invoke();
         }
 
         // УСТАРЕВШИЙ МЕТОД - Теперь используется DarknessService.CheckAndApplyDarknessBuff
@@ -816,7 +897,7 @@ namespace HarveyStressMeter.Handlers
             /*
             if (Game1.stats.DaysPlayed >= 3
                 && Game1.timeOfDay >= 2200 && Game1.timeOfDay <= 2600
-                && !_stateService.HasActiveBuffInGame(BuffIds.Darkness)
+                && !_stateService.HasActiveTreatmentState(BuffIds.Darkness)
                 && !_stateService.HasImmunity(BuffIds.Darkness))
             {
                 var n = newLocation.NameOrUniqueName;
@@ -831,9 +912,10 @@ namespace HarveyStressMeter.Handlers
         private void ApplyQuestLocationBuffs(GameLocation newLocation)
         {
             // Tired quest - resting at home buff
-            if (_stateService.HasQuestInJournal(QuestIds.Tired)
+            if (_stateService.HasActiveQuestState(QuestIds.Tired)
                 && newLocation is StardewValley.Locations.FarmHouse
-                && !GameStateHelper.HasHeavyTools(Game1.player))
+                && !GameStateHelper.HasHeavyTools(Game1.player)
+                && !_buffService.HasBuff(BuffIds.RestingAtHome))
             {
                 _buffService.ApplyBuff(BuffIds.RestingAtHome, "Отдых дома",
                     new StardewValley.Buffs.BuffEffects { }, -2);
@@ -842,9 +924,9 @@ namespace HarveyStressMeter.Handlers
             ManageOverworkBreaks(newLocation);
 
             // Darkness quest - light and safety buff
-            if (_stateService.HasQuestInJournal(QuestIds.Darkness)
-                && Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 200
-                && !_stateService.HasActiveBuffInGame(BuffIds.LightAndSafe)
+            if (_stateService.HasActiveQuestState(QuestIds.Darkness)
+                && GameStateHelper.IsEveningNight(2000, 2600)
+                && !_buffService.HasBuff(BuffIds.LightAndSafe)
                 && newLocation is StardewValley.Locations.FarmHouse)
             {
                 _buffService.ApplyBuff(BuffIds.LightAndSafe, "Свет и безопасность",
@@ -854,11 +936,11 @@ namespace HarveyStressMeter.Handlers
 
         private void ManageOverworkBreaks(GameLocation newLocation)
         {
-            if (!_stateService.HasQuestInJournal(QuestIds.Overwork)) return;
+            if (!_stateService.HasActiveQuestState(QuestIds.Overwork)) return;
 
             bool restZone = GameStateHelper.IsInRestZone();
 
-            if (restZone && _data.OverworkBreaksToday < 3 && !_stateService.HasActiveBuffInGame(BuffIds.OverworkBreak))
+            if (restZone && _data.OverworkBreaksToday < 3 && !_buffService.HasBuff(BuffIds.OverworkBreak))
             {
                 _buffService.ApplyBuff(BuffIds.OverworkBreak, "Перерыв",
                     new StardewValley.Buffs.BuffEffects { }, -2);
@@ -866,32 +948,46 @@ namespace HarveyStressMeter.Handlers
                 ConversationHelper.RemoveTopic(TopicIds.OverworkBreakInterrupted);
                 Game1.playSound("sipTea");
             }
-            else if (!restZone && _stateService.HasActiveBuffInGame(BuffIds.OverworkBreak))
+            else if (!restZone && _buffService.HasBuff(BuffIds.OverworkBreak))
             {
                 _buffService.RemoveBuff(BuffIds.OverworkBreak);
+                _data.OverworkBreakSeconds = 0;
+                _data.OverworkBreakActive = false;
                 ConversationHelper.AddTopic(TopicIds.OverworkBreakInterrupted, 0);
                 ConversationHelper.RemoveTopic(TopicIds.OverworkBreakActive);
                 Game1.playSound("cancel");
-            }
-
-            if (_data.OverworkBreaksToday >= 3)
-            {
-                _stateService.CompleteTreatment(QuestIds.Overwork);
-                ConversationHelper.RemoveTopic(TopicIds.OverworkBreakActive);
-                ConversationHelper.AddTopic("topicStressTreatmentOverworkCured", 2);
-                Game1.playSound("questcomplete");
             }
         }
 
         private void CheckLightningStressTrigger()
         {
             if (Game1.stats.DaysPlayed < 2) return;
-            if (_stateService.HasActiveBuffInGame(BuffIds.Thunder)) return;
+            if (_stateService.HasActiveTreatmentState(BuffIds.Thunder)) return;
             if (_stateService.HasImmunity(BuffIds.Thunder)) return;
 
             if (Game1.random.NextDouble() < 0.3)
             {
                 _treatmentService.ApplyStressBuff(BuffIds.Thunder, "Страх грозы");
+            }
+        }
+
+        /// <summary>
+        /// Выдача debuff TooCold: вечер/ночь (21:00–2:00), холодная погода, холодные локации.
+        /// Вызывается при warp и при переходе времени за 21:00 (не на DayStarted).
+        /// </summary>
+        private void TryApplyTooColdStressTrigger()
+        {
+            if (Game1.stats.DaysPlayed < 2) return;
+            if (!GameStateHelper.IsEveningNight(2100, 2600)) return;
+            if (!GameStateHelper.IsSeasonOneOf("spring", "fall", "winter")) return;
+            if (!GameStateHelper.IsWeatherOneOf("Snow", "Rain", "Wind", "Storm")) return;
+            if (_stateService.HasActiveTreatmentState(BuffIds.TooCold)) return;
+            if (_stateService.HasImmunity(BuffIds.TooCold)) return;
+
+            var loc = Game1.player.currentLocation?.NameOrUniqueName;
+            if (loc is "Mountain" or "Forest" or "Railroad" or "Backwoods")
+            {
+                _treatmentService.ApplyStressBuff(BuffIds.TooCold, "Переохлаждение");
             }
         }
 
@@ -907,7 +1003,7 @@ namespace HarveyStressMeter.Handlers
             // Базовые проверки
             if (Game1.stats.DaysPlayed < 1) return;
             if (_stateService.HasImmunity(BuffIds.Tired)) return;
-            if (_stateService.HasActiveBuffInGame(BuffIds.Tired)) return;
+            if (_stateService.HasActiveTreatmentState(BuffIds.Tired)) return;
 
             // Проверяем, что stamina низкая (<= 10) и игрок не в событии
             if (Game1.CurrentEvent != null) return;
@@ -960,7 +1056,7 @@ namespace HarveyStressMeter.Handlers
 
         private void ResetDailyQuestCounters()
         {
-            if (_stateService.HasQuestInJournal(QuestIds.Overwork))
+            if (_stateService.HasActiveQuestState(QuestIds.Overwork))
             {
                 _data.OverworkBreaksToday = 0;
                 _buffService.RemoveBuff(BuffIds.OverworkBreak);
@@ -968,7 +1064,7 @@ namespace HarveyStressMeter.Handlers
                 ConversationHelper.RemoveTopic(TopicIds.OverworkBreakInterrupted);
             }
 
-            if (_stateService.HasQuestInJournal(QuestIds.Thunder))
+            if (_stateService.HasActiveQuestState(QuestIds.Thunder))
             {
                 var thunderTreatment = GetTreatmentByQuest(QuestIds.Thunder);
                 if (thunderTreatment?.Progress != null)
@@ -1011,7 +1107,7 @@ namespace HarveyStressMeter.Handlers
             if (_data.Darkness.IsTherapyActive) return;
 
             // Проверяем уровень 3 (фобия) - приоритет
-            if (_stateService.HasActiveBuffInGame("buffDarknessLevel3"))
+            if (_stateService.HasBuffInGame("buffDarknessLevel3"))
             {
                 if (!ConversationHelper.HasTopic("topicStressDarknessLevel3"))
                 {
@@ -1022,7 +1118,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // Проверяем уровень 2 (сильный страх)
-            if (_stateService.HasActiveBuffInGame("buffDarknessLevel2"))
+            if (_stateService.HasActiveTreatmentState("buffDarknessLevel2"))
             {
                 if (!ConversationHelper.HasTopic("topicStressDarknessLevel2"))
                 {
@@ -1033,7 +1129,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // Проверяем уровень 1 (легкий страх) - старый топик уже должен быть
-            if (_stateService.HasActiveBuffInGame("buffDarknessLevel1") || _stateService.HasActiveBuffInGame(BuffIds.Darkness))
+            if (_stateService.HasBuffInGame("buffDarknessLevel1") || _stateService.HasBuffInGame(BuffIds.Darkness))
             {
                 if (!ConversationHelper.HasTopic(TopicIds.StressDarkness))
                 {

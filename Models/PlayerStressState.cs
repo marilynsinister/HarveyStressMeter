@@ -139,14 +139,106 @@ namespace HarveyStressMeter.Models
         }
 
         /// <summary>
-        /// Добавляет лечение в историю
+        /// Добавляет или обновляет запись в истории по <see cref="TreatmentState.TreatmentKey"/> (без дублей).
         /// </summary>
         public void AddTreatmentToHistory(string buffId, TreatmentState treatment)
         {
-            if (!TreatmentHistory.ContainsKey(buffId))
-                TreatmentHistory[buffId] = new List<TreatmentState>();
-            
-            TreatmentHistory[buffId].Add(treatment);
+            treatment.EnsureTreatmentKey();
+
+            if (!TreatmentHistory.TryGetValue(buffId, out var history))
+            {
+                TreatmentHistory[buffId] = new List<TreatmentState> { treatment };
+                return;
+            }
+
+            var existing = history.FirstOrDefault(t =>
+            {
+                t.EnsureTreatmentKey();
+                return string.Equals(t.TreatmentKey, treatment.TreatmentKey, StringComparison.Ordinal);
+            });
+
+            if (existing != null)
+            {
+                MergeHistoryEntry(existing, treatment);
+                return;
+            }
+
+            history.Add(treatment);
+        }
+
+        /// <summary>
+        /// Удаляет повторяющиеся TreatmentKey в TreatmentHistory (старые save / до fix 27).
+        /// </summary>
+        /// <returns>Число удалённых дублирующих записей.</returns>
+        public int DedupeTreatmentHistory()
+        {
+            int removed = 0;
+
+            foreach (var buffId in TreatmentHistory.Keys.ToList())
+            {
+                var list = TreatmentHistory[buffId];
+                if (list.Count <= 1)
+                    continue;
+
+                var byKey = new Dictionary<string, TreatmentState>(StringComparer.Ordinal);
+                var order = new List<string>();
+
+                foreach (var entry in list)
+                {
+                    entry.EnsureTreatmentKey();
+                    var key = entry.TreatmentKey;
+                    if (string.IsNullOrEmpty(key))
+                        continue;
+
+                    if (byKey.TryGetValue(key, out var existing))
+                    {
+                        MergeHistoryEntry(existing, entry);
+                        removed++;
+                    }
+                    else
+                    {
+                        byKey[key] = entry;
+                        order.Add(key);
+                    }
+                }
+
+                TreatmentHistory[buffId] = order.Select(k => byKey[k]).ToList();
+            }
+
+            return removed;
+        }
+
+        private static void MergeHistoryEntry(TreatmentState keep, TreatmentState incoming)
+        {
+            if (incoming.TreatmentStarted && !keep.TreatmentStarted)
+            {
+                keep.TreatmentStarted = true;
+                keep.TreatmentStartedDate = incoming.TreatmentStartedDate ?? keep.TreatmentStartedDate;
+            }
+
+            if (!string.IsNullOrEmpty(incoming.QuestId) && string.IsNullOrEmpty(keep.QuestId))
+                keep.QuestId = incoming.QuestId;
+
+            if (incoming.AddedToGameLog)
+                keep.AddedToGameLog = true;
+
+            if (incoming.IsCompleted)
+                keep.IsCompleted = true;
+
+            if (incoming.IsCured)
+            {
+                keep.IsCured = true;
+                keep.IsCompleted = keep.IsCompleted || incoming.IsCompleted;
+                if (incoming.CompletedDate != null)
+                    keep.CompletedDate = incoming.CompletedDate;
+            }
+
+            if (incoming.Progress != null)
+            {
+                keep.Progress ??= new TreatmentProgress();
+                if (incoming.IsCured || incoming.IsCompleted)
+                    keep.Progress = incoming.Progress;
+            }
         }
 
         /// <summary>
@@ -199,6 +291,48 @@ namespace HarveyStressMeter.Models
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Возвращает лечение в активные коллекции без повторной записи в TreatmentHistory (restore / console).
+        /// </summary>
+        public void RestoreActiveTreatment(TreatmentState treatment)
+        {
+            treatment.EnsureTreatmentKey();
+
+            if (ActiveTreatments.ContainsKey(treatment.TreatmentKey))
+                return;
+
+            ActiveTreatments[treatment.TreatmentKey] = treatment;
+
+            if (!ActiveTreatmentsByBuff.ContainsKey(treatment.BuffId))
+                ActiveTreatmentsByBuff[treatment.BuffId] = new List<string>();
+
+            if (!ActiveTreatmentsByBuff[treatment.BuffId].Contains(treatment.TreatmentKey))
+                ActiveTreatmentsByBuff[treatment.BuffId].Add(treatment.TreatmentKey);
+        }
+
+        /// <summary>
+        /// Очищает активные лечения и индекс ByBuff (in-memory reset, напр. ReturnedToTitle).
+        /// </summary>
+        public void ClearActiveTreatments()
+        {
+            ActiveTreatments.Clear();
+            ActiveTreatmentsByBuff.Clear();
+        }
+
+        /// <summary>
+        /// Копирует активные лечения и индекс из другого state (save load / CopySaveData).
+        /// </summary>
+        public void CopyActiveTreatmentsFrom(PlayerStressState source, Func<TreatmentState, TreatmentState> cloneTreatment)
+        {
+            ActiveTreatments.Clear();
+            foreach (var (key, treatment) in source.ActiveTreatments)
+                ActiveTreatments[key] = cloneTreatment(treatment);
+
+            ActiveTreatmentsByBuff.Clear();
+            foreach (var (buffId, keys) in source.ActiveTreatmentsByBuff)
+                ActiveTreatmentsByBuff[buffId] = new List<string>(keys);
         }
 
         /// <summary>

@@ -61,23 +61,38 @@ namespace HarveyStressMeter.Handlers
 
         private void OnSaveLoaded(object? s, SaveLoadedEventArgs e)
         {
-            _monitor.Log("[OnSaveLoaded] Loading save data", LogLevel.Debug);
+            var loaded = _helper.Data.ReadSaveData<SaveData>(SaveDataHelper.SaveKey);
 
-            _data.LastDay = SDate.Now();
-            _data.StressState ??= new PlayerStressState();
+            if (loaded != null)
+            {
+                SaveDataHelper.CopySaveDataIntoExistingInstance(_data, loaded);
+                _monitor.Log(
+                    $"[OnSaveLoaded] Mod save loaded from '{SaveDataHelper.SaveKey}': " +
+                    $"active treatments={_data.StressState.ActiveTreatments.Count}, " +
+                    $"DaysWithoutEating={_data.DaysWithoutEating}, FearLevel={_data.Darkness.FearLevel}",
+                    LogLevel.Info);
+            }
+            else
+            {
+                SaveDataHelper.ResetSaveDataInPlace(_data);
+                _monitor.Log(
+                    $"[OnSaveLoaded] No mod save found for '{SaveDataHelper.SaveKey}' — initialized fresh mod state for this slot",
+                    LogLevel.Info);
+            }
 
             _stateService.MigrateOldData();
             _stateService.SyncWithGame();
-            
-            // ⭐ НОВОЕ: Восстанавливаем все активные баффы после загрузки сохранения
-            _stateService.RestoreAllActiveBuffs();
 
-            _monitor.Log($"[OnSaveLoaded] ✅ Save loaded: active treatments={_data.StressState.ActiveTreatments.Count}", LogLevel.Info);
+            _gameLogicHandler.ClearStressDialoguePending();
+
+            // Восстанавливаем все активные баффы после загрузки сохранения
+            _stateService.RestoreAllActiveBuffs();
         }
 
         private void OnReturnedToTitle(object? s, ReturnedToTitleEventArgs e)
         {
-            _data.StressState.ActiveTreatments.Clear();
+            _data.StressState.ClearActiveTreatments();
+            _gameLogicHandler.ClearStressDialoguePending();
         }
 
         private void OnDayStarted(object? s, DayStartedEventArgs e)
@@ -169,7 +184,7 @@ namespace HarveyStressMeter.Handlers
 
         private void SaveData()
         {
-            _helper.Data.WriteSaveData("stress-data-v1", _data);
+            _helper.Data.WriteSaveData(SaveDataHelper.SaveKey, _data);
         }
     }
 }

@@ -72,7 +72,11 @@ namespace HarveyStressMeter.Models
 
         // ===== Усталость (Tired) =====
         /// <summary>
-        /// Минуты отдыха для лечения усталости
+        /// Секунды «правильного» отдыха дома (FarmHouse, без тяжёлых инструментов)
+        /// </summary>
+        public int TiredRestSeconds { get; set; }
+        /// <summary>
+        /// Минуты отдыха для лечения усталости (legacy, не используется в tick-path)
         /// </summary>
         public int TiredRestMinutes { get; set; }
         /// <summary>

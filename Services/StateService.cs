@@ -85,6 +85,10 @@ namespace HarveyStressMeter.Services
                 }
             }
 
+            int deduped = _data.StressState.DedupeTreatmentHistory();
+            if (deduped > 0)
+                _monitor.Log($"[StateService] TreatmentHistory: удалено дублей по TreatmentKey: {deduped}", LogLevel.Info);
+
             if (migrated)
             {
                 _monitor.Log("[StateService] Миграция старых данных в PlayerStressState завершена", LogLevel.Info);
@@ -147,9 +151,14 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
+            var instanceNumber = _data.StressState.GetNextInstanceNumber(buffId);
+            var treatmentKey = TreatmentState.GenerateTreatmentKey(buffId, instanceNumber);
+
             var treatment = new TreatmentState
             {
                 BuffId = buffId,
+                TreatmentKey = treatmentKey,
+                InstanceNumber = instanceNumber,
                 IssuedDate = SDate.Now(),
                 TreatmentStarted = false,
                 IsCured = false,
@@ -157,7 +166,7 @@ namespace HarveyStressMeter.Services
                 Progress = new TreatmentProgress()
             };
 
-            _data.StressState.ActiveTreatments[buffId] = treatment;
+            _data.StressState.AddTreatment(treatment);
             _data.StressState.LastIssuedDay[buffId] = SDate.Now();
 
             _monitor.Log($"[StateService] ✅ Создано новое лечение для дебаффа '{buffId}'", LogLevel.Info);
@@ -538,19 +547,55 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// Проверяет, есть ли активный бафф
+        /// Mod state: есть не-излеченная запись лечения для данного debuff в ActiveTreatments.
         /// </summary>
-        public bool HasActiveBuffInGame(string buffId)
+        public bool HasActiveTreatmentState(string buffId)
         {
             return _data.StressState.HasActiveBuff(buffId);
         }
 
         /// <summary>
-        /// Проверяет, есть ли квест в журнале игры
+        /// Mod state: лечение начато (TreatmentStarted) и квест ещё активен в state.
         /// </summary>
-        public bool HasQuestInJournal(string questId)
+        public bool HasActiveQuestState(string questId)
         {
             return _data.StressState.HasActiveQuest(questId);
+        }
+
+        /// <summary>
+        /// Игра: бафф висит на игроке (Game1.player.hasBuff).
+        /// </summary>
+        public bool HasBuffInGame(string buffId)
+        {
+            return _buffService.HasBuff(buffId);
+        }
+
+        /// <summary>
+        /// Игра: квест присутствует в журнале SDV.
+        /// </summary>
+        public bool HasQuestInGameJournal(string questId)
+        {
+            return _questService.HasQuest(questId);
+        }
+
+        /// <summary>
+        /// WARNING: проверяет mod state (ActiveTreatments), не Game1.player.hasBuff.
+        /// Используйте <see cref="HasActiveTreatmentState"/> или <see cref="HasBuffInGame"/>.
+        /// </summary>
+        [Obsolete("Misleading name: checks mod state, not the game. Use HasActiveTreatmentState or HasBuffInGame.")]
+        public bool HasActiveBuffInGame(string buffId)
+        {
+            return HasActiveTreatmentState(buffId);
+        }
+
+        /// <summary>
+        /// WARNING: проверяет mod state (TreatmentStarted), не journal SDV.
+        /// Используйте <see cref="HasActiveQuestState"/> или <see cref="HasQuestInGameJournal"/>.
+        /// </summary>
+        [Obsolete("Misleading name: checks mod state, not the journal. Use HasActiveQuestState or HasQuestInGameJournal.")]
+        public bool HasQuestInJournal(string questId)
+        {
+            return HasActiveQuestState(questId);
         }
 
         /// <summary>

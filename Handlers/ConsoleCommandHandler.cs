@@ -4,9 +4,11 @@ using StardewModdingAPI;
 using StardewModdingAPI.Utilities;
 using StardewValley;
 using StardewValley.Menus;
+using HarveyStressMeter.Constants;
 using HarveyStressMeter.Services;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Handlers;
+using HarveyStressMeter.Helpers;
 
 namespace HarveyStressMeter.Handlers
 {
@@ -23,6 +25,7 @@ namespace HarveyStressMeter.Handlers
         private readonly TriggerService _triggerService;
         private readonly StateService _stateService;
         private readonly UIHandler _uiHandler;
+        private readonly ModResetService _modResetService;
 
         public ConsoleCommandHandler(
             IMonitor monitor,
@@ -31,7 +34,8 @@ namespace HarveyStressMeter.Handlers
             TreatmentService treatmentService,
             TriggerService triggerService,
             StateService stateService,
-            UIHandler uiHandler)
+            UIHandler uiHandler,
+            ModResetService modResetService)
         {
             _monitor = monitor;
             _helper = helper;
@@ -40,6 +44,7 @@ namespace HarveyStressMeter.Handlers
             _triggerService = triggerService;
             _stateService = stateService;
             _uiHandler = uiHandler;
+            _modResetService = modResetService;
         }
 
         public void RegisterCommands()
@@ -55,6 +60,7 @@ namespace HarveyStressMeter.Handlers
             RegisterSyncCommands();
             RegisterRestoreCommands();
             RegisterCleanupCommands();
+            RegisterResetCommands();
             RegisterTriggerCommands();
         }
 
@@ -145,85 +151,32 @@ namespace HarveyStressMeter.Handlers
                 _monitor.Log("✅ Комплексная очистка завершена.", LogLevel.Info);
             });
 
-            _helper.ConsoleCommands.Add("hs.emergency-reset", "🚨 АВАРИЙНЫЙ СБРОС: Удалить ВСЕ баффы, топики, лечения и квесты стресса.", (_, __) =>
+        }
+
+        private void RegisterResetCommands()
+        {
+            _helper.ConsoleCommands.Add("hs.reset", "Полный сброс мода: топики, дебаффы, квесты и save-данные.", (_, __) => RunFullReset());
+
+            _helper.ConsoleCommands.Add("hs.emergency-reset", "Legacy: используйте 'hs.reset'. Полный сброс мода.", (_, __) =>
             {
-                _monitor.Log("🚨 ================================", LogLevel.Warn);
-                _monitor.Log("🚨 АВАРИЙНЫЙ СБРОС НАЧАТ", LogLevel.Warn);
-                _monitor.Log("🚨 ================================", LogLevel.Warn);
-
-                // 1. Удаляем все стрессовые баффы
-                var stressBuffIds = new[] { 
-                    "buffStressSocial",
-                    "buffStressTired", "buffStressThunder", "buffStressTooCold", 
-                    "buffStressOverwork", "buffStressDarkness", "buffDarknessLevel1", "buffDarknessLevel2", "buffDarknessLevel3",
-                    "buffStressLonely", "buffStressHunger", "buffStressNoSleep",
-                    "buffImmunity", "buffCareAura", "buffRestingAtHome", "buffDimLight", 
-                    "buffOverworkBreak", "buffThunderCalming", "buffLightAndSafe"
-                };
-                
-                int removedBuffs = 0;
-                foreach (var buffId in stressBuffIds)
-                {
-                    if (Game1.player.hasBuff(buffId))
-                    {
-                        Game1.player.buffs.Remove(buffId);
-                        removedBuffs++;
-                    }
-                }
-                _monitor.Log($"  ✓ Удалено баффов: {removedBuffs}", LogLevel.Info);
-
-                // 2. Удаляем все квесты стресса
-                var questIds = new[] {
-                    "HarveyMod_SocialRecovery", "HarveyMod_RestAndRecovery", "HarveyMod_ThunderTherapy",
-                    "HarveyMod_WarmthTherapy", "HarveyMod_OverworkBreaks", "HarveyMod_DarknessStep1",
-                    "HarveyMod_DarknessStep2", "HarveyMod_NoSleepTherapy", "HarveyMod_LonelyTherapy",
-                    "HarveyMod_HungerTherapy"
-                };
-
-                int removedQuests = 0;
-                foreach (var questId in questIds)
-                {
-                    var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == questId);
-                    if (quest != null)
-                    {
-                        Game1.player.questLog.Remove(quest);
-                        removedQuests++;
-                    }
-                }
-                _monitor.Log($"  ✓ Удалено квестов: {removedQuests}", LogLevel.Info);
-
-                // 3. Очищаем все топики стресса
-                var topicPrefixes = new[] { "topic", "Stress", "Treatment", "Harvey" };
-                int removedTopics = 0;
-                var topicsToRemove = Game1.player.activeDialogueEvents.Keys
-                    .Where(k => topicPrefixes.Any(p => k.Contains(p)))
-                    .ToList();
-                
-                foreach (var topic in topicsToRemove)
-                {
-                    Game1.player.activeDialogueEvents.Remove(topic);
-                    removedTopics++;
-                }
-                _monitor.Log($"  ✓ Удалено топиков: {removedTopics}", LogLevel.Info);
-
-                // 4. Очищаем состояние мода
-                _data.StressState.ActiveTreatments.Clear();
-                _data.TalkedNpcsToday.Clear();
-                _data.DaysWithoutTalking = 0;
-                _data.DaysWithoutEating = 0;
-                _data.DaysWithLateSleep = 0;
-                _data.OverworkBreaksToday = 0;
-                _data.OverworkBreakSeconds = 0;
-                _data.OverworkBreakActive = false;
-                _data.Darkness = new DarknessProgress();
-                _monitor.Log($"  ✓ Состояние мода очищено", LogLevel.Info);
-
-                _monitor.Log("🚨 ================================", LogLevel.Warn);
-                _monitor.Log("✅ АВАРИЙНЫЙ СБРОС ЗАВЕРШЕН", LogLevel.Warn);
-                _monitor.Log("🚨 ================================", LogLevel.Warn);
-                _monitor.Log("ℹ️  Все стрессовые дебаффы, квесты, топики и лечения удалены.", LogLevel.Info);
-                _monitor.Log("ℹ️  Игра вернулась в начальное состояние.", LogLevel.Info);
+                _monitor.Log("⚠️ Команда 'hs.emergency-reset' устарела. Используйте 'hs.reset'", LogLevel.Warn);
+                RunFullReset();
             });
+        }
+
+        private void RunFullReset()
+        {
+            _monitor.Log("🔄 Полный сброс HarveyStressMeter...", LogLevel.Warn);
+
+            var result = _modResetService.ResetAll();
+
+            _monitor.Log($"  ✓ Баффов удалено: {result.RemovedBuffs}", LogLevel.Info);
+            _monitor.Log($"  ✓ Квестов удалено: {result.RemovedQuests}", LogLevel.Info);
+            _monitor.Log($"  ✓ Топиков удалено: {result.RemovedTopics}", LogLevel.Info);
+            _monitor.Log("  ✓ Mod save сброшен", LogLevel.Info);
+            _monitor.Log("✅ Сброс завершён. Мод в начальном состоянии.", LogLevel.Info);
+
+            Game1.addHUDMessage(new HUDMessage("HarveyStressMeter: полный сброс выполнен", HUDMessage.newQuest_type));
         }
 
         private void RegisterTriggerCommands()
@@ -239,8 +192,12 @@ namespace HarveyStressMeter.Handlers
         {
             _helper.ConsoleCommands.Add("hs.debug-quests", "Debug quest system - check quest data and availability.", (_, __) => DebugQuestSystem());
             _helper.ConsoleCommands.Add("hs.states", "Show all stress buff states.", (_, __) => ShowTreatmentStates());
-            _helper.ConsoleCommands.Add("hs.debug", "Show full diagnostic info (topics, buffs, states).", (_, __) => ShowFullDiagnostic());
-            _helper.ConsoleCommands.Add("hs.clear", "Clear all stress buffs, quests and topics (emergency reset).", (_, __) => ClearAllStressStates());
+            _helper.ConsoleCommands.Add("hs.debug", "hs.debug v2: mod state vs real game (buffs, journal, topics, problems).", (_, __) => ShowFullDiagnostic());
+            _helper.ConsoleCommands.Add("hs.clear", "Legacy: используйте 'hs.reset'. Полный сброс мода.", (_, __) =>
+            {
+                _monitor.Log("⚠️ Команда 'hs.clear' устарела. Используйте 'hs.reset'", LogLevel.Warn);
+                RunFullReset();
+            });
         }
 
         private void DebugQuestSystem()
@@ -270,7 +227,8 @@ namespace HarveyStressMeter.Handlers
             }
 
             _monitor.Log($"Social quest HarveyMod_SocialRecovery in Data/Quests: {questData.ContainsKey("HarveyMod_SocialRecovery")}", LogLevel.Info);
-            _monitor.Log($"Social quest in journal: {_stateService.HasQuestInJournal("HarveyMod_SocialRecovery")}", LogLevel.Info);
+            _monitor.Log($"Social quest in mod state: {_stateService.HasActiveQuestState(QuestIds.Social)}", LogLevel.Info);
+            _monitor.Log($"Social quest in real journal: {_stateService.HasQuestInGameJournal(QuestIds.Social)}", LogLevel.Info);
         }
 
         private void ShowTreatmentStates()
@@ -291,223 +249,7 @@ namespace HarveyStressMeter.Handlers
 
         private void ShowFullDiagnostic()
         {
-            _monitor.Log("=== ДИАГНОСТИКА СИСТЕМЫ СТРЕССА ===", LogLevel.Info);
-
-            ShowActiveTopics();
-            ShowActiveStressBuffs();
-            ShowActiveTreatments();
-            ShowTreatmentHistory();
-            ShowConversationState();
-            ShowTreatmentProgress();
-            ShowDetailedAnalysis();
-
-            _monitor.Log("\n=== КОНЕЦ ДИАГНОСТИКИ ===", LogLevel.Info);
-        }
-
-        private void ShowActiveTopics()
-        {
-            var topics = Game1.player.activeDialogueEvents;
-            _monitor.Log($"\n📋 Активные топики:", LogLevel.Info);
-            if (topics != null && topics.Count() > 0)
-            {
-                int foundCount = 0;
-                foreach (var key in topics.Keys)
-                {
-                    if (key.Contains("Stress") || key.Contains("Treatment") || key.Contains("Harvey"))
-                    {
-                        topics.TryGetValue(key, out int days);
-                        _monitor.Log($"  • {key} = {days} дней", LogLevel.Info);
-                        foundCount++;
-                    }
-                }
-                if (foundCount == 0)
-                {
-                    _monitor.Log("  Нет топиков, связанных со стрессом", LogLevel.Info);
-                }
-            }
-            else
-            {
-                _monitor.Log("  Нет активных топиков", LogLevel.Info);
-            }
-        }
-
-        private void ShowActiveStressBuffs()
-        {
-            _monitor.Log($"\n🔴 Активные баффы стресса:", LogLevel.Info);
-            var stressBuffIds = new[] { "HarveyMod_Tired", "HarveyMod_Lonely", "HarveyMod_Thunder", "HarveyMod_Hunger",
-                "HarveyMod_Overwork", "HarveyMod_NoSleep", "HarveyMod_TooCold", "HarveyMod_Social", "HarveyMod_Darkness" };
-            bool hasAnyBuff = false;
-            foreach (var buffId in stressBuffIds)
-            {
-                if (_stateService.HasActiveBuffInGame(buffId))
-                {
-                    var isLocked = _data.StressState.IsTreatmentLocked(buffId) ? "🔒 ЗАЛОЧЕН" : "⚪ Свободный";
-                    _monitor.Log($"  • {buffId} - {isLocked}", LogLevel.Info);
-                    hasAnyBuff = true;
-                }
-            }
-            if (!hasAnyBuff) _monitor.Log("  Нет активных баффов стресса", LogLevel.Info);
-        }
-
-        private void ShowActiveTreatments()
-        {
-            _monitor.Log($"\n🔒 Активные лечения (всего: {_data.StressState.GetActiveTreatmentsCount()}):", LogLevel.Info);
-            if (_data.StressState.ActiveTreatments.Count > 0)
-            {
-                foreach (var kvp in _data.StressState.ActiveTreatments)
-                {
-                    var questId = kvp.Value.QuestId ?? "нет квеста";
-                    _monitor.Log($"  • {kvp.Key} → квест: {questId}", LogLevel.Info);
-                }
-            }
-            else
-            {
-                _monitor.Log("  Нет залоченных дебаффов", LogLevel.Info);
-            }
-        }
-
-        private void ShowTreatmentHistory()
-        {
-            _monitor.Log($"\n📊 История лечений (всего: {_data.StressState.TreatmentHistory.Count}):", LogLevel.Info);
-            if (_data.StressState.TreatmentHistory.Count > 0)
-            {
-                foreach (var (buffId, historyList) in _data.StressState.TreatmentHistory)
-                {
-                    if (historyList.Count > 0)
-                    {
-                        var treatment = historyList.Last();
-                        var daysSince = SDate.Now().DaysSinceStart - treatment.IssuedDate.DaysSinceStart;
-                        var status = treatment.IsCured ? "✅ Вылечен" :
-                                    (treatment.TreatmentStarted ? "🔄 Лечение начато" : "⏳ Ожидание");
-                        _monitor.Log($"  • {buffId}: {status}, выдан {treatment.IssuedDate} ({daysSince}д назад)", LogLevel.Info);
-                    }
-                }
-            }
-            else
-            {
-                _monitor.Log("  Нет сохраненных состояний", LogLevel.Info);
-            }
-        }
-
-        private void ShowConversationState()
-        {
-            _monitor.Log($"\n💬 Состояние разговоров:", LogLevel.Info);
-            _monitor.Log($"  • Разговоров сегодня: {_data.TalkedNpcsToday.Count}", LogLevel.Info);
-            if (_data.TalkedNpcsToday.Count > 0)
-            {
-                foreach (var npc in _data.TalkedNpcsToday)
-                {
-                    _monitor.Log($"    - {npc}", LogLevel.Info);
-                }
-            }
-        }
-
-        private void ShowTreatmentProgress()
-        {
-            _monitor.Log($"\n🏥 Прогресс лечения:", LogLevel.Info);
-            bool hasActiveTreatment = false;
-            foreach (var (buffId, treatment) in _data.StressState.ActiveTreatments)
-            {
-                if (treatment.TreatmentStarted && !string.IsNullOrEmpty(treatment.QuestId))
-                {
-                    hasActiveTreatment = true;
-                    var progress = treatment.Progress;
-                    if (progress != null)
-                    {
-                        _monitor.Log($"  • {buffId}: разговоры={progress.TalkedUniqueToday}, время с Харви={progress.SecondsNearHarvey}с", LogLevel.Info);
-                    }
-                }
-            }
-            if (!hasActiveTreatment)
-            {
-                _monitor.Log("  Нет активного лечения", LogLevel.Info);
-            }
-        }
-
-        private void ShowDetailedAnalysis()
-        {
-            _monitor.Log("\n🔍 ДЕТАЛЬНЫЙ АНАЛИЗ СОСТОЯНИЯ:", LogLevel.Info);
-            _monitor.Log($"ActiveTreatments: {_data.StressState.ActiveTreatments.Count}", LogLevel.Info);
-            _monitor.Log($"TreatmentHistory: {_data.StressState.TreatmentHistory.Count}", LogLevel.Info);
-            _monitor.Log($"TalkedNpcsToday: {_data.TalkedNpcsToday.Count}", LogLevel.Info);
-        }
-
-        private void ClearAllStressStates()
-        {
-            int removedBuffs = 0;
-            int removedQuests = 0;
-            int removedTopics = 0;
-
-            var allBuffIds = new[]
-            {
-                "HarveyMod_Tired", "HarveyMod_Lonely", "HarveyMod_Thunder", "HarveyMod_Hunger",
-                "HarveyMod_Overwork", "HarveyMod_NoSleep", "HarveyMod_TooCold", "HarveyMod_Social", "HarveyMod_Darkness"
-            };
-
-            foreach (var buffId in allBuffIds)
-            {
-                if (_stateService.HasActiveBuffInGame(buffId))
-                {
-                    // Note: BuffService.RemoveBuff is not accessible here, using direct buff removal
-                    Game1.player.buffs.Remove(buffId);
-                    removedBuffs++;
-                }
-            }
-
-            var allQuestIds = new[]
-            {
-                "HarveyMod_Tired", "HarveyMod_Lonely", "HarveyMod_Thunder", "HarveyMod_Hunger",
-                "HarveyMod_Overwork", "HarveyMod_NoSleep", "HarveyMod_TooCold", "HarveyMod_Social", "HarveyMod_Darkness"
-            };
-
-            foreach (var questId in allQuestIds)
-            {
-                if (_stateService.HasQuestInJournal(questId))
-                {
-                    _stateService.CompleteTreatment(questId);
-                    removedQuests++;
-                }
-            }
-
-            var allTopics = new[]
-            {
-                "topicStressTired", "topicStressLonely", "topicStressThunder", "topicStressHunger",
-                "topicStressOverwork", "topicStressNoSleep", "topicStressTooCold", "topicStressSocial",
-                "topicStressDarkness", "topicLonelyPending", "topicOverworkBreakActive",
-                "topicOverworkBreakInterrupted", "topicAteToday", "topicSpokeToday",
-                "topicStressTreatmentStartTired", "topicStressTreatmentStartLonely", "topicStressTreatmentStartThunder",
-                "topicStressTreatmentStartHunger", "topicStressTreatmentStartOverwork", "topicStressTreatmentStartNoSleep",
-                "topicStressTreatmentStartTooCold", "topicStressTreatmentStartSocial", "topicStressTreatmentStartDarkness",
-                "topicStressTreatmentStarted"
-            };
-
-            foreach (var topic in allTopics)
-            {
-                if (Game1.player.activeDialogueEvents.ContainsKey(topic))
-                {
-                    Game1.player.activeDialogueEvents.Remove(topic);
-                    removedTopics++;
-                }
-            }
-
-            _data.StressState.ActiveTreatments.Clear();
-            _data.StressState.LastIssuedDay.Clear();
-            _data.StressState.TreatmentHistory.Clear();
-            _data.TalkedNpcsToday.Clear();
-            _data.OverworkBreaksToday = 0;
-            _data.OverworkBreakSeconds = 0;
-            _data.OverworkBreakActive = false;
-            _data.TalkedToHarveyToday = false;
-
-            SaveData();
-
-            _monitor.Log($"Все состояния стресса очищены: {removedBuffs} баффов, {removedQuests} квестов, {removedTopics} топиков.", LogLevel.Info);
-            Game1.addHUDMessage(new HUDMessage("Все состояния стресса очищены", HUDMessage.newQuest_type));
-        }
-
-        private void SaveData()
-        {
-            _helper.Data.WriteSaveData("stress-data-v1", _data);
+            new HsDebugReporter(_data, _stateService, _monitor).WriteFullReport();
         }
     }
 }

@@ -12,9 +12,9 @@ namespace HarveyStressMeter.Patches
     public static class FoodConsumptionPatch
     {
         private static IMonitor? _monitor;
-        private static Action? _onFoodConsumed;
+        private static Action<StardewValley.Object>? _onFoodConsumed;
 
-        public static void Initialize(IMonitor monitor, Action onFoodConsumed)
+        public static void Initialize(IMonitor monitor, Action<StardewValley.Object> onFoodConsumed)
         {
             _monitor = monitor;
             _onFoodConsumed = onFoodConsumed;
@@ -39,26 +39,35 @@ namespace HarveyStressMeter.Patches
         }
 
         /// <summary>
-        /// Сохраняет, было ли это реальное поедание локального игрока.
+        /// Сохраняет съеденный предмет для postfix (до очистки itemToEat).
         /// </summary>
-        public static void DoneEatingPrefix(Farmer __instance, ref bool __state)
+        public static void DoneEatingPrefix(Farmer __instance, ref StardewValley.Object? __state)
         {
-            __state = __instance.IsLocalPlayer
-                && __instance.mostRecentlyGrabbedItem != null
-                && __instance.itemToEat is StardewValley.Object o
-                && o.Edibility != -300;
+            __state = null;
+
+            if (!__instance.IsLocalPlayer)
+                return;
+
+            if (__instance.mostRecentlyGrabbedItem == null)
+                return;
+
+            if (__instance.itemToEat is not StardewValley.Object consumed || consumed.Edibility == -300)
+                return;
+
+            __state = consumed;
         }
 
-        public static void DoneEatingPostfix(Farmer __instance, bool __state)
+        public static void DoneEatingPostfix(Farmer __instance, StardewValley.Object? __state)
         {
-            if (!__state)
+            if (__state == null)
                 return;
 
             try
             {
-                var consumed = __instance.itemToEat as StardewValley.Object;
-                _monitor?.Log($"[FoodConsumptionPatch] ✅ Игрок съел: {consumed?.DisplayName ?? consumed?.Name}", LogLevel.Debug);
-                _onFoodConsumed?.Invoke();
+                _monitor?.Log(
+                    $"[FoodConsumptionPatch] ✅ Игрок съел: {__state.DisplayName ?? __state.Name} ({__state.QualifiedItemId})",
+                    LogLevel.Debug);
+                _onFoodConsumed?.Invoke(__state);
             }
             catch (Exception ex)
             {

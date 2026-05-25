@@ -19,7 +19,6 @@ namespace HarveyStressMeter
         // Configuration and data
         private ModConfig _config = null!;
         private SaveData _data = new();
-        private const string SaveKey = "stress-data-v1";
 
         // Services
         private BuffService _buffService = null!;
@@ -30,6 +29,7 @@ namespace HarveyStressMeter
         private DarknessService _darknessService = null!;
         private StressDialogueService _stressDialogueService = null!;
         private GameDataService _gameDataService = null!;
+        private ModResetService _modResetService = null!;
 
         // Handlers (following SRP)
         private Handlers.EventHandler _eventHandler = null!;
@@ -105,14 +105,18 @@ namespace HarveyStressMeter
             _uiHandler = new UIHandler(Monitor, _data, _helper);
             _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _stressDialogueService);
             _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _gameLogicHandler, _uiHandler, _darknessService);
-            _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler);
+            _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler, _modResetService);
             
             // Патч еды применяется после создания GameLogicHandler, когда callback уже известен
-            FoodConsumptionPatch.Initialize(Monitor, () => _gameLogicHandler.OnFoodConsumed());
+            FoodConsumptionPatch.Initialize(Monitor, consumed => _gameLogicHandler.OnFoodConsumed(consumed));
+            StressDialogueConsentPatch.Initialize(Monitor, _stressDialogueService);
             if (_harmony != null)
+            {
                 FoodConsumptionPatch.Apply(_harmony);
+                StressDialogueConsentPatch.Apply(_harmony);
+            }
             else
-                Monitor.Log("❌ Harmony не инициализирован — отслеживание еды отключено", LogLevel.Error);
+                Monitor.Log("❌ Harmony не инициализирован — отслеживание еды и согласия в диалогах отключено", LogLevel.Error);
         }
     }
 }

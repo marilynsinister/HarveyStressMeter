@@ -294,8 +294,10 @@ namespace HarveyStressMeter.Services
             _monitor.Log($"[StartTreatment] ═══ СОСТОЯНИЕ ПОСЛЕ НАЧАЛА ЛЕЧЕНИЯ ═══", LogLevel.Info);
             _monitor.Log($"[StartTreatment] TreatmentKey: {treatmentKey}", LogLevel.Info);
             _monitor.Log($"[StartTreatment] InstanceNumber: {treatment.InstanceNumber}", LogLevel.Info);
-            _monitor.Log($"[StartTreatment] HasBuff({buffId}): {_stateService.HasActiveBuffInGame(buffId)}", LogLevel.Info);
-            _monitor.Log($"[StartTreatment] HasQuest({questId}): {_stateService.HasQuestInJournal(questId)}", LogLevel.Info);
+            _monitor.Log($"[StartTreatment] HasBuffInGame({buffId}): {_stateService.HasBuffInGame(buffId)}", LogLevel.Info);
+            _monitor.Log($"[StartTreatment] HasActiveTreatmentState({buffId}): {_stateService.HasActiveTreatmentState(buffId)}", LogLevel.Info);
+            _monitor.Log($"[StartTreatment] HasActiveQuestState({questId}): {_stateService.HasActiveQuestState(questId)}", LogLevel.Info);
+            _monitor.Log($"[StartTreatment] HasQuestInGameJournal({questId}): {_stateService.HasQuestInGameJournal(questId)}", LogLevel.Info);
             _monitor.Log($"[StartTreatment] ActiveTreatments.Count: {_data.StressState.ActiveTreatments.Count}", LogLevel.Info);
             _monitor.Log($"[StartTreatment] ActiveTreatmentsByBuff({buffId}).Count: {_data.StressState.GetActiveTreatmentCountByBuff(buffId)}", LogLevel.Info);
 
@@ -305,27 +307,28 @@ namespace HarveyStressMeter.Services
 
         public void CompleteTreatment(string buffId, string message = "Лечение завершено.")
         {
-            // ⭐ ИСПРАВЛЕНО: Находим активное лечение по buffId
             var activeTreatment = _data.StressState.GetActiveTreatment(buffId);
-            if (activeTreatment != null)
+            if (activeTreatment == null)
             {
-                // Отмечаем лечение как завершенное
-                activeTreatment.IsCured = true;
-                activeTreatment.CompletedDate = SDate.Now();
-
-                // Удаляем из активных лечений по уникальному ключу
-                _data.StressState.RemoveTreatment(activeTreatment.TreatmentKey);
+                _monitor.Log($"[CompleteTreatment] ⚠️ Активное лечение для buffId '{buffId}' не найдено — завершение пропущено", LogLevel.Warn);
+                return;
             }
 
-            // Отмечаем лечение как завершенное в истории
-            if (_data.StressState.TreatmentHistory.TryGetValue(buffId, out var historyList) && historyList.Count > 0)
+            var questId = activeTreatment.QuestId;
+            if (string.IsNullOrEmpty(questId) && !BuffToQuest.TryGetValue(buffId, out questId))
             {
-                var latestTreatment = historyList.Last();
-                latestTreatment.IsCured = true;
-                latestTreatment.CompletedDate = SDate.Now();
+                _monitor.Log($"[CompleteTreatment] ⚠️ QuestId не найден для buffId '{buffId}' — завершение пропущено", LogLevel.Warn);
+                return;
             }
 
-            // ⭐ НОВОЕ: Удаляем топик стресса при завершении лечения
+            _stateService.CompleteTreatment(questId);
+
+            if (_data.StressState.HasActiveQuest(questId))
+            {
+                _monitor.Log($"[CompleteTreatment] ⚠️ StateService не завершил лечение для questId '{questId}' — wrapper и HUD пропущены", LogLevel.Warn);
+                return;
+            }
+
             if (BuffToStressTopic.TryGetValue(buffId, out var stressTopic))
             {
                 if (ConversationHelper.HasTopic(stressTopic.topic))
@@ -335,19 +338,6 @@ namespace HarveyStressMeter.Services
                 }
             }
 
-            // Удаляем из активных баффов и квестов через StateService
-            if (BuffToQuest.TryGetValue(buffId, out var questId))
-            {
-                _stateService.CompleteTreatment(questId);
-            }
-            else
-            {
-                // Если нет квеста, просто удаляем бафф
-                _buffService.RemoveBuff(buffId);
-            }
-
-            // ⭐ НОВОЕ: Применяем индивидуальный иммунитет после завершения лечения
-            // Используем запись в состоянии вместо баффа
             int immunityDays = GetImmunityDaysForDebuff(buffId);
             if (immunityDays > 0)
             {
@@ -373,7 +363,7 @@ namespace HarveyStressMeter.Services
 
         public void AddTopicForBuff(string buffId)
         {
-            if (!_stateService.HasActiveBuffInGame(buffId))
+            if (!_stateService.HasActiveTreatmentState(buffId))
                 return;
 
             if (BuffToStressTopic.TryGetValue(buffId, out var topic))
@@ -395,7 +385,7 @@ namespace HarveyStressMeter.Services
         {
             foreach (var (treatmentKey, treatment) in _data.StressState.ActiveTreatments)
             {
-                if (!treatment.IsCured && !_stateService.HasActiveBuffInGame(treatment.BuffId))
+                if (!treatment.IsCured && !_stateService.HasBuffInGame(treatment.BuffId))
                 {
                     if (!_buffService.ApplyBuffFromData(treatment.BuffId))
                     {
@@ -442,7 +432,7 @@ namespace HarveyStressMeter.Services
                 }
 
                 // Восстанавливаем бафф если потерялся
-                if (!_stateService.HasActiveBuffInGame(buffId))
+                if (!_stateService.HasBuffInGame(buffId))
                 {
                     if (_buffService.ApplyBuffFromData(buffId))
                     {
@@ -478,7 +468,7 @@ namespace HarveyStressMeter.Services
                 if (!ConversationHelper.HasTopic(topicData.topic))
                     continue;
 
-                if (_data.StressState.ActiveTreatments.ContainsKey(buffId))
+                if (_data.StressState.HasActiveBuff(buffId))
                     continue;
 
                 if (!BuffToQuest.TryGetValue(buffId, out var questId))
@@ -554,7 +544,7 @@ namespace HarveyStressMeter.Services
                 var buffId = treatment.BuffId;
 
                 // Проверяем, есть ли бафф в игре
-                if (!_stateService.HasActiveBuffInGame(buffId))
+                if (!_stateService.HasBuffInGame(buffId))
                 {
                     _monitor.Log($"[RestoreMissingBuffs] Восстанавливаем потерянный бафф '{buffId}' для лечения {treatmentKey}", LogLevel.Info);
                     if (_buffService.ApplyBuffFromData(buffId))
@@ -601,7 +591,7 @@ namespace HarveyStressMeter.Services
                 }
 
                 // Восстанавливаем бафф если его нет
-                if (!_stateService.HasActiveBuffInGame(buffId))
+                if (!_stateService.HasBuffInGame(buffId))
                 {
                     if (!_buffService.ApplyBuffFromData(buffId))
                     {
@@ -622,13 +612,11 @@ namespace HarveyStressMeter.Services
                 if (treatment.TreatmentStarted && !string.IsNullOrEmpty(treatment.QuestId))
                 {
                     if (!_questService.HasQuest(treatment.QuestId))
-                    {
                         _questService.AddQuest(treatment.QuestId);
-                        if (!_data.StressState.ActiveTreatments.ContainsKey(buffId))
-                        {
-                            _data.StressState.ActiveTreatments[buffId] = treatment;
-                        }
-                    }
+
+                    treatment.EnsureTreatmentKey();
+                    if (_data.StressState.GetTreatmentByKey(treatment.TreatmentKey) == null)
+                        _data.StressState.RestoreActiveTreatment(treatment);
                 }
             }
         }
@@ -666,7 +654,7 @@ namespace HarveyStressMeter.Services
             {
                 if (ConversationHelper.HasTopic(topic))
                 {
-                    bool hasActiveBuff = _stateService.HasActiveBuffInGame(buffId);
+                    bool hasActiveBuff = _stateService.HasActiveTreatmentState(buffId);
                     bool hasValidState = _data.StressState.TreatmentHistory.TryGetValue(buffId, out var historyList)
                                         && historyList.Count > 0
                                         && !historyList.Last().IsCured;

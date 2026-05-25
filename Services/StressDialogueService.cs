@@ -14,6 +14,20 @@ namespace HarveyStressMeter.Services
     /// </summary>
     public class StressDialogueService
     {
+        /// <summary>Ключи ответов #$y: первый = согласие, второй = отказ (index 1 и 3 в parseDialogueString).</summary>
+        internal const string ConsentAcceptResponseKey = "quickResponse1";
+        internal const string ConsentDeclineResponseKey = "quickResponse3";
+
+        private const string ConsentQuestionSuffix =
+            "#$b#$y 'Готова начать программу лечения?_Да, давай._Хорошо. Тогда оформлю всё и мы начнём.$h_Не сейчас._Хорошо. Когда будешь готова — поговори со мной снова.$l'";
+
+        private enum ConsentResult
+        {
+            None,
+            Accepted,
+            Declined
+        }
+
         private readonly IMonitor _monitor;
         private readonly IModHelper _helper;
         private readonly StateService _stateService;
@@ -21,6 +35,7 @@ namespace HarveyStressMeter.Services
         
         private StressDialoguesContainer? _dialoguesData;
         private string? _pendingBuffIdForTreatment;
+        private ConsentResult _pendingConsentResult = ConsentResult.None;
         
         // ⭐ ИСПРАВЛЕНИЕ: Флаг для предотвращения бесконечного цикла при показе диалогов
         private bool _isShowingDialogue = false;
@@ -92,14 +107,11 @@ namespace HarveyStressMeter.Services
 
             foreach (var buffId in buffPriority)
             {
-                // ⭐ ИСПРАВЛЕНИЕ: Проверяем внутримодовое состояние через StateService
-                // Не используем HasActiveBuffInGame, потому что бафф может быть снят, но лечение не завершено
-                
                 // 1. Проверяем, есть ли активное лечение этого типа
                 var treatment = _stateService.GetActiveTreatment(buffId);
                 
-                // 2. Если лечения нет, но бафф активен в игре - это новый случай
-                if (treatment == null && _stateService.HasActiveBuffInGame(buffId))
+                // 2. Если лечения нет, но бафф висит на игроке — новый случай (game buff, не mod state)
+                if (treatment == null && _stateService.HasBuffInGame(buffId))
                 {
                     _monitor.Log($"[StressDialogueService] Найден активный дебафф без лечения: {buffId}", LogLevel.Debug);
                     return buffId;
@@ -171,7 +183,7 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// Показывает диалог стресса и запоминает buffId для запуска лечения
+        /// Показывает диалог стресса с вопросом о согласии на лечение (#$y).
         /// </summary>
         public void ShowStressDialogue(string buffId, string dialogueText)
         {
@@ -182,23 +194,49 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
-            // ⭐ ИСПРАВЛЕНИЕ: Устанавливаем флаг что диалог показывается
             _isShowingDialogue = true;
-            
-            // Запоминаем buffId для запуска лечения после закрытия диалога
+            _pendingConsentResult = ConsentResult.None;
             _pendingBuffIdForTreatment = buffId;
 
-            // Создаём диалог программно
-            var dialogue = new Dialogue(harvey, null, dialogueText);
+            var fullDialogueText = AppendConsentQuestion(dialogueText);
+            var dialogue = new Dialogue(harvey, null, fullDialogueText);
             harvey.CurrentDialogue.Push(dialogue);
             Game1.drawDialogue(harvey);
 
-            _monitor.Log($"[StressDialogueService] ✅ Показан диалог для {buffId}", LogLevel.Info);
+            _monitor.Log($"[StressDialogueService] ✅ Показан диалог для {buffId} (с выбором согласия)", LogLevel.Info);
         }
 
         /// <summary>
-        /// Проверяет, был ли закрыт диалог стресса, и запускает лечение
-        /// Вызывается из GameLogicHandler при HandleHarveyDialogueEnd
+        /// Записывает выбор игрока из #$y quick response (вызывается Harmony-патчем).
+        /// </summary>
+        public bool TryRecordConsentResponse(string? responseKey)
+        {
+            if (string.IsNullOrEmpty(_pendingBuffIdForTreatment) || !_isShowingDialogue)
+                return false;
+
+            if (responseKey == ConsentAcceptResponseKey)
+            {
+                _pendingConsentResult = ConsentResult.Accepted;
+                _monitor.Log(
+                    $"[StressDialogueService] Игрок согласилась на лечение {_pendingBuffIdForTreatment}",
+                    LogLevel.Info);
+                return true;
+            }
+
+            if (responseKey == ConsentDeclineResponseKey)
+            {
+                _pendingConsentResult = ConsentResult.Declined;
+                _monitor.Log(
+                    $"[StressDialogueService] Игрок отложила лечение {_pendingBuffIdForTreatment}",
+                    LogLevel.Info);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// После закрытия programmatic-диалога: StartTreatment только при явном согласии.
         /// </summary>
         public void CheckAndStartTreatmentAfterDialogue()
         {
@@ -206,27 +244,44 @@ namespace HarveyStressMeter.Services
                 return;
 
             var buffId = _pendingBuffIdForTreatment;
+            var consent = _pendingConsentResult;
+
             _pendingBuffIdForTreatment = null;
-            
-            // ⭐ ИСПРАВЛЕНИЕ: Сбрасываем флаг показа диалога
+            _pendingConsentResult = ConsentResult.None;
             _isShowingDialogue = false;
 
-            // Получаем отображаемое название баффа
+            if (consent != ConsentResult.Accepted)
+            {
+                var reason = consent == ConsentResult.Declined ? "отказ" : "диалог закрыт без выбора";
+                _monitor.Log(
+                    $"[StressDialogueService] Лечение для {buffId} не начато ({reason})",
+                    LogLevel.Info);
+                return;
+            }
+
             var dialogueData = _dialoguesData?.Dialogues.FirstOrDefault(d => d.BuffId == buffId);
             var displayName = dialogueData?.DisplayName ?? buffId;
 
-            // Запускаем лечение
-            _monitor.Log($"[StressDialogueService] Запуск лечения для {buffId} после закрытия диалога", LogLevel.Info);
+            _monitor.Log($"[StressDialogueService] Запуск лечения для {buffId} после согласия игрока", LogLevel.Info);
             _treatmentService.StartTreatment(buffId, displayName);
         }
 
         /// <summary>
-        /// Сбрасывает ожидающее лечение (например, при выходе из игры)
+        /// Сбрасывает ожидающее согласие (выход в меню, загрузка save и т.д.).
         /// </summary>
         public void ClearPendingTreatment()
         {
             _pendingBuffIdForTreatment = null;
-            _isShowingDialogue = false; // ⭐ ИСПРАВЛЕНИЕ: Также сбрасываем флаг показа диалога
+            _pendingConsentResult = ConsentResult.None;
+            _isShowingDialogue = false;
+        }
+
+        private static string AppendConsentQuestion(string dialogueText)
+        {
+            if (dialogueText.Contains("$y '", StringComparison.Ordinal))
+                return dialogueText;
+
+            return dialogueText + ConsentQuestionSuffix;
         }
 
         /// <summary>

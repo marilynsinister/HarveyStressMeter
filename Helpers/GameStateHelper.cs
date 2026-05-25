@@ -11,7 +11,25 @@ namespace HarveyStressMeter.Helpers
     public static class GameStateHelper
     {
         public static bool IsTimeBetween(int from, int to) 
+            => IsTimeInRange(from, to);
+
+        /// <summary>
+        /// Линейный диапазон 26-hour time SDV (from &lt;= to). Например 2000–2600 = 20:00–2:00.
+        /// </summary>
+        public static bool IsTimeInRange(int from, int to)
             => Game1.timeOfDay >= from && Game1.timeOfDay <= to;
+
+        /// <summary>
+        /// Вечер и ночь до 2:00 (по умолчанию 20:00–2:00).
+        /// </summary>
+        public static bool IsEveningNight(int start = 2000, int end = 2600)
+            => IsTimeInRange(start, end);
+
+        /// <summary>
+        /// После полуночи до 2:00 (2400–2600).
+        /// </summary>
+        public static bool IsAfterMidnightUntilTwoAm()
+            => IsTimeInRange(2400, 2600);
 
         public static bool IsSeasonOneOf(params string[] seasons)
         {

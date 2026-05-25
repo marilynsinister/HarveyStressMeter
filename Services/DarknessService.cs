@@ -86,7 +86,7 @@ namespace HarveyStressMeter.Services
             string displayName = GetFearLevelDisplayName();
             
             // Проверяем, уже активен ли бафф этого уровня
-            if (_stateService.HasActiveBuffInGame(buffId))
+            if (_stateService.HasBuffInGame(buffId))
             {
                 _monitor.Log($"[DarknessService] Бафф {buffId} уже активен", LogLevel.Debug);
                 return;
@@ -312,7 +312,7 @@ namespace HarveyStressMeter.Services
             if (isEvening && atHome)
             {
                 // Применяем бафф "Приглушенный свет"
-                if (!_stateService.HasActiveBuffInGame("buffDimLight"))
+                if (!_stateService.HasBuffInGame("buffDimLight"))
                 {
                     _buffService.ApplyBuff("buffDimLight", "Приглушенный свет", 
                         new StardewValley.Buffs.BuffEffects(), -2);
@@ -340,7 +340,7 @@ namespace HarveyStressMeter.Services
             else
             {
                 // Убираем бафф если покинули дом или не вечер
-                if (_stateService.HasActiveBuffInGame("buffDimLight"))
+                if (_stateService.HasBuffInGame("buffDimLight"))
                 {
                     _buffService.RemoveBuff("buffDimLight");
                 }
@@ -492,7 +492,7 @@ namespace HarveyStressMeter.Services
             if (isLateNight && inMountains)
             {
                 // Применяем бафф "Свет надежды" (виртуальный фонарь)
-                if (!_stateService.HasActiveBuffInGame("buffHarveyLantern"))
+                if (!_stateService.HasBuffInGame("buffHarveyLantern"))
                 {
                     var effects = new StardewValley.Buffs.BuffEffects();
                     effects.Defense.Add(2);
@@ -534,7 +534,7 @@ namespace HarveyStressMeter.Services
             else
             {
                 // Убираем бафф если покинули горы
-                if (_stateService.HasActiveBuffInGame("buffHarveyLantern"))
+                if (_stateService.HasBuffInGame("buffHarveyLantern"))
                 {
                     _buffService.RemoveBuff("buffHarveyLantern");
                 }
@@ -616,7 +616,7 @@ namespace HarveyStressMeter.Services
             
             foreach (var buffId in allBuffIds)
             {
-                if (buffId != currentBuffId && _stateService.HasActiveBuffInGame(buffId))
+                if (buffId != currentBuffId && _stateService.HasBuffInGame(buffId))
                 {
                     _buffService.RemoveBuff(buffId);
                 }
@@ -704,7 +704,7 @@ namespace HarveyStressMeter.Services
             if (_data.Darkness.FearLevel > 0)
             {
                 string currentBuffId = GetCurrentBuffId();
-                if (!_stateService.HasActiveBuffInGame(currentBuffId))
+                if (!_stateService.HasBuffInGame(currentBuffId))
                 {
                     string displayName = GetFearLevelDisplayName();
                     var effects = GetFearLevelEffects(_data.Darkness.FearLevel);

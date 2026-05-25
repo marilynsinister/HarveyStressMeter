@@ -14,6 +14,10 @@ namespace HarveyStressMeter.Services
     /// </summary>
     public class TriggerService
     {
+        private const int TiredRestSecondsRequired = 60;
+        private const int ThunderSecondsRequired = 120;
+        private const int OverworkBreakSecondsRequired = 30;
+
         private readonly SaveData _data;
         private readonly BuffService _buffService;
         private readonly QuestService _questService;
@@ -44,54 +48,25 @@ namespace HarveyStressMeter.Services
 
         private void CheckTiredRestTrigger()
         {
-            if (!_stateService.HasQuestInJournal(QuestIds.Tired)) return;
-
-            if (Game1.player.currentLocation is StardewValley.Locations.FarmHouse
-                && !GameStateHelper.HasHeavyTools(Game1.player)
-                && !_stateService.HasActiveBuffInGame(BuffIds.RestingAtHome))
-            {
-                Game1.playSound("questcomplete");
-                _questService.CompleteQuest(QuestIds.Tired);
-                _buffService.RemoveBuff(BuffIds.Tired);
-                ConversationHelper.AddTopic("topicStressTreatmentTiredCured", 2);
-                _stateService.CompleteTreatment(QuestIds.Tired);
-            }
+            // Завершение Tired — через UpdateTiredRestProgress (tick, 60 сек дома без инструментов).
+            // Instant-complete и gate !RestingAtHome удалены (C-02): конфликтовали с buffRestingAtHome.
         }
 
         private void CheckThunderCalmingTrigger()
         {
-            if (!_stateService.HasQuestInJournal(QuestIds.Thunder)) return;
-
-            if (Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
-                && (Game1.isLightning || Game1.isRaining)
-                && !_stateService.HasActiveBuffInGame(BuffIds.CalmingAtHospital))
-            {
-                Game1.playSound("questcomplete");
-                _questService.CompleteQuest(QuestIds.Thunder);
-                _buffService.RemoveBuff(BuffIds.Thunder);
-                ConversationHelper.AddTopic("topicStressTreatmentThunderCured", 2);
-                _stateService.CompleteTreatment(QuestIds.Thunder);
-            }
+            // Завершение Thunder — через UpdateThunderProgress (120 сек, Hospital, дождь/гроза, Harvey рядом).
+            // Legacy instant-complete при !CalmingAtHospital отключён (M-04).
         }
 
         private void CheckOverworkBreakCompleteTrigger()
         {
-            if (!_stateService.HasQuestInJournal(QuestIds.Overwork)) return;
-            if (_stateService.HasActiveBuffInGame(BuffIds.OverworkBreak)) return;
-
-            if (ConversationHelper.HasTopic(TopicIds.OverworkBreakActive)
-                && !ConversationHelper.HasTopic(TopicIds.OverworkBreakInterrupted))
-            {
-                _data.OverworkBreaksToday++;
-                Game1.playSound("reward");
-                Game1.addHUDMessage(new HUDMessage($"+1 отдых ({_data.OverworkBreaksToday}/3)", HUDMessage.achievement_type));
-                ConversationHelper.RemoveTopic(TopicIds.OverworkBreakActive);
-            }
+            // Завершение перерывов Overwork — через UpdateOverworkBreakProgress (tick, 30 сек в rest zone).
+            // Legacy CP trigger path (topic + !buff) отключён (C-03): CP TriggerAction не wired.
         }
 
         private void CheckSocialQuestCompleteTrigger()
         {
-            if (!_stateService.HasQuestInJournal(QuestIds.Social)) return;
+            if (!_stateService.HasActiveQuestState(QuestIds.Social)) return;
 
             var socialTreatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.Social);
             if (socialTreatment?.Progress == null) return;
@@ -105,8 +80,6 @@ namespace HarveyStressMeter.Services
                 _monitor.Log($"[Social Quest] Время с Харви: {socialTreatment.Progress.SecondsNearHarvey} сек", LogLevel.Info);
 
                 Game1.playSound("questcomplete");
-                _questService.CompleteQuest(QuestIds.Social);
-                _buffService.RemoveBuff(BuffIds.Social);
                 ConversationHelper.AddTopic("topicStressTreatmentSocialCured", 2);
                 _stateService.CompleteTreatment(QuestIds.Social);
             }
@@ -136,12 +109,7 @@ namespace HarveyStressMeter.Services
             switch (buffId)
             {
                 case BuffIds.Thunder:
-                    if (harveyNearby)
-                    {
-                        progress.SecondsNearHarvey++;
-                        if (progress.SecondsNearHarvey >= 120)
-                            _treatmentService.CompleteTreatment(buffId, "Мы пережили грозу вместе.");
-                    }
+                    UpdateThunderProgress(progress, harveyNearby);
                     break;
 
                 case BuffIds.Darkness:
@@ -165,6 +133,14 @@ namespace HarveyStressMeter.Services
                     }
                     break;
 
+                case BuffIds.Tired:
+                    UpdateTiredRestProgress(progress);
+                    break;
+
+                case BuffIds.Overwork:
+                    UpdateOverworkBreakProgress();
+                    break;
+
                 case BuffIds.Social:
                     UpdateSocialAnxietyProgress(progress, harveyNearby);
                     break;
@@ -180,13 +156,180 @@ namespace HarveyStressMeter.Services
                 p.AteAnyFood = progress.AteAnyFood;
                 p.WarmSeconds = progress.WarmSeconds;
                 p.EarlySleepStreak = progress.EarlySleepStreak;
+                p.TiredRestSeconds = progress.TiredRestSeconds;
             });
+        }
+
+        private void UpdateThunderProgress(TreatmentProgress progress, bool harveyNearby)
+        {
+            if (!_stateService.HasActiveQuestState(QuestIds.Thunder))
+                return;
+
+            if (Game1.CurrentEvent != null)
+                return;
+
+            if (!IsThunderQuestProgressConditionsMet(harveyNearby))
+                return;
+
+            progress.SecondsNearHarvey++;
+
+            switch (progress.SecondsNearHarvey)
+            {
+                case 30:
+                    Game1.addHUDMessage(new HUDMessage("Гроза — рядом с Харви: 30/120 сек", HUDMessage.newQuest_type));
+                    UpdateThunderQuestDescription(progress);
+                    break;
+                case 60:
+                    Game1.addHUDMessage(new HUDMessage("Гроза — рядом с Харви: 60/120 сек", HUDMessage.newQuest_type));
+                    UpdateThunderQuestDescription(progress);
+                    break;
+                case 90:
+                    Game1.addHUDMessage(new HUDMessage("Гроза — рядом с Харви: 90/120 сек", HUDMessage.newQuest_type));
+                    UpdateThunderQuestDescription(progress);
+                    break;
+                case 120:
+                    UpdateThunderQuestDescription(progress);
+                    break;
+            }
+
+            if (progress.SecondsNearHarvey >= ThunderSecondsRequired)
+                CompleteThunderTreatment();
+        }
+
+        private static bool IsThunderQuestProgressConditionsMet(bool harveyNearby)
+        {
+            return harveyNearby
+                && Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
+                && (Game1.isLightning || Game1.isRaining);
+        }
+
+        private void CompleteThunderTreatment()
+        {
+            Game1.playSound("questcomplete");
+            ConversationHelper.AddTopic("topicStressTreatmentThunderCured", 2);
+            _stateService.CompleteTreatment(QuestIds.Thunder);
+        }
+
+        private void UpdateThunderQuestDescription(TreatmentProgress progress)
+        {
+            int seconds = Math.Min(progress.SecondsNearHarvey, ThunderSecondsRequired);
+            string progressLine = progress.SecondsNearHarvey >= ThunderSecondsRequired
+                ? "✅ Вы пережили грозу вместе!"
+                : $"Рядом с Харви в клинике: {seconds}/{ThunderSecondsRequired} сек (нужен дождь или гроза)";
+
+            _questService.UpdateQuest(QuestIds.Thunder,
+                objective: $"Проведи время с Харви в клинике во время грозы.\n\n{progressLine}");
+        }
+
+        private void UpdateTiredRestProgress(TreatmentProgress progress)
+        {
+            if (!_stateService.HasActiveQuestState(QuestIds.Tired))
+                return;
+
+            if (Game1.CurrentEvent != null)
+                return;
+
+            bool restingAtHome = Game1.player.currentLocation is StardewValley.Locations.FarmHouse
+                && !GameStateHelper.HasHeavyTools(Game1.player);
+
+            if (!restingAtHome)
+                return;
+
+            progress.TiredRestSeconds++;
+
+            switch (progress.TiredRestSeconds)
+            {
+                case 15:
+                    Game1.addHUDMessage(new HUDMessage("Отдых дома: 15/60 сек", HUDMessage.newQuest_type));
+                    UpdateTiredQuestDescription(progress);
+                    break;
+                case 30:
+                    Game1.addHUDMessage(new HUDMessage("Отдых дома: 30/60 сек", HUDMessage.newQuest_type));
+                    UpdateTiredQuestDescription(progress);
+                    break;
+                case 45:
+                    Game1.addHUDMessage(new HUDMessage("Отдых дома: 45/60 сек", HUDMessage.newQuest_type));
+                    UpdateTiredQuestDescription(progress);
+                    break;
+                case 60:
+                    UpdateTiredQuestDescription(progress);
+                    break;
+            }
+
+            if (progress.TiredRestSeconds >= TiredRestSecondsRequired)
+            {
+                Game1.playSound("questcomplete");
+                ConversationHelper.AddTopic("topicStressTreatmentTiredCured", 2);
+                _stateService.CompleteTreatment(QuestIds.Tired);
+            }
+        }
+
+        private void UpdateTiredQuestDescription(TreatmentProgress progress)
+        {
+            int seconds = Math.Min(progress.TiredRestSeconds, TiredRestSecondsRequired);
+            string progressLine = progress.TiredRestSeconds >= TiredRestSecondsRequired
+                ? "✅ Отдых дома завершён!"
+                : $"Отдых дома: {seconds}/{TiredRestSecondsRequired} сек (уберите кирку, топор и мотыгу)";
+
+            _questService.UpdateQuest(QuestIds.Tired,
+                objective: $"Отдохни в фермерском доме, избегая тяжёлой работы.\n\n{progressLine}");
+        }
+
+        private void UpdateOverworkBreakProgress()
+        {
+            if (!_stateService.HasActiveQuestState(QuestIds.Overwork))
+                return;
+
+            if (Game1.CurrentEvent != null)
+                return;
+
+            if (_data.OverworkBreaksToday >= 3)
+                return;
+
+            if (!GameStateHelper.IsInRestZone())
+            {
+                if (_data.OverworkBreakSeconds > 0 || _data.OverworkBreakActive)
+                {
+                    _data.OverworkBreakSeconds = 0;
+                    _data.OverworkBreakActive = false;
+                }
+                return;
+            }
+
+            if (!_stateService.HasBuffInGame(BuffIds.OverworkBreak))
+                return;
+
+            _data.OverworkBreakActive = true;
+            _data.OverworkBreakSeconds++;
+
+            if (_data.OverworkBreakSeconds < OverworkBreakSecondsRequired)
+                return;
+
+            _data.OverworkBreaksToday = Math.Min(3, _data.OverworkBreaksToday + 1);
+            _data.OverworkBreakSeconds = 0;
+            _data.OverworkBreakActive = false;
+
+            Game1.playSound("reward");
+            Game1.addHUDMessage(new HUDMessage($"Перерыв {_data.OverworkBreaksToday}/3", HUDMessage.achievement_type));
+
+            if (_data.OverworkBreaksToday >= 3)
+                CompleteOverworkTreatment();
+        }
+
+        private void CompleteOverworkTreatment()
+        {
+            Game1.playSound("questcomplete");
+            ConversationHelper.RemoveTopic(TopicIds.OverworkBreakActive);
+            ConversationHelper.RemoveTopic(TopicIds.OverworkBreakInterrupted);
+            ConversationHelper.AddTopic("topicStressTreatmentOverworkCured", 2);
+            _buffService.RemoveBuff(BuffIds.OverworkBreak);
+            _stateService.CompleteTreatment(QuestIds.Overwork);
         }
 
         private void UpdateSocialAnxietyProgress(TreatmentProgress progress, bool harveyNearby)
         {
             // ⭐ ИСПРАВЛЕНО: Обновляем время с Харви ТОЛЬКО если квест Social активен
-            if (_stateService.HasQuestInJournal(QuestIds.Social))
+            if (_stateService.HasActiveQuestState(QuestIds.Social))
             {
                 // Обновляем время с Харви (возвращает true если были изменения)
                 bool timeChanged = UpdateHarveyTimeProgress(progress, harveyNearby);
@@ -288,7 +431,7 @@ namespace HarveyStressMeter.Services
         {
             // ⭐ ИСПРАВЛЕНО: Проверяем, что квест еще активен перед завершением
             // Это предотвращает повторные вызовы после завершения
-            if (!_stateService.HasQuestInJournal(QuestIds.Social))
+            if (!_stateService.HasActiveQuestState(QuestIds.Social))
             {
                 return; // Квест уже завершен, ничего не делаем
             }
@@ -301,9 +444,6 @@ namespace HarveyStressMeter.Services
                 // Добавляем топик для реакции Харви на завершение
                 ConversationHelper.AddTopic("topicStressTreatmentSocialCured", 2);
 
-                // Завершаем квест и снимаем дебафф
-                _questService.CompleteQuest(QuestIds.Social);
-                _buffService.RemoveBuff(BuffIds.Social);
                 _stateService.CompleteTreatment(QuestIds.Social);
 
                 _monitor.Log($"[Social Quest] Квест завершен, дебафф снят, топик реакции добавлен", LogLevel.Info);
@@ -318,9 +458,6 @@ namespace HarveyStressMeter.Services
                 // Добавляем топик для реакции Харви на завершение
                 ConversationHelper.AddTopic("topicStressTreatmentSocialCured", 2);
 
-                // Завершаем квест и снимаем дебафф
-                _questService.CompleteQuest(QuestIds.Social);
-                _buffService.RemoveBuff(BuffIds.Social);
                 _stateService.CompleteTreatment(QuestIds.Social);
 
                 _monitor.Log($"[Social Quest] Квест завершен, дебафф снят, топик реакции добавлен", LogLevel.Info);
