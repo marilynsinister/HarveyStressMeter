@@ -105,7 +105,7 @@ namespace HarveyStressMeter
             _uiHandler = new UIHandler(Monitor, _data, _helper);
             _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _stressDialogueService);
             _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _gameLogicHandler, _uiHandler, _darknessService);
-            _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler, _modResetService);
+            _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler, _modResetService, _stressDialogueService);
             
             // Патч еды применяется после создания GameLogicHandler, когда callback уже известен
             FoodConsumptionPatch.Initialize(Monitor, consumed => _gameLogicHandler.OnFoodConsumed(consumed));

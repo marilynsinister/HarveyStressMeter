@@ -99,6 +99,14 @@ namespace HarveyStressMeter.Helpers
             foreach (var (buffId, date) in source.LastIssuedDay)
                 target.LastIssuedDay[buffId] = date;
 
+            target.LastTreatmentOfferDateByBuff.Clear();
+            foreach (var (buffId, date) in source.LastTreatmentOfferDateByBuff)
+                target.LastTreatmentOfferDateByBuff[buffId] = date;
+
+            target.LastTreatmentDeclinedDateByBuff.Clear();
+            foreach (var (buffId, date) in source.LastTreatmentDeclinedDateByBuff)
+                target.LastTreatmentDeclinedDateByBuff[buffId] = date;
+
             CopyTreatmentFlagsInto(target.TreatmentFlags, source.TreatmentFlags);
 
             target.DebuffImmunities.Clear();

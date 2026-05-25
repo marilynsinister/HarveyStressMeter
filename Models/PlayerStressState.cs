@@ -34,6 +34,12 @@ namespace HarveyStressMeter.Models
         /// </summary>
         public Dictionary<string, SDate> LastIssuedDay { get; set; } = new();
 
+        /// <summary>Последний день показа consent-диалога лечения по buffId (не во время event).</summary>
+        public Dictionary<string, SDate> LastTreatmentOfferDateByBuff { get; set; } = new();
+
+        /// <summary>Последний день отказа от лечения по buffId.</summary>
+        public Dictionary<string, SDate> LastTreatmentDeclinedDateByBuff { get; set; } = new();
+
         /// <summary>
         /// Служебные переменные для отслеживания состояния лечения
         /// </summary>

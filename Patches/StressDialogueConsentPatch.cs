@@ -1,6 +1,7 @@
 using HarmonyLib;
 using StardewModdingAPI;
 using StardewValley;
+using HarveyStressMeter.Helpers;
 using HarveyStressMeter.Services;
 
 namespace HarveyStressMeter.Patches

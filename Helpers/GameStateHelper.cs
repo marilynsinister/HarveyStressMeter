@@ -10,6 +10,13 @@ namespace HarveyStressMeter.Helpers
     /// </summary>
     public static class GameStateHelper
     {
+        /// <summary>
+        /// Активен vanilla/CP event script (CurrentEvent или eventUp).
+        /// Стрессовые диалоги, топики и StartTreatment во время события запрещены.
+        /// </summary>
+        public static bool IsEventActive()
+            => Game1.CurrentEvent != null || Game1.eventUp;
+
         public static bool IsTimeBetween(int from, int to) 
             => IsTimeInRange(from, to);
 

@@ -6,6 +6,7 @@ using StardewModdingAPI.Utilities;
 using StardewValley;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Models;
+using HarveyStressMeter.Helpers;
 
 namespace HarveyStressMeter.Services
 {
@@ -656,6 +657,44 @@ namespace HarveyStressMeter.Services
         public void CleanupExpiredImmunities()
         {
             _data.StressState.CleanupExpiredImmunities();
+        }
+
+        public bool WasTreatmentOfferShownToday(string buffId)
+        {
+            return _data.StressState.LastTreatmentOfferDateByBuff.TryGetValue(buffId, out var date)
+                && IsSameGameDay(date);
+        }
+
+        public void MarkTreatmentOfferShown(string buffId)
+        {
+            if (!StressDialoguePipelineGuard.CanRun(
+                    out _,
+                    requireDialogueBox: false,
+                    requireHarveySpeaker: false))
+            {
+                return;
+            }
+
+            _data.StressState.LastTreatmentOfferDateByBuff[buffId] = SDate.Now();
+            _monitor.Log($"[StateService] Treatment offer recorded today for {buffId}", LogLevel.Debug);
+        }
+
+        public bool WasTreatmentDeclinedToday(string buffId)
+        {
+            return _data.StressState.LastTreatmentDeclinedDateByBuff.TryGetValue(buffId, out var date)
+                && IsSameGameDay(date);
+        }
+
+        public void MarkTreatmentDeclined(string buffId)
+        {
+            _data.StressState.LastTreatmentDeclinedDateByBuff[buffId] = SDate.Now();
+            _monitor.Log($"[StateService] Treatment decline recorded today for {buffId}", LogLevel.Debug);
+        }
+
+        private static bool IsSameGameDay(SDate date)
+        {
+            var today = SDate.Now();
+            return date.DaysSinceStart == today.DaysSinceStart;
         }
     }
 }

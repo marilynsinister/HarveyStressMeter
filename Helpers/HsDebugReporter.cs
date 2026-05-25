@@ -63,9 +63,23 @@ namespace HarveyStressMeter.Helpers
             TopicIds.OverworkBreakInterrupted,
         };
 
-        private static readonly string[] TreatmentStartedTopicIds =
+        private static readonly string[] TreatmentFollowupTopicIds =
         {
             TopicIds.TreatmentStarted,
+            TopicIds.TreatmentFollowupTired,
+            TopicIds.TreatmentFollowupLonely,
+            TopicIds.TreatmentFollowupThunder,
+            TopicIds.TreatmentFollowupHunger,
+            TopicIds.TreatmentFollowupOverwork,
+            TopicIds.TreatmentFollowupNoSleep,
+            TopicIds.TreatmentFollowupTooCold,
+            TopicIds.TreatmentFollowupSocial,
+            TopicIds.TreatmentFollowupDarkness,
+            "topicDarknessTherapyStart",
+        };
+
+        private static readonly string[] LegacyTreatmentStartTopicIds =
+        {
             TopicIds.TreatmentStartTired,
             TopicIds.TreatmentStartLonely,
             TopicIds.TreatmentStartThunder,
@@ -75,7 +89,6 @@ namespace HarveyStressMeter.Helpers
             TopicIds.TreatmentStartTooCold,
             TopicIds.TreatmentStartSocial,
             TopicIds.TreatmentStartDarkness,
-            "topicDarknessTherapyStart",
         };
 
         private static readonly string[] CuredTopicIds =
@@ -205,7 +218,8 @@ namespace HarveyStressMeter.Helpers
         {
             _monitor.Log("\n--- TOPICS ---", LogLevel.Info);
             WriteTopicGroup("Stress topics", StressTopicIds);
-            WriteTopicGroup("Treatment started topics", TreatmentStartedTopicIds);
+            WriteTopicGroup("Treatment followup topics (C# after consent)", TreatmentFollowupTopicIds);
+            WriteTopicGroup("Legacy CP start topics (should be empty)", LegacyTreatmentStartTopicIds);
             WriteTopicGroup("Cured topics", CuredTopicIds);
         }
 

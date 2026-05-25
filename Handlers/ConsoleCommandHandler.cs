@@ -26,6 +26,7 @@ namespace HarveyStressMeter.Handlers
         private readonly StateService _stateService;
         private readonly UIHandler _uiHandler;
         private readonly ModResetService _modResetService;
+        private readonly StressDialogueService _stressDialogueService;
 
         public ConsoleCommandHandler(
             IMonitor monitor,
@@ -35,7 +36,8 @@ namespace HarveyStressMeter.Handlers
             TriggerService triggerService,
             StateService stateService,
             UIHandler uiHandler,
-            ModResetService modResetService)
+            ModResetService modResetService,
+            StressDialogueService stressDialogueService)
         {
             _monitor = monitor;
             _helper = helper;
@@ -45,6 +47,7 @@ namespace HarveyStressMeter.Handlers
             _stateService = stateService;
             _uiHandler = uiHandler;
             _modResetService = modResetService;
+            _stressDialogueService = stressDialogueService;
         }
 
         public void RegisterCommands()
@@ -193,6 +196,10 @@ namespace HarveyStressMeter.Handlers
             _helper.ConsoleCommands.Add("hs.debug-quests", "Debug quest system - check quest data and availability.", (_, __) => DebugQuestSystem());
             _helper.ConsoleCommands.Add("hs.states", "Show all stress buff states.", (_, __) => ShowTreatmentStates());
             _helper.ConsoleCommands.Add("hs.debug", "hs.debug v2: mod state vs real game (buffs, journal, topics, problems).", (_, __) => ShowFullDiagnostic());
+            _helper.ConsoleCommands.Add(
+                "stress_dialogue_state",
+                "Read-only snapshot: stress dialogue pipeline, debuffs, topics, context.",
+                (_, __) => ShowStressDialogueState());
             _helper.ConsoleCommands.Add("hs.clear", "Legacy: используйте 'hs.reset'. Полный сброс мода.", (_, __) =>
             {
                 _monitor.Log("⚠️ Команда 'hs.clear' устарела. Используйте 'hs.reset'", LogLevel.Warn);
@@ -250,6 +257,11 @@ namespace HarveyStressMeter.Handlers
         private void ShowFullDiagnostic()
         {
             new HsDebugReporter(_data, _stateService, _monitor).WriteFullReport();
+        }
+
+        private void ShowStressDialogueState()
+        {
+            new StressDialogueStateReporter(_data, _stateService, _stressDialogueService, _monitor).WriteReport();
         }
     }
 }

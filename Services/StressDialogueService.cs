@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using StardewModdingAPI;
 using StardewValley;
+using StardewValley.Menus;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Helpers;
@@ -39,6 +40,14 @@ namespace HarveyStressMeter.Services
         
         // ⭐ ИСПРАВЛЕНИЕ: Флаг для предотвращения бесконечного цикла при показе диалогов
         private bool _isShowingDialogue = false;
+        private string? _deferredBuffId;
+        private string? _deferredDialogueText;
+
+        /// <summary>Открыт programmatic stress/consent-диалог — fallback-топики добавлять нельзя.</summary>
+        public bool IsShowingStressDialogue => _isShowingDialogue;
+
+        /// <summary>Stress-dialogue отложен до закрытия текущего DialogueBox.</summary>
+        public bool HasDeferredStressDialogue => _deferredBuffId != null;
 
         public StressDialogueService(
             IMonitor monitor,
@@ -79,60 +88,79 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// Проверяет наличие активного дебаффа без лечения и возвращает buffId
+        /// Проверяет наличие активного дебаффа без лечения и возвращает buffId с наивысшим приоритетом,
+        /// пропуская buffId с offer/decline сегодня.
         /// </summary>
         public string? CheckForActiveDebuffWithoutTreatment()
         {
             if (_dialoguesData == null) return null;
-            
-            // ⭐ ИСПРАВЛЕНИЕ: Если уже показываем диалог, не проверяем снова
+
             if (_isShowingDialogue)
             {
-                _monitor.Log($"[StressDialogueService] Диалог уже показывается, пропускаем проверку", LogLevel.Debug);
+                _monitor.Log("[StressDialogueService] Диалог уже показывается, пропускаем проверку", LogLevel.Debug);
                 return null;
             }
 
-            // Порядок приоритета проверки баффов
-            var buffPriority = new[]
-            {
-                BuffIds.Social,      // Самый важный - социальная тревожность
-                BuffIds.Tired,
-                BuffIds.Overwork,
-                BuffIds.NoSleep,
-                BuffIds.Lonely,
-                BuffIds.Hunger,
-                BuffIds.TooCold,
-                BuffIds.Thunder
-            };
+            string? selected = null;
+            var skippedShown = new List<string>();
+            var skippedDeclined = new List<string>();
 
-            foreach (var buffId in buffPriority)
+            foreach (var buffId in StressDebuffSelector.PriorityOrder)
             {
-                // 1. Проверяем, есть ли активное лечение этого типа
-                var treatment = _stateService.GetActiveTreatment(buffId);
-                
-                // 2. Если лечения нет, но бафф висит на игроке — новый случай (game buff, не mod state)
-                if (treatment == null && _stateService.HasBuffInGame(buffId))
+                if (!StressDebuffSelector.IsUntreatedDebuff(_stateService, buffId))
+                    continue;
+
+                if (_stateService.WasTreatmentDeclinedToday(buffId))
                 {
-                    _monitor.Log($"[StressDialogueService] Найден активный дебафф без лечения: {buffId}", LogLevel.Debug);
-                    return buffId;
-                }
-                
-                // 3. Если есть лечение, но оно не начато (TreatmentStarted=false) - показываем диалог
-                if (treatment != null && !treatment.TreatmentStarted)
-                {
-                    _monitor.Log($"[StressDialogueService] Найден дебафф с незапущенным лечением: {buffId}", LogLevel.Debug);
-                    return buffId;
-                }
-                
-                // 4. Если лечение начато (есть квест) или завершено (IsCured) - пропускаем
-                if (treatment != null && (treatment.TreatmentStarted || treatment.IsCured))
-                {
-                    _monitor.Log($"[StressDialogueService] Дебафф {buffId} уже в процессе лечения или излечен, пропускаем", LogLevel.Trace);
+                    skippedDeclined.Add(buffId);
                     continue;
                 }
+
+                if (_stateService.WasTreatmentOfferShownToday(buffId))
+                {
+                    skippedShown.Add(buffId);
+                    continue;
+                }
+
+                selected = buffId;
+                break;
             }
 
-            return null;
+            if (selected == null)
+            {
+                foreach (var buffId in skippedShown)
+                {
+                    _monitor.Log(
+                        $"[StressDialogue] Consent dialogue skipped for {buffId}: offer already shown today",
+                        LogLevel.Debug);
+                }
+
+                foreach (var buffId in skippedDeclined)
+                {
+                    _monitor.Log(
+                        $"[StressDialogue] Consent dialogue skipped for {buffId}: declined today",
+                        LogLevel.Debug);
+                }
+
+                return null;
+            }
+
+            var otherUntreated = StressDebuffSelector.GetUntreatedDebuffs(_stateService)
+                .Where(id => id != selected)
+                .ToList();
+
+            if (otherUntreated.Count > 0)
+            {
+                _monitor.Log(
+                    $"[StressDialogue] Multiple active stress debuffs found: {string.Join(", ", otherUntreated.Prepend(selected))}. Selected: {selected}",
+                    LogLevel.Debug);
+            }
+            else
+            {
+                _monitor.Log($"[StressDialogueService] Найден активный дебафф без лечения: {selected}", LogLevel.Debug);
+            }
+
+            return selected;
         }
 
         /// <summary>
@@ -183,6 +211,53 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
+        /// Откладывает stress-dialogue до закрытия текущего DialogueBox (без принудительного закрытия меню).
+        /// </summary>
+        public void ScheduleDeferredStressDialogue(string buffId, string dialogueText)
+        {
+            _deferredBuffId = buffId;
+            _deferredDialogueText = dialogueText;
+            _monitor.Log(
+                $"[StressDialogue] DialogueBox already active — stress dialogue deferred until close (buff={buffId})",
+                LogLevel.Debug);
+        }
+
+        /// <summary>
+        /// Показывает отложенный stress-dialogue после закрытия CP/vanilla DialogueBox.
+        /// </summary>
+        public bool TryShowDeferredStressDialogue()
+        {
+            if (_deferredBuffId == null || _deferredDialogueText == null)
+                return false;
+
+            var harvey = Game1.getCharacterFromName("Harvey");
+            if (harvey == null)
+            {
+                _monitor.Log("[StressDialogueService] Harvey не найден — deferred stress dialogue skipped", LogLevel.Warn);
+                ClearDeferredStressDialogue();
+                return false;
+            }
+
+            if (!EnsurePipelineGuard(nameof(TryShowDeferredStressDialogue), requireDialogueBox: false, knownHarveyNpc: harvey))
+                return false;
+
+            if (Game1.activeClickableMenu is DialogueBox)
+            {
+                _monitor.Log(
+                    "[StressDialogue] DialogueBox already active — stress dialogue deferred/skipped",
+                    LogLevel.Debug);
+                return false;
+            }
+
+            var buffId = _deferredBuffId;
+            var dialogueText = _deferredDialogueText;
+            ClearDeferredStressDialogue();
+
+            DisplayStressDialogue(harvey, buffId, dialogueText);
+            return true;
+        }
+
+        /// <summary>
         /// Показывает диалог стресса с вопросом о согласии на лечение (#$y).
         /// </summary>
         public void ShowStressDialogue(string buffId, string dialogueText)
@@ -194,6 +269,20 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
+            if (!EnsurePipelineGuard(nameof(ShowStressDialogue), requireDialogueBox: false, knownHarveyNpc: harvey))
+                return;
+
+            if (Game1.activeClickableMenu is DialogueBox)
+            {
+                ScheduleDeferredStressDialogue(buffId, dialogueText);
+                return;
+            }
+
+            DisplayStressDialogue(harvey, buffId, dialogueText);
+        }
+
+        private void DisplayStressDialogue(NPC harvey, string buffId, string dialogueText)
+        {
             _isShowingDialogue = true;
             _pendingConsentResult = ConsentResult.None;
             _pendingBuffIdForTreatment = buffId;
@@ -203,6 +292,7 @@ namespace HarveyStressMeter.Services
             harvey.CurrentDialogue.Push(dialogue);
             Game1.drawDialogue(harvey);
 
+            _stateService.MarkTreatmentOfferShown(buffId);
             _monitor.Log($"[StressDialogueService] ✅ Показан диалог для {buffId} (с выбором согласия)", LogLevel.Info);
         }
 
@@ -211,6 +301,9 @@ namespace HarveyStressMeter.Services
         /// </summary>
         public bool TryRecordConsentResponse(string? responseKey)
         {
+            if (!EnsurePipelineGuard(nameof(TryRecordConsentResponse)))
+                return false;
+
             if (string.IsNullOrEmpty(_pendingBuffIdForTreatment) || !_isShowingDialogue)
                 return false;
 
@@ -225,9 +318,12 @@ namespace HarveyStressMeter.Services
 
             if (responseKey == ConsentDeclineResponseKey)
             {
-                _pendingConsentResult = ConsentResult.Declined;
+                var buffId = _pendingBuffIdForTreatment!;
+                _stateService.MarkTreatmentDeclined(buffId);
+                _pendingBuffIdForTreatment = null;
+                _pendingConsentResult = ConsentResult.None;
                 _monitor.Log(
-                    $"[StressDialogueService] Игрок отложила лечение {_pendingBuffIdForTreatment}",
+                    $"[StressDialogueService] Игрок отложила лечение {buffId}",
                     LogLevel.Info);
                 return true;
             }
@@ -237,11 +333,24 @@ namespace HarveyStressMeter.Services
 
         /// <summary>
         /// После закрытия programmatic-диалога: StartTreatment только при явном согласии.
+        /// Treatment start is controlled only by C# consent flow. CP topics must not start treatment.
         /// </summary>
         public void CheckAndStartTreatmentAfterDialogue()
         {
-            if (string.IsNullOrEmpty(_pendingBuffIdForTreatment))
+            if (!EnsurePipelineGuard(
+                    nameof(CheckAndStartTreatmentAfterDialogue),
+                    requireDialogueBox: false,
+                    requireHarveySpeaker: false))
+            {
+                _isShowingDialogue = false;
                 return;
+            }
+
+            if (string.IsNullOrEmpty(_pendingBuffIdForTreatment))
+            {
+                _isShowingDialogue = false;
+                return;
+            }
 
             var buffId = _pendingBuffIdForTreatment;
             var consent = _pendingConsentResult;
@@ -274,6 +383,13 @@ namespace HarveyStressMeter.Services
             _pendingBuffIdForTreatment = null;
             _pendingConsentResult = ConsentResult.None;
             _isShowingDialogue = false;
+            ClearDeferredStressDialogue();
+        }
+
+        private void ClearDeferredStressDialogue()
+        {
+            _deferredBuffId = null;
+            _deferredDialogueText = null;
         }
 
         private static string AppendConsentQuestion(string dialogueText)
@@ -289,6 +405,12 @@ namespace HarveyStressMeter.Services
         /// </summary>
         public bool ShouldShowStressDialogue(out string? buffId, out string? dialogueText)
         {
+            buffId = null;
+            dialogueText = null;
+
+            if (!EnsurePipelineGuard(nameof(ShouldShowStressDialogue)))
+                return false;
+
             // ⭐ НОВОЕ: Проверяем, нет ли уже топика завершения лечения
             // Если есть топик Cured, Content Patcher покажет свой диалог
             var curedTopics = new[]
@@ -308,8 +430,6 @@ namespace HarveyStressMeter.Services
                 if (ConversationHelper.HasTopic(topic))
                 {
                     _monitor.Log($"[StressDialogueService] Обнаружен топик завершения {topic}, пропускаем программный диалог", LogLevel.Debug);
-                    buffId = null;
-                    dialogueText = null;
                     return false;
                 }
             }
@@ -330,7 +450,41 @@ namespace HarveyStressMeter.Services
                 return false;
             }
 
+            _monitor.Log($"[StressDialogueService] ShouldShowStressDialogue=true, buffId={buffId}", LogLevel.Debug);
             return true;
+        }
+
+        private bool EnsurePipelineGuard(
+            string caller,
+            bool requireDialogueBox = true,
+            bool requireHarveySpeaker = true,
+            NPC? knownHarveyNpc = null)
+        {
+            if (StressDialoguePipelineGuard.CanRun(
+                    out var reason,
+                    requireDialogueBox,
+                    requireHarveySpeaker,
+                    knownHarveyNpc))
+            {
+                return true;
+            }
+
+            StressDialoguePipelineGuard.LogBlocked(_monitor, caller, reason);
+            return false;
+        }
+
+        /// <summary>Read-only snapshot для debug-команды stress_dialogue_state.</summary>
+        public StressDialogueDebugSnapshot GetDebugSnapshot()
+        {
+            return new StressDialogueDebugSnapshot
+            {
+                IsShowingStressDialogue = _isShowingDialogue,
+                HasDeferredStressDialogue = HasDeferredStressDialogue,
+                PendingBuffIdForTreatment = _pendingBuffIdForTreatment,
+                DeferredBuffId = _deferredBuffId,
+                PendingConsentResult = _pendingConsentResult.ToString(),
+                ResponseAlreadyRecorded = _pendingConsentResult != ConsentResult.None,
+            };
         }
     }
 }

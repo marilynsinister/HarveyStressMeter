@@ -26,7 +26,7 @@ namespace HarveyStressMeter.Constants
         public const string OverworkBreakActive = "topicOverworkBreakActive";
         public const string OverworkBreakInterrupted = "topicOverworkBreakInterrupted";
 
-        // Топики начала лечения (устанавливаются при согласии на лечение в диалогах)
+        // Топики начала лечения (legacy CP — НЕ gameplay-триггеры; только cleanup)
         public const string TreatmentStartTired = "topicStressTreatmentTiredStarted";
         public const string TreatmentStartLonely = "topicStressTreatmentLonelyStarted";
         public const string TreatmentStartThunder = "topicStressTreatmentThunderStarted";
@@ -49,6 +49,30 @@ namespace HarveyStressMeter.Constants
         public const string TreatmentStartCollapse = "topicStressTreatmentCollapseStarted";
         public const string TreatmentStartNumbness = "topicStressTreatmentNumbnessStarted";
         public const string TreatmentStartDespair = "topicStressTreatmentDespairStarted";
+
+        // Followup-топики после C# consent (CP aftercare-реплики, не старт лечения)
+        public const string TreatmentFollowupTired = "topicStressTreatmentTiredFollowup";
+        public const string TreatmentFollowupLonely = "topicStressTreatmentLonelyFollowup";
+        public const string TreatmentFollowupThunder = "topicStressTreatmentThunderFollowup";
+        public const string TreatmentFollowupHunger = "topicStressTreatmentHungerFollowup";
+        public const string TreatmentFollowupOverwork = "topicStressTreatmentOverworkFollowup";
+        public const string TreatmentFollowupNoSleep = "topicStressTreatmentNoSleepFollowup";
+        public const string TreatmentFollowupTooCold = "topicStressTreatmentTooColdFollowup";
+        public const string TreatmentFollowupSocial = "topicStressTreatmentSocialFollowup";
+        public const string TreatmentFollowupDarkness = "topicStressTreatmentDarknessFollowup";
+        public const string TreatmentFollowupCriticism = "topicStressTreatmentCriticismFollowup";
+        public const string TreatmentFollowupBadDream = "topicStressTreatmentBadDreamFollowup";
+        public const string TreatmentFollowupPanic = "topicStressTreatmentPanicFollowup";
+        public const string TreatmentFollowupSleepDeprivation = "topicStressTreatmentSleepDeprivationFollowup";
+        public const string TreatmentFollowupAnxietyWave = "topicStressTreatmentAnxietyWaveFollowup";
+        public const string TreatmentFollowupMentalFatigue = "topicStressTreatmentMentalFatigueFollowup";
+        public const string TreatmentFollowupShadowParanoia = "topicStressTreatmentShadowParanoiaFollowup";
+        public const string TreatmentFollowupFreezeResponse = "topicStressTreatmentFreezeResponseFollowup";
+        public const string TreatmentFollowupIsolation = "topicStressTreatmentIsolationFollowup";
+        public const string TreatmentFollowupBreakdown = "topicStressTreatmentBreakdownFollowup";
+        public const string TreatmentFollowupCollapse = "topicStressTreatmentCollapseFollowup";
+        public const string TreatmentFollowupNumbness = "topicStressTreatmentNumbnessFollowup";
+        public const string TreatmentFollowupDespair = "topicStressTreatmentDespairFollowup";
     }
 }
 

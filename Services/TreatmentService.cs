@@ -109,12 +109,17 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// ⭐ УЛУЧШЕНО: Начинает программу лечения с поддержкой множественных лечений
-        /// Начинает программу лечения: залочивает бафф и выдает квест
-        /// Вызывается из диалогов Content Patcher после согласия игрока на лечение
+        /// Начинает программу лечения: залочивает бафф и выдает квест.
+        /// Treatment start is controlled only by C# consent flow. CP topics must not start treatment.
         /// </summary>
         public void StartTreatment(string buffId, string displayName)
         {
+            if (GameStateHelper.IsEventActive())
+            {
+                _monitor.Log($"[StartTreatment] Пропуск: активно событие ({buffId})", LogLevel.Debug);
+                return;
+            }
+
             _monitor.Log($"[StartTreatment] Попытка начать лечение для {buffId} ({displayName})", LogLevel.Debug);
 
             // ⭐ НОВОЕ: Получаем данные квеста из GameDataService
@@ -217,6 +222,14 @@ namespace HarveyStressMeter.Services
             {
                 if (ConversationHelper.HasTopic(stressTopic.topic))
                     ConversationHelper.RemoveTopic(stressTopic.topic);
+            }
+
+            RemoveLegacyTreatmentStartTopic(buffId);
+
+            if (TreatmentTopics.FollowupByBuff.TryGetValue(buffId, out var followupTopic))
+            {
+                ConversationHelper.AddTopic(followupTopic, 2);
+                _monitor.Log($"[StartTreatment] Followup topic {followupTopic} for aftercare dialogue", LogLevel.Debug);
             }
 
             // ⭐ НОВОЕ: Логируем состояние ПЕРЕД началом лечения
@@ -337,6 +350,9 @@ namespace HarveyStressMeter.Services
                     _monitor.Log($"[CompleteTreatment] Удален топик {stressTopic.topic} после завершения лечения", LogLevel.Debug);
                 }
             }
+
+            RemoveLegacyTreatmentStartTopic(buffId);
+            RemoveTreatmentFollowupTopic(buffId);
 
             int immunityDays = GetImmunityDaysForDebuff(buffId);
             if (immunityDays > 0)
@@ -636,40 +652,70 @@ namespace HarveyStressMeter.Services
 
         public void CleanupOrphanedTreatmentTopics()
         {
-            var treatmentStartTopics = new Dictionary<string, string>
-            {
-                [TopicIds.TreatmentStartTired] = BuffIds.Tired,
-                [TopicIds.TreatmentStartLonely] = BuffIds.Lonely,
-                [TopicIds.TreatmentStartThunder] = BuffIds.Thunder,
-                [TopicIds.TreatmentStartHunger] = BuffIds.Hunger,
-                [TopicIds.TreatmentStartOverwork] = BuffIds.Overwork,
-                [TopicIds.TreatmentStartNoSleep] = BuffIds.NoSleep,
-                [TopicIds.TreatmentStartTooCold] = BuffIds.TooCold,
-                [TopicIds.TreatmentStartSocial] = BuffIds.Social,
-                [TopicIds.TreatmentStartDarkness] = BuffIds.Darkness,
-            };
-
             int removedCount = 0;
-            foreach (var (topic, buffId) in treatmentStartTopics)
-            {
-                if (ConversationHelper.HasTopic(topic))
-                {
-                    bool hasActiveBuff = _stateService.HasActiveTreatmentState(buffId);
-                    bool hasValidState = _data.StressState.TreatmentHistory.TryGetValue(buffId, out var historyList)
-                                        && historyList.Count > 0
-                                        && !historyList.Last().IsCured;
 
-                    if (!hasActiveBuff && !hasValidState)
-                    {
-                        ConversationHelper.RemoveTopic(topic);
-                        removedCount++;
-                        _monitor.Log($"[CleanupOrphanedTreatmentTopics] Удален сиротский топик {topic} для {BuffToDisplayName.GetValueOrDefault(buffId, buffId)}", LogLevel.Info);
-                    }
+            foreach (var topicId in TreatmentTopics.UnimplementedDisabledTopicIds)
+            {
+                if (!ConversationHelper.HasTopic(topicId))
+                    continue;
+
+                ConversationHelper.RemoveTopic(topicId);
+                removedCount++;
+                _monitor.Log($"[CleanupOrphanedTreatmentTopics] Удален disabled topic {topicId}", LogLevel.Info);
+            }
+
+            foreach (var (buffId, legacyTopic) in TreatmentTopics.LegacyStartByBuff)
+            {
+                if (!ConversationHelper.HasTopic(legacyTopic))
+                    continue;
+
+                bool treatmentStarted = _data.StressState.GetActiveTreatmentsByBuff(buffId)
+                    .Any(t => t.TreatmentStarted && !t.IsCured);
+
+                if (treatmentStarted || !_stateService.HasActiveTreatmentState(buffId))
+                {
+                    ConversationHelper.RemoveTopic(legacyTopic);
+                    removedCount++;
+                    _monitor.Log($"[CleanupOrphanedTreatmentTopics] Удален legacy start topic {legacyTopic}", LogLevel.Info);
+                }
+            }
+
+            foreach (var (buffId, followupTopic) in TreatmentTopics.FollowupByBuff)
+            {
+                if (!ConversationHelper.HasTopic(followupTopic))
+                    continue;
+
+                bool hasActiveTreatment = _data.StressState.GetActiveTreatmentsByBuff(buffId)
+                    .Any(t => t.TreatmentStarted && !t.IsCured);
+
+                if (!hasActiveTreatment)
+                {
+                    ConversationHelper.RemoveTopic(followupTopic);
+                    removedCount++;
+                    _monitor.Log($"[CleanupOrphanedTreatmentTopics] Удален orphaned followup {followupTopic}", LogLevel.Info);
                 }
             }
 
             if (removedCount > 0)
-                _monitor.Log($"[CleanupOrphanedTreatmentTopics] Удалено сиротских топиков: {removedCount}", LogLevel.Info);
+                _monitor.Log($"[CleanupOrphanedTreatmentTopics] Удалено топиков: {removedCount}", LogLevel.Info);
+        }
+
+        private static void RemoveLegacyTreatmentStartTopic(string buffId)
+        {
+            if (TreatmentTopics.LegacyStartByBuff.TryGetValue(buffId, out var legacyTopic)
+                && ConversationHelper.HasTopic(legacyTopic))
+            {
+                ConversationHelper.RemoveTopic(legacyTopic);
+            }
+        }
+
+        private static void RemoveTreatmentFollowupTopic(string buffId)
+        {
+            if (TreatmentTopics.FollowupByBuff.TryGetValue(buffId, out var followupTopic)
+                && ConversationHelper.HasTopic(followupTopic))
+            {
+                ConversationHelper.RemoveTopic(followupTopic);
+            }
         }
     }
 }
