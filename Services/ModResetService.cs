@@ -53,7 +53,7 @@ namespace HarveyStressMeter.Services
 
             SaveDataHelper.ResetSaveDataInPlace(_data);
             _stressDialogueService.ClearPendingTreatment();
-            _helper.Data.WriteSaveData(SaveDataHelper.SaveKey, _data);
+            SaveDataHelper.WriteSaveData(_data);
 
             return new ModResetResult
             {

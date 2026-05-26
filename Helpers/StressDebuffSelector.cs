@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using HarveyStressMeter.Constants;
+using HarveyStressMeter.Models;
 using HarveyStressMeter.Services;
 
 namespace HarveyStressMeter.Helpers
@@ -20,6 +21,7 @@ namespace HarveyStressMeter.Helpers
             BuffIds.Hunger,
             BuffIds.TooCold,
             BuffIds.Thunder,
+            BuffIds.Darkness,
         };
 
         public static readonly Dictionary<string, (string topic, int days)> BuffToStressTopic = new()
@@ -72,6 +74,44 @@ namespace HarveyStressMeter.Helpers
             }
 
             return null;
+        }
+
+        /// <summary>Активное лечение с выполненными условиями, ожидающее финального разговора (наивысший приоритет).</summary>
+        public static TreatmentState? GetPrimaryTreatmentAwaitingReview(StateService stateService)
+        {
+            foreach (var buffId in PriorityOrder)
+            {
+                var treatment = stateService.GetActiveTreatment(buffId);
+                if (treatment != null
+                    && treatment.AwaitingHarveyReview
+                    && !treatment.IsCured
+                    && !treatment.IsCompleted)
+                {
+                    return treatment;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>Все лечения, ожидающие финального разговора, в порядке приоритета.</summary>
+        public static List<TreatmentState> GetTreatmentsAwaitingReview(StateService stateService)
+        {
+            var result = new List<TreatmentState>();
+
+            foreach (var buffId in PriorityOrder)
+            {
+                var treatment = stateService.GetActiveTreatment(buffId);
+                if (treatment != null
+                    && treatment.AwaitingHarveyReview
+                    && !treatment.IsCured
+                    && !treatment.IsCompleted)
+                {
+                    result.Add(treatment);
+                }
+            }
+
+            return result;
         }
     }
 }

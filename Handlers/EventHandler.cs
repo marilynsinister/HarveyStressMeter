@@ -8,6 +8,7 @@ using StardewValley.Menus;
 using HarveyStressMeter.Services;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Helpers;
+using HarveyStressMeter.Constants;
 
 namespace HarveyStressMeter.Handlers
 {
@@ -24,6 +25,7 @@ namespace HarveyStressMeter.Handlers
         private readonly GameLogicHandler _gameLogicHandler;
         private readonly UIHandler _uiHandler;
         private readonly DarknessService _darknessService;
+        private readonly StressLoadService _stressLoadService;
 
         public EventHandler(
             IMonitor monitor,
@@ -32,7 +34,8 @@ namespace HarveyStressMeter.Handlers
             StateService stateService,
             GameLogicHandler gameLogicHandler,
             UIHandler uiHandler,
-            DarknessService darknessService)
+            DarknessService darknessService,
+            StressLoadService stressLoadService)
         {
             _monitor = monitor;
             _helper = helper;
@@ -41,6 +44,7 @@ namespace HarveyStressMeter.Handlers
             _gameLogicHandler = gameLogicHandler;
             _uiHandler = uiHandler;
             _darknessService = darknessService;
+            _stressLoadService = stressLoadService;
         }
 
         public void SubscribeToEvents()
@@ -61,7 +65,7 @@ namespace HarveyStressMeter.Handlers
 
         private void OnSaveLoaded(object? s, SaveLoadedEventArgs e)
         {
-            var loaded = _helper.Data.ReadSaveData<SaveData>(SaveDataHelper.SaveKey);
+            var loaded = SaveDataHelper.ReadSaveData(_monitor);
 
             if (loaded != null)
             {
@@ -87,6 +91,7 @@ namespace HarveyStressMeter.Handlers
 
             // Восстанавливаем все активные баффы после загрузки сохранения
             _stateService.RestoreAllActiveBuffs();
+            _stressLoadService.SyncFromGameState();
         }
 
         private void OnReturnedToTitle(object? s, ReturnedToTitleEventArgs e)
@@ -116,16 +121,26 @@ namespace HarveyStressMeter.Handlers
             _darknessService.RestoreFearBuff();
             
             _gameLogicHandler.CheckDayStartedStressTriggers();
+            _stressLoadService.SyncFromGameState();
 
-            _monitor.Log($"[OnDayStarted] New day initialized: active treatments={_data.StressState.ActiveTreatments.Count}", LogLevel.Info);
+            _monitor.Log($"[OnDayStarted] New day initialized: active treatments={_data.StressState.ActiveTreatments.Count}, stressLoad={_stressLoadService.GetCurrentStressLoad()} ({_stressLoadService.GetSeverity()})", LogLevel.Info);
         }
 
         private void OnDayEnding(object? s, DayEndingEventArgs e)
         {
             _gameLogicHandler.CheckDayEndingQuestCompletion();
             _gameLogicHandler.CheckLateSleepPattern();  // ⭐ НОВОЕ: Отслеживание позднего сна
+            _stressLoadService.SyncFromGameState();
+            _stressLoadService.DecayStress(GetEndOfDayStressDecay());
             SaveData();
         }
+
+        private static int GetEndOfDayStressDecay() =>
+            Game1.timeOfDay switch
+            {
+                _ when Game1.player.hasBuff(BuffIds.NoSleep) => 0,
+                _ => 5,
+            };
 
         private void OnUpdateTicked(object? s, UpdateTickedEventArgs e)
         {
@@ -184,7 +199,7 @@ namespace HarveyStressMeter.Handlers
 
         private void SaveData()
         {
-            _helper.Data.WriteSaveData(SaveDataHelper.SaveKey, _data);
+            SaveDataHelper.WriteSaveData(_data);
         }
     }
 }

@@ -40,6 +40,29 @@ namespace HarveyStressMeter.Models
         /// </summary>
         public DarknessProgress Darkness { get; set; } = new();
 
+        /// <summary>
+        /// Общая шкала стресса (StressLoad) и активные причины.
+        /// </summary>
+        public StressLoadState StressLoad { get; set; } = new();
+
+        /// <summary>Испуг молнии / Gotoro flashback во время грозы.</summary>
+        public ThunderFlashbackState ThunderFlashback { get; set; } = new();
+
+        /// <summary>Харви ищет игрока в лесу во время Gotoro flashback.</summary>
+        public HarveyFlashbackRescueState HarveyFlashbackRescue { get; set; } = new();
+
+        /// <summary>Доверие к Харви (safe person) — бонусы стабилизации и снижения стресса.</summary>
+        public HarveyCareTrustState HarveyCareTrust { get; set; } = new();
+
+        /// <summary>Периодическое снижение StressLoad / стабилизация flashback рядом с Харви.</summary>
+        public HarveySafePersonAuraState HarveySafePersonAura { get; set; } = new();
+
+        /// <summary>Активное назначение Харви по TreatmentEpisode (не более одного).</summary>
+        public TreatmentEpisodeState? ActiveTreatmentEpisode { get; set; }
+
+        /// <summary>Кулдаун повторного episode после CompleteTreatmentEpisode.</summary>
+        public Dictionary<string, SDate> EpisodeImmunityUntil { get; set; } = new();
+
         // ============================================
         // УСТАРЕВШИЕ ПОЛЯ (для обратной совместимости)
         // Будут мигрированы в StressState при загрузке

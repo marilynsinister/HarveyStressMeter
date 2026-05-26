@@ -400,14 +400,20 @@ namespace HarveyStressMeter.Services
                     continue;
                 }
 
-                // Если квест завершен в игре - завершаем лечение
+                // Квест завершён в журнале игры — не снимаем дебафф до разговора с Харви
                 if (!string.IsNullOrEmpty(questId) && _questService.HasQuest(questId))
                 {
                     var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == questId);
-                    if (quest?.completed.Value == true)
+                    if (quest?.completed.Value == true && !treatment.AwaitingHarveyReview)
                     {
-                        CompleteTreatment(questId);
-                        cleanedCount++;
+                        treatment.ObjectivesCompleted = true;
+                        treatment.AwaitingHarveyReview = true;
+                        treatment.ReadyForReviewDate = SDate.Now();
+                        if (TreatmentTopics.GetReadyForReviewTopic(buffId) is { } reviewTopic)
+                            ConversationHelper.AddTopic(reviewTopic, 2);
+                        _monitor.Log(
+                            $"[StateService] Квест '{questId}' завершён в журнале — ожидание разговора с Харви (buffId={buffId})",
+                            LogLevel.Info);
                         continue;
                     }
                 }
@@ -689,6 +695,14 @@ namespace HarveyStressMeter.Services
         {
             _data.StressState.LastTreatmentDeclinedDateByBuff[buffId] = SDate.Now();
             _monitor.Log($"[StateService] Treatment decline recorded today for {buffId}", LogLevel.Debug);
+        }
+
+        /// <summary>DEV/TEST: сбрасывает флаги offer/decline на текущий игровой день.</summary>
+        public void ClearTreatmentOfferFlags(string buffId)
+        {
+            _data.StressState.LastTreatmentOfferDateByBuff.Remove(buffId);
+            _data.StressState.LastTreatmentDeclinedDateByBuff.Remove(buffId);
+            _monitor.Log($"[StateService] DEV/TEST: cleared offer/decline flags for {buffId}", LogLevel.Debug);
         }
 
         private static bool IsSameGameDay(SDate date)

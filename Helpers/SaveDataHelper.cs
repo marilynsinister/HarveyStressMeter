@@ -1,5 +1,10 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
+using StardewModdingAPI;
+using StardewModdingAPI.Utilities;
+using StardewValley;
 using HarveyStressMeter.Models;
 
 namespace HarveyStressMeter.Helpers
@@ -10,6 +15,94 @@ namespace HarveyStressMeter.Helpers
     public static class SaveDataHelper
     {
         public const string SaveKey = "stress-data-v1";
+        private const string ModUniqueId = "marilynsinister.HarveyStressMeter";
+
+        private static JsonSerializerSettings CreateSaveJsonSettings()
+        {
+            return new JsonSerializerSettings
+            {
+                Formatting = Formatting.None,
+                ObjectCreationHandling = ObjectCreationHandling.Replace,
+                Converters =
+                {
+                    new SDateSaveDataConverter(),
+                    new StringEnumConverter()
+                }
+            };
+        }
+
+        /// <summary>
+        /// Читает mod save data с tolerant-десериализацией SDate (legacy Day=0).
+        /// </summary>
+        public static SaveData? ReadSaveData(IMonitor? monitor = null)
+        {
+            var rawJson = TryGetRawSaveJson();
+            if (rawJson == null)
+                return null;
+
+            try
+            {
+                return JsonConvert.DeserializeObject<SaveData>(rawJson, CreateSaveJsonSettings());
+            }
+            catch (Exception ex)
+            {
+                monitor?.Log(
+                    $"[SaveDataHelper] Failed to deserialize mod save '{SaveKey}': {ex.Message}. " +
+                    "Starting with fresh mod state for this slot.",
+                    LogLevel.Warn);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Записывает mod save data с тем же форматом SDate, что и <see cref="ReadSaveData"/>.
+        /// </summary>
+        public static void WriteSaveData(SaveData? data)
+        {
+            var internalKey = GetSaveFileKey(ModUniqueId, SaveKey);
+            var json = data != null
+                ? JsonConvert.SerializeObject(data, CreateSaveJsonSettings())
+                : null;
+
+            foreach (var dataField in GetSaveDataFields())
+            {
+                if (json != null)
+                    dataField[internalKey] = json;
+                else
+                    dataField.Remove(internalKey);
+            }
+        }
+
+        private static string? TryGetRawSaveJson()
+        {
+            var internalKey = GetSaveFileKey(ModUniqueId, SaveKey);
+
+            foreach (var dataField in GetSaveDataFields())
+            {
+                if (dataField.TryGetValue(internalKey, out var value))
+                    return value;
+            }
+
+            return null;
+        }
+
+        private static string GetSaveFileKey(string modId, string key)
+        {
+            return $"smapi/mod-data/{modId}/{key}".ToLowerInvariant();
+        }
+
+        private static IEnumerable<IDictionary<string, string>> GetSaveDataFields()
+        {
+            if (SaveGame.loaded != null)
+            {
+                yield return Game1.CustomData;
+                yield return SaveGame.loaded.CustomData;
+            }
+            else
+            {
+                yield return Game1.CustomData;
+            }
+        }
 
         /// <summary>
         /// Копирует все поля из <paramref name="source"/> в существующий <paramref name="target"/>.
@@ -46,6 +139,26 @@ namespace HarveyStressMeter.Helpers
             target.Darkness ??= new DarknessProgress();
             CopyDarknessInto(target.Darkness, source.Darkness ?? new DarknessProgress());
 
+            target.StressLoad ??= new StressLoadState();
+            CopyStressLoadInto(target.StressLoad, source.StressLoad ?? new StressLoadState());
+
+            target.ThunderFlashback ??= new ThunderFlashbackState();
+            CopyThunderFlashbackInto(target.ThunderFlashback, source.ThunderFlashback ?? new ThunderFlashbackState());
+
+            target.HarveyFlashbackRescue ??= new HarveyFlashbackRescueState();
+            CopyHarveyFlashbackRescueInto(
+                target.HarveyFlashbackRescue,
+                source.HarveyFlashbackRescue ?? new HarveyFlashbackRescueState());
+
+            target.HarveyCareTrust ??= new HarveyCareTrustState();
+            CopyHarveyCareTrustInto(target.HarveyCareTrust, source.HarveyCareTrust ?? new HarveyCareTrustState());
+            CopyHarveySafePersonAuraInto(
+                target.HarveySafePersonAura,
+                source.HarveySafePersonAura ?? new HarveySafePersonAuraState());
+
+            target.ActiveTreatmentEpisode = CloneTreatmentEpisodeState(source.ActiveTreatmentEpisode);
+            CopyEpisodeImmunityInto(target, source);
+
 #pragma warning disable CS0618
             CopyDictionary(source.ActiveLockedDebuffs, target.ActiveLockedDebuffs);
             CopyTreatmentProgressDictionary(source.Treatment, target.Treatment);
@@ -73,6 +186,12 @@ namespace HarveyStressMeter.Helpers
             target.DaysWithLateSleep = 0;
             target.StressState = new PlayerStressState();
             target.Darkness = new DarknessProgress();
+            target.StressLoad = new StressLoadState();
+            target.ThunderFlashback = new ThunderFlashbackState();
+            target.HarveyFlashbackRescue = new HarveyFlashbackRescueState();
+            target.HarveyCareTrust = new HarveyCareTrustState();
+            target.ActiveTreatmentEpisode = null;
+            target.EpisodeImmunityUntil = new Dictionary<string, SDate>();
 
 #pragma warning disable CS0618
             target.ActiveLockedDebuffs = new Dictionary<string, string>();
@@ -162,6 +281,133 @@ namespace HarveyStressMeter.Helpers
             target.CompletedStep3 = source.CompletedStep3;
         }
 
+        private static void CopyStressLoadInto(StressLoadState target, StressLoadState source)
+        {
+            target.CurrentStressLoad = source.CurrentStressLoad;
+            target.Severity = source.Severity;
+            target.ActiveEpisodeId = source.ActiveEpisodeId;
+            target.ActiveTreatmentEpisodeId = source.ActiveTreatmentEpisodeId;
+            target.HasActiveTreatment = source.HasActiveTreatment;
+            target.AwaitingHarveyReview = source.AwaitingHarveyReview;
+            target.LastUpdatedTime = source.LastUpdatedTime;
+            target.LastPrimaryCause = source.LastPrimaryCause;
+            target.GotoroFlashbackActive = source.GotoroFlashbackActive;
+            target.WarTraumaFlag = source.WarTraumaFlag;
+
+            target.ActiveCauses.Clear();
+            foreach (var (causeId, cause) in source.ActiveCauses)
+            {
+                target.ActiveCauses[causeId] = new StressCauseState
+                {
+                    CauseId = cause.CauseId,
+                    SourceBuffId = cause.SourceBuffId,
+                    Weight = cause.Weight,
+                    IsActive = cause.IsActive,
+                    IsSevere = cause.IsSevere,
+                    AppliedTime = cause.AppliedTime,
+                    LastUpdatedTime = cause.LastUpdatedTime,
+                    CanSelfResolve = cause.CanSelfResolve,
+                    RequiresHarveyIfSevere = cause.RequiresHarveyIfSevere,
+                };
+            }
+        }
+
+        private static void CopyThunderFlashbackInto(ThunderFlashbackState target, ThunderFlashbackState source)
+        {
+            target.IsActive = source.IsActive;
+            target.WasTriggeredToday = source.WasTriggeredToday;
+            target.WasStabilizedToday = source.WasStabilizedToday;
+            target.EnteredForestDuringFlashback = source.EnteredForestDuringFlashback;
+            target.ForestShelterSeconds = source.ForestShelterSeconds;
+            target.RequiredForestShelterSeconds = source.RequiredForestShelterSeconds;
+            target.TriggerLocation = source.TriggerLocation;
+            target.TriggerTime = source.TriggerTime;
+            target.LastFrightCheckTime = source.LastFrightCheckTime;
+            target.LastHudMessageTime = source.LastHudMessageTime;
+            target.HudMessageCooldownMinutes = source.HudMessageCooldownMinutes;
+            target.LightningFrightIntensity = source.LightningFrightIntensity;
+            target.IsGotoroFlashback = source.IsGotoroFlashback;
+        }
+
+        private static void CopyHarveyCareTrustInto(HarveyCareTrustState target, HarveyCareTrustState source)
+        {
+            target.TrustPoints = source.TrustPoints;
+            target.TrustLevel = source.TrustLevel;
+            target.SuccessfulAssignments = source.SuccessfulAssignments;
+            target.IgnoredAssignments = source.IgnoredAssignments;
+            target.FlashbacksStabilizedWithHarvey = source.FlashbacksStabilizedWithHarvey;
+            target.DaysSinceLastSuccessfulAssignment = source.DaysSinceLastSuccessfulAssignment;
+            target.LastTrustGainDay = source.LastTrustGainDay;
+            target.LastTrustPenaltyDay = source.LastTrustPenaltyDay;
+            target.ReviewOfferedAbsoluteDay = source.ReviewOfferedAbsoluteDay;
+            target.AssignmentBoostDaysRemaining = source.AssignmentBoostDaysRemaining;
+            target.SafePersonUnlocked = source.SafePersonUnlocked;
+            target.ForestRescueUnlocked = source.ForestRescueUnlocked;
+            target.GroundingDialogueUnlocked = source.GroundingDialogueUnlocked;
+            target.LastAmbientTrustEpisodeId = source.LastAmbientTrustEpisodeId;
+            target.SupportiveTalkTrustToday = source.SupportiveTalkTrustToday;
+            target.ShownCareTrustDialogueKeys = new HashSet<string>(source.ShownCareTrustDialogueKeys ?? new HashSet<string>());
+        }
+
+        private static void CopyHarveySafePersonAuraInto(
+            HarveySafePersonAuraState target,
+            HarveySafePersonAuraState source)
+        {
+            target.LastProcessTime = source.LastProcessTime;
+            target.LastMessageTime = source.LastMessageTime;
+            target.LastDecayAmount = source.LastDecayAmount;
+            target.LastDistanceTiles = source.LastDistanceTiles;
+            target.LastHarveyNearby = source.LastHarveyNearby;
+            target.LastSafeAuraActive = source.LastSafeAuraActive;
+        }
+
+        private static void CopyHarveyFlashbackRescueInto(
+            HarveyFlashbackRescueState target,
+            HarveyFlashbackRescueState source)
+        {
+            target.HarveyRescueTriggeredToday = source.HarveyRescueTriggeredToday;
+            target.LastRescueDay = source.LastRescueDay;
+            target.LastRescueEventId = source.LastRescueEventId;
+            target.ForestSecondsBeforeRescue = source.ForestSecondsBeforeRescue;
+            target.HarveyHelpedStabilizeToday = source.HarveyHelpedStabilizeToday;
+            target.LastRescueCheckTime = source.LastRescueCheckTime;
+            target.RescueTier = source.RescueTier;
+            target.PendingPostRescueTier = source.PendingPostRescueTier;
+            target.PendingPostRescueEventId = source.PendingPostRescueEventId;
+        }
+
+        private static TreatmentEpisodeState? CloneTreatmentEpisodeState(TreatmentEpisodeState? source)
+        {
+            if (source == null)
+                return null;
+
+            return new TreatmentEpisodeState
+            {
+                EpisodeId = source.EpisodeId,
+                RelatedCauseIds = new List<string>(source.RelatedCauseIds),
+                QuestId = source.QuestId,
+                TreatmentStarted = source.TreatmentStarted,
+                ObjectivesCompleted = source.ObjectivesCompleted,
+                AwaitingHarveyReview = source.AwaitingHarveyReview,
+                IsCompleted = source.IsCompleted,
+                IsCured = source.IsCured,
+                StartedTime = source.StartedTime,
+                ReadyForReviewTime = source.ReadyForReviewTime,
+                PrimaryCauseId = source.PrimaryCauseId,
+            };
+        }
+
+        private static void CopyEpisodeImmunityInto(SaveData target, SaveData source)
+        {
+            target.EpisodeImmunityUntil ??= new Dictionary<string, SDate>();
+            target.EpisodeImmunityUntil.Clear();
+            if (source.EpisodeImmunityUntil == null)
+                return;
+
+            foreach (var (episodeId, until) in source.EpisodeImmunityUntil)
+                target.EpisodeImmunityUntil[episodeId] = until;
+        }
+
         private static TreatmentState CloneTreatmentState(TreatmentState source)
         {
             return new TreatmentState
@@ -177,6 +423,9 @@ namespace HarveyStressMeter.Helpers
                 AddedToGameLog = source.AddedToGameLog,
                 IsCured = source.IsCured,
                 IsCompleted = source.IsCompleted,
+                ObjectivesCompleted = source.ObjectivesCompleted,
+                AwaitingHarveyReview = source.AwaitingHarveyReview,
+                ReadyForReviewDate = source.ReadyForReviewDate,
                 Progress = CloneTreatmentProgress(source.Progress)
             };
         }

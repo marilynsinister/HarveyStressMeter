@@ -1,6 +1,9 @@
 using System;
 using System.Linq;
+using Microsoft.Xna.Framework;
 using StardewValley;
+using StardewValley.Characters;
+using StardewValley.Monsters;
 using StardewValley.Tools;
 
 namespace HarveyStressMeter.Helpers
@@ -16,6 +19,18 @@ namespace HarveyStressMeter.Helpers
         /// </summary>
         public static bool IsEventActive()
             => Game1.CurrentEvent != null || Game1.eventUp;
+
+        /// <summary>ID текущего event script (global или location-bound), если есть.</summary>
+        public static string? GetCurrentEventId()
+        {
+            if (Game1.CurrentEvent?.id is { Length: > 0 } globalId)
+                return globalId;
+
+            if (Game1.currentLocation?.currentEvent?.id is { Length: > 0 } locationId)
+                return locationId;
+
+            return null;
+        }
 
         public static bool IsTimeBetween(int from, int to) 
             => IsTimeInRange(from, to);
@@ -73,16 +88,90 @@ namespace HarveyStressMeter.Helpers
             return false;
         }
 
-        public static bool IsHarveyNearby(float maxDistance = 6f)
+        public static bool TryGetHarveyDistanceTiles(out NPC? harvey, out float distanceTiles)
         {
-            var harvey = Game1.getCharacterFromName("Harvey");
-            if (harvey?.currentLocation != Game1.currentLocation) 
+            harvey = Game1.getCharacterFromName("Harvey");
+            distanceTiles = -1f;
+
+            if (harvey?.currentLocation != Game1.currentLocation)
+            {
+                harvey = null;
                 return false;
+            }
 
             var harveyPos = harvey.getStandingPosition();
             var playerPos = Game1.player.getStandingPosition();
-            return Microsoft.Xna.Framework.Vector2.Distance(harveyPos, playerPos) <= maxDistance * Game1.tileSize;
+            var pixelDistance = Vector2.Distance(harveyPos, playerPos);
+            distanceTiles = pixelDistance / Math.Max(1f, Game1.tileSize);
+            return true;
         }
+
+        public static bool IsHarveyNearby(float maxDistanceTiles = 6f)
+            => TryGetHarveyDistanceTiles(out _, out var distance)
+               && distance <= maxDistanceTiles;
+
+        public static bool IsDangerousStressLocation()
+        {
+            var name = Game1.currentLocation?.NameOrUniqueName ?? "";
+            if (string.IsNullOrEmpty(name))
+                return false;
+
+            return name.Contains("Mine", StringComparison.OrdinalIgnoreCase)
+                   || name.Contains("Skull", StringComparison.OrdinalIgnoreCase)
+                   || name.Contains("Volcano", StringComparison.OrdinalIgnoreCase)
+                   || name.Contains("Dungeon", StringComparison.OrdinalIgnoreCase)
+                   || name.Equals("UndergroundMine", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool HasHostileMonstersNearby(float rangeTiles = 8f)
+        {
+            var location = Game1.currentLocation;
+            if (location == null)
+                return false;
+
+            var playerTile = Game1.player.Tile;
+            foreach (var character in location.characters)
+            {
+                if (character is not Monster monster || monster.Health <= 0)
+                    continue;
+
+                if (Vector2.Distance(monster.Tile, playerTile) <= rangeTiles)
+                    return true;
+            }
+
+            return false;
+        }
+
+        public static bool IsSafeAuraBlockedContext()
+        {
+            if (IsEventActive())
+                return true;
+
+            try
+            {
+                if (Game1.isFestival())
+                    return true;
+            }
+            catch
+            {
+                // ignored
+            }
+
+            if (IsDangerousStressLocation())
+                return true;
+
+            if (HasHostileMonstersNearby())
+                return true;
+
+            return false;
+        }
+
+        public static bool IsClinicLocation()
+            => IsLocationOneOf(Game1.currentLocation, "Hospital");
+
+        public static bool IsMarriedFarmHouseContext()
+            => HarveyFriendshipHelper.IsMarriedToHarvey()
+               && IsLocationOneOf(Game1.currentLocation, "FarmHouse");
 
         public static bool IsInRestZone()
         {
@@ -104,6 +193,53 @@ namespace HarveyStressMeter.Helpers
                 || locationName == "Hospital" 
                 || location is StardewValley.Locations.BathHousePool;
         }
+
+        public static bool IsOutdoors()
+            => Game1.currentLocation?.IsOutdoors == true;
+
+        public static bool IsIndoors()
+            => Game1.currentLocation != null && !Game1.currentLocation.IsOutdoors;
+
+        public static bool IsTownLocation()
+            => IsLocationOneOf(Game1.currentLocation, "Town");
+
+        /// <summary>Лесные локации, где гром приглушён деревьями.</summary>
+        public static bool IsForestShelterLocation()
+            => IsLocationOneOf(Game1.currentLocation, "Forest", "Woods", "SecretWoods");
+
+        public static bool IsOptionalForestShelterLocation()
+            => IsForestShelterLocation() || IsLocationOneOf(Game1.currentLocation, "FarmCave");
+
+        public static bool IsBlockingFlashbackContext()
+        {
+            if (IsEventActive())
+                return true;
+
+            if (Game1.dialogueUp)
+                return true;
+
+            if (Game1.activeClickableMenu != null)
+                return true;
+
+            try
+            {
+                if (Game1.isFestival())
+                    return true;
+            }
+            catch
+            {
+                // ignored
+            }
+
+            var locationName = Game1.currentLocation?.NameOrUniqueName ?? "";
+            if (locationName.Contains("Festival", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
+        }
+
+        public static bool IsStormWeather()
+            => Game1.isLightning;
     }
 }
 

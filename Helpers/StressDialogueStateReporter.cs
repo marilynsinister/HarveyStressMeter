@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Services;
@@ -15,10 +17,9 @@ namespace HarveyStressMeter.Helpers
     {
         public bool IsShowingStressDialogue { get; init; }
         public bool HasDeferredStressDialogue { get; init; }
-        public string? PendingBuffIdForTreatment { get; init; }
+        public string? PendingAutoStartBuffId { get; init; }
+        public string? PendingAutoStartEpisodeId { get; init; }
         public string? DeferredBuffId { get; init; }
-        public string PendingConsentResult { get; init; } = "None";
-        public bool ResponseAlreadyRecorded { get; init; }
     }
 
     /// <summary>
@@ -45,13 +46,27 @@ namespace HarveyStressMeter.Helpers
 
         public void WriteReport()
         {
+            foreach (var line in BuildReport().Split('\n'))
+            {
+                if (line.Length > 0)
+                    _monitor.Log(line, LogLevel.Info);
+            }
+        }
+
+        public string BuildReport()
+        {
+            var sb = new StringBuilder();
+            void L(string message) => sb.AppendLine(message);
+
             var dialogue = _stressDialogueService.GetDebugSnapshot();
             var untreated = StressDebuffSelector.GetUntreatedDebuffs(_stateService);
-            var selected = GetConsentEligibleBuff(untreated);
+            var selected = GetStartDialogueEligibleBuff(untreated);
             var speaker = Game1.currentSpeaker?.Name ?? "null";
             var menuType = Game1.activeClickableMenu?.GetType().Name ?? "null";
             var location = Game1.currentLocation?.NameOrUniqueName ?? "null";
             var eventActive = Game1.CurrentEvent != null;
+            var eventId = GameStateHelper.GetCurrentEventId();
+            var dialogueBox = HarveyDevTalkHelper.GetDialogueBoxSnapshot();
 
             StressDialoguePipelineGuard.CanRun(
                 out var guardReason,
@@ -60,42 +75,32 @@ namespace HarveyStressMeter.Helpers
 
             var stressTopics = GetStressRelatedTopics();
 
-            var shownToday = FormatOfferDeclineToday(isOffer: true, untreated);
-            var declinedToday = FormatOfferDeclineToday(isOffer: false, untreated);
+            var shownToday = FormatOfferShownToday(untreated);
 
-            _monitor.Log("[StressDialogueState]", LogLevel.Info);
-            _monitor.Log(
-                $"Context: EventActive={eventActive}, EventUp={Game1.eventUp}, Menu={menuType}, Speaker={speaker}, Location={location}, PipelineGuard={(guardReason == StressDialoguePipelineGuard.BlockReason.None ? "OK" : guardReason)}",
-                LogLevel.Info);
-            _monitor.Log(
-                $"Active untreated debuffs: {(untreated.Count > 0 ? string.Join(", ", untreated) : "(none)")}",
-                LogLevel.Info);
-            _monitor.Log(
-                $"Selected by priority (consent-eligible): {selected ?? "null"}",
-                LogLevel.Info);
-            _monitor.Log(
-                $"IsShowingStressDialogue={dialogue.IsShowingStressDialogue}, HasDeferred={dialogue.HasDeferredStressDialogue}, PendingBuffId={dialogue.PendingBuffIdForTreatment ?? "null"}, DeferredBuffId={dialogue.DeferredBuffId ?? "null"}, Consent={dialogue.PendingConsentResult}, ResponseRecorded={dialogue.ResponseAlreadyRecorded}",
-                LogLevel.Info);
-            _monitor.Log($"ShownToday: {shownToday}", LogLevel.Info);
-            _monitor.Log($"DeclinedToday: {declinedToday}", LogLevel.Info);
+            L("[StressDialogueState]");
+            L($"Context: EventActive={eventActive}, EventUp={Game1.eventUp}, EventId={eventId ?? "null"}, Menu={menuType}, Speaker={speaker}, Location={location}, PipelineGuard={(guardReason == StressDialoguePipelineGuard.BlockReason.None ? "OK" : guardReason)}");
+            L($"DialogueIsQuestion={dialogueBox.IsQuestion}, ResponseCount={dialogueBox.Responses.Count}");
+            L($"Active untreated debuffs: {(untreated.Count > 0 ? string.Join(", ", untreated) : "(none)")}");
+            L($"Selected by priority (start-dialogue eligible): {selected ?? "null"}");
+            L($"IsShowingStressDialogue={dialogue.IsShowingStressDialogue}, HasDeferred={dialogue.HasDeferredStressDialogue}, PendingAutoStartBuffId={dialogue.PendingAutoStartBuffId ?? "null"}, DeferredBuffId={dialogue.DeferredBuffId ?? "null"}");
+            L($"ShownToday: {shownToday}");
 
             if (stressTopics.Count > 0)
             {
-                _monitor.Log(
-                    $"Active topics: {string.Join(", ", stressTopics.Select(t => t.Item1 + (t.Item2 >= 0 ? $"({t.Item2}d)" : "")))}",
-                    LogLevel.Info);
+                L($"Active topics: {string.Join(", ", stressTopics.Select(t => t.Item1 + (t.Item2 >= 0 ? $"({t.Item2}d)" : "")))}");
             }
             else
             {
-                _monitor.Log("Active topics: (none)", LogLevel.Info);
+                L("Active topics: (none)");
             }
 
-            WriteBuffDetails();
+            AppendBuffDetails(L);
+            return sb.ToString().TrimEnd();
         }
 
-        private void WriteBuffDetails()
+        private void AppendBuffDetails(Action<string> log)
         {
-            _monitor.Log("Buff details:", LogLevel.Info);
+            log("Buff details:");
 
             foreach (var buffId in TreatmentTopics.ImplementedBuffIds)
             {
@@ -103,14 +108,25 @@ namespace HarveyStressMeter.Helpers
                 var treatment = _stateService.GetActiveTreatment(buffId);
                 var started = treatment?.TreatmentStarted ?? false;
                 var completed = treatment != null && (treatment.IsCured || treatment.IsCompleted);
+                var awaitingReview = treatment?.AwaitingHarveyReview ?? false;
                 var severity = GetSeverityLabel(buffId);
 
                 if (!activeInGame && treatment == null)
                     continue;
 
-                _monitor.Log(
-                    $"  {buffId}: active={activeInGame}, treatmentStarted={started}, treatmentCompleted={completed}{severity}",
-                    LogLevel.Info);
+                var objectivesCompleted = treatment?.ObjectivesCompleted ?? false;
+                var nextStep = TreatmentNextStep.Resolve(treatment, activeInGame);
+                var detailPart = treatment != null
+                    ? $", questId={treatment.QuestId ?? "(empty)"}, objectivesCompleted={objectivesCompleted}, awaitingHarveyReview={awaitingReview}"
+                      + (treatment.ReadyForReviewDate != null
+                          ? $", readyForReviewDate={treatment.ReadyForReviewDate}"
+                          : "")
+                      + $", nextStep={nextStep}"
+                    : activeInGame
+                        ? $", nextStep={nextStep}"
+                        : "";
+
+                log($"  {buffId}: active={activeInGame}, treatmentStarted={started}, treatmentCompleted={completed}{detailPart}{severity}");
             }
 
             foreach (var levelBuff in new[] { BuffIds.DarknessLevel1, BuffIds.DarknessLevel2, BuffIds.DarknessLevel3 })
@@ -118,23 +134,15 @@ namespace HarveyStressMeter.Helpers
                 if (!_stateService.HasBuffInGame(levelBuff))
                     continue;
 
-                _monitor.Log(
-                    $"  {levelBuff}: active=true, treatmentStarted=n/a, treatmentCompleted=n/a, level={levelBuff[^1]}",
-                    LogLevel.Info);
+                log($"  {levelBuff}: active=true, treatmentStarted=n/a, treatmentCompleted=n/a, level={levelBuff[^1]}");
             }
         }
 
-        private string? GetConsentEligibleBuff(IReadOnlyList<string> untreated)
+        private string? GetStartDialogueEligibleBuff(IReadOnlyList<string> untreated)
         {
             foreach (var buffId in StressDebuffSelector.PriorityOrder)
             {
                 if (!untreated.Contains(buffId))
-                    continue;
-
-                if (_stateService.WasTreatmentDeclinedToday(buffId))
-                    continue;
-
-                if (_stateService.WasTreatmentOfferShownToday(buffId))
                     continue;
 
                 return buffId;
@@ -152,7 +160,7 @@ namespace HarveyStressMeter.Helpers
             return $", fearLevel={fear}";
         }
 
-        private string FormatOfferDeclineToday(bool isOffer, IReadOnlyList<string> buffIds)
+        private string FormatOfferShownToday(IReadOnlyList<string> buffIds)
         {
             if (buffIds.Count == 0)
                 return "(no untreated debuffs)";
@@ -160,10 +168,7 @@ namespace HarveyStressMeter.Helpers
             var parts = new List<string>();
             foreach (var buffId in buffIds)
             {
-                var value = isOffer
-                    ? _stateService.WasTreatmentOfferShownToday(buffId)
-                    : _stateService.WasTreatmentDeclinedToday(buffId);
-                parts.Add($"{ShortBuff(buffId)}={value}");
+                parts.Add($"{ShortBuff(buffId)}={_stateService.WasTreatmentOfferShownToday(buffId)}");
             }
 
             return string.Join(", ", parts);

@@ -22,6 +22,18 @@ namespace HarveyStressMeter.Constants
         public const string StressDarkness = "topicStressDarkness";
         public const string StressSocial = "topicStressSocial";
 
+        /// <summary>Gotoro thunder flashback активен — CP gate для forest rescue.</summary>
+        public const string GotoroFlashbackActive = "topicStressGotoroFlashbackActive";
+
+        /// <summary>C# выставляет перед запуском rescue-сцены (предотвращает дубль location trigger).</summary>
+        public const string GotoroForestRescuePending = "topicStressGotoroForestRescuePending";
+
+        /// <summary>После forest rescue — programmatic follow-up при разговоре с Харви.</summary>
+        public const string TrustRescueMidTrust = "topicStressTrust_RescueMidTrust";
+        public const string TrustRescueHighTrust = "topicStressTrust_RescueHighTrust";
+        public const string TrustRescueDating = "topicStressTrust_RescueDating";
+        public const string TrustRescueMarried = "topicStressTrust_RescueMarried";
+
         // Топики перерывов (Overwork)
         public const string OverworkBreakActive = "topicOverworkBreakActive";
         public const string OverworkBreakInterrupted = "topicOverworkBreakInterrupted";

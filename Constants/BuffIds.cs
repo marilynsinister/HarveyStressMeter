@@ -37,6 +37,9 @@ namespace HarveyStressMeter.Constants
         // Специальные баффы
         public const string Immunity = "buffStressImmunity";
         public const string CareAura = "HarveyStress.CareAura";
+        /// <summary>Маркер programmatic trust-диалога (бафф не применяется).</summary>
+        public const string TrustProgress = "HarveyStress.TrustProgress";
+        public const string StressLoadTier = "buffStressLoadTier";
 
         // Баффы терапии темноты
         public const string DimLight = "buffDimLight"; // Приглушенный свет (Шаг 1)

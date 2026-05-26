@@ -93,6 +93,56 @@ namespace HarveyStressMeter.Services
             return Game1.player.hasBuff(buffId);
         }
 
+        /// <summary>Visible stress buff without mechanical effects (penalties consolidated in tier buff).</summary>
+        public bool ApplyCosmeticBuffFromData(string buffId)
+        {
+            try
+            {
+                var dict = Game1.content.Load<Dictionary<string, BuffData>>("Data/Buffs");
+                if (!dict.TryGetValue(buffId, out var data))
+                    return ApplyBuffFromData(buffId);
+
+                if (Game1.player.hasBuff(buffId))
+                    Game1.player.buffs.Remove(buffId);
+
+                var buff = new Buff(
+                    buffId,
+                    data.DisplayName,
+                    iconTexture: null,
+                    iconSheetIndex: 0,
+                    duration: Buff.ENDLESS,
+                    effects: new BuffEffects())
+                { visible = true };
+
+                Game1.player.applyBuff(buff);
+                return Game1.player.hasBuff(buffId);
+            }
+            catch (Exception ex)
+            {
+                _monitor.Log($"[BuffService] ApplyCosmeticBuffFromData failed for {buffId}: {ex.Message}", LogLevel.Warn);
+                return false;
+            }
+        }
+
+        /// <summary>MaxStamina/Speed penalty magnitudes from buff data (positive numbers).</summary>
+        public (int Stamina, int Speed) GetNegativeMechanicalPenalties(string buffId)
+        {
+            try
+            {
+                var dict = Game1.content.Load<Dictionary<string, BuffData>>("Data/Buffs");
+                if (!dict.TryGetValue(buffId, out var data) || data.Effects == null)
+                    return (0, 0);
+
+                var stam = data.Effects.MaxStamina < 0 ? (int)Math.Abs(data.Effects.MaxStamina) : 0;
+                var speed = data.Effects.Speed < 0 ? (int)Math.Abs(data.Effects.Speed) : 0;
+                return (stam, speed);
+            }
+            catch
+            {
+                return (0, 0);
+            }
+        }
+
         private static BuffEffects ConvertToEffects(BuffAttributesData attributes)
         {
             var effects = new BuffEffects();

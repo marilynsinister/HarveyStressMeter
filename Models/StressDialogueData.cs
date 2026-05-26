@@ -7,8 +7,11 @@ namespace HarveyStressMeter.Models
     /// </summary>
     public class StressDialogueData
     {
+        /// <summary>Ключ диалога (episode_*, ambient_*, reminder_*).</summary>
+        public string DialogueKey { get; set; } = "";
+
         /// <summary>
-        /// ID баффа (например, "buffStressSocial")
+        /// ID баффа (legacy, например "buffStressSocial")
         /// </summary>
         public string BuffId { get; set; } = "";
 

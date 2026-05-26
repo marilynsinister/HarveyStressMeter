@@ -14,6 +14,12 @@ namespace HarveyStressMeter.Constants
         public const string Social = "HarveyMod_SocialRecovery";
         public const string NoSleep = "HarveyMod_NoSleepRecovery";
         public const string Tired = "HarveyMod_TiredRecovery";
+
+        public const string PhysicalExhaustion = "HarveyMod_PhysicalExhaustionRecovery";
+        public const string Burnout = "HarveyMod_BurnoutRecovery";
+        public const string AnxietySpike = "HarveyMod_AnxietySpikeRecovery";
+        public const string GotoroFlashback = "HarveyMod_GotoroFlashbackRecovery";
+        public const string SocialShutdown = "HarveyMod_SocialShutdownRecovery";
     }
 }
 

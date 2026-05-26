@@ -21,6 +21,8 @@ namespace HarveyStressMeter.Services
         private readonly StateService _stateService;
         private readonly IMonitor _monitor;
         private GameDataService? _gameDataService;
+        private StressLoadService? _stressLoadService;
+        private TreatmentEpisodeService? _episodeService;
 
         // Карты связей buff -> quest/topic/mail
         private static readonly Dictionary<string, string> BuffToQuest = new()
@@ -80,6 +82,18 @@ namespace HarveyStressMeter.Services
             _monitor.Log("[TreatmentService] GameDataService установлен", LogLevel.Debug);
         }
 
+        public void SetStressLoadService(StressLoadService stressLoadService)
+        {
+            _stressLoadService = stressLoadService;
+            _monitor.Log("[TreatmentService] StressLoadService установлен", LogLevel.Debug);
+        }
+
+        public void SetTreatmentEpisodeService(TreatmentEpisodeService episodeService)
+        {
+            _episodeService = episodeService;
+            _monitor.Log("[TreatmentService] TreatmentEpisodeService установлен", LogLevel.Debug);
+        }
+
         /// <summary>
         /// Применяет простой (незалоченный) бафф стресса при срабатывании триггера
         /// НЕ выдает квест - только бафф и топик для диалога с Харви
@@ -105,14 +119,34 @@ namespace HarveyStressMeter.Services
             // Добавляем топик для диалога с Харви
             AddTopicForBuff(buffId);
 
+            _stressLoadService?.AddCauseFromBuff(buffId);
+
             _monitor.Log($"[ApplyStressBuff] ✅ Стресс {displayName} применен. Поговорите с Харви для начала лечения.", LogLevel.Info);
         }
 
         /// <summary>
-        /// Начинает программу лечения: залочивает бафф и выдает квест.
-        /// Treatment start is controlled only by C# consent flow. CP topics must not start treatment.
+        /// Начинает TreatmentEpisode — единое назначение Харви по общему состоянию.
         /// </summary>
-        public void StartTreatment(string buffId, string displayName)
+        public bool StartTreatmentEpisode(string episodeId)
+        {
+            if (_episodeService == null)
+            {
+                _monitor.Log("[StartTreatmentEpisode] TreatmentEpisodeService не установлен", LogLevel.Error);
+                return false;
+            }
+
+            return _episodeService.StartTreatmentEpisode(episodeId);
+        }
+
+        /// <summary>
+        /// Legacy: начинает программу лечения по одному buffId.
+        /// Episode mode использует <see cref="StartTreatmentEpisode"/>.
+        /// </summary>
+        public void StartTreatment(
+            string buffId,
+            string displayName,
+            string? questIdOverride = null,
+            string? episodeId = null)
         {
             if (GameStateHelper.IsEventActive())
             {
@@ -121,12 +155,19 @@ namespace HarveyStressMeter.Services
             }
 
             _monitor.Log($"[StartTreatment] Попытка начать лечение для {buffId} ({displayName})", LogLevel.Debug);
+            if (!string.IsNullOrEmpty(episodeId))
+                _monitor.Log($"[StartTreatment] Episode mode: {episodeId}", LogLevel.Debug);
 
-            // ⭐ НОВОЕ: Получаем данные квеста из GameDataService
             string? questId = null;
             QuestData? questData = null;
-            
-            if (_gameDataService != null)
+
+            if (!string.IsNullOrEmpty(questIdOverride))
+            {
+                questId = questIdOverride;
+                questData = _gameDataService?.GetQuestData(questIdOverride);
+                _monitor.Log($"[StartTreatment] Episode quest override: {questId}", LogLevel.Debug);
+            }
+            else if (_gameDataService != null)
             {
                 // Пробуем получить квест из новой системы
                 var quests = _gameDataService.GetQuestsForBuff(buffId);
@@ -162,9 +203,9 @@ namespace HarveyStressMeter.Services
             }
 
             // Проверяем, можно ли начать лечение
-            if (!_data.StressState.HasActiveBuff(buffId))
+            if (!CanStartTreatmentForBuff(buffId, episodeId))
             {
-                _monitor.Log($"[StartTreatment] ОШИБКА: Бафф {buffId} не активен. Лечение не может быть начато.", LogLevel.Error);
+                _monitor.Log($"[StartTreatment] ОШИБКА: Бафф {buffId} не активен и episode causes отсутствуют.", LogLevel.Error);
                 return;
             }
 
@@ -256,6 +297,14 @@ namespace HarveyStressMeter.Services
                 _monitor.Log($"[StartTreatment] ❌ КРИТИЧЕСКАЯ ОШИБКА: Квест '{questId}' не добавлен в журнал!", LogLevel.Error);
             }
 
+            if (_stressLoadService != null
+                && !string.IsNullOrEmpty(episodeId)
+                && (_data.ActiveTreatmentEpisode == null
+                    || !string.Equals(_data.ActiveTreatmentEpisode.EpisodeId, episodeId, StringComparison.Ordinal)))
+            {
+                _stressLoadService.SetActiveTreatmentEpisode(episodeId);
+            }
+
             // ⭐ НОВОЕ: Отправляем письмо о начале лечения
             if (_gameDataService != null)
             {
@@ -318,7 +367,101 @@ namespace HarveyStressMeter.Services
             Game1.playSound("questcomplete");
         }
 
+        /// <summary>
+        /// Условия назначения выполнены — квест и дебафф остаются до финального разговора с Харви.
+        /// </summary>
+        public void MarkTreatmentReadyForReview(string buffId, string? optionalMessage = null)
+        {
+            var episode = _data.ActiveTreatmentEpisode;
+            if (episode?.IsActiveEpisode() == true && _episodeService != null)
+            {
+                var primaryBuff = episode.PrimaryCauseId != null
+                    && StressCauses.CauseToBuff.TryGetValue(episode.PrimaryCauseId, out var mappedBuff)
+                    ? mappedBuff
+                    : TreatmentEpisodeDefinitions.ResolvePrimaryBuffId(episode.EpisodeId, episode.RelatedCauseIds);
+
+                if (string.IsNullOrEmpty(primaryBuff) || primaryBuff == buffId)
+                {
+                    _episodeService.MarkTreatmentEpisodeReadyForReview(episode.EpisodeId, optionalMessage);
+                    return;
+                }
+            }
+
+            MarkTreatmentReadyForReviewLegacy(buffId, optionalMessage);
+        }
+
+        private void MarkTreatmentReadyForReviewLegacy(string buffId, string? optionalMessage = null)
+        {
+            var activeTreatment = _data.StressState.GetActiveTreatment(buffId);
+            if (activeTreatment == null)
+            {
+                _monitor.Log($"[MarkTreatmentReadyForReview] ⚠️ Активное лечение для buffId '{buffId}' не найдено", LogLevel.Warn);
+                return;
+            }
+
+            if (activeTreatment.IsCured || activeTreatment.IsCompleted)
+                return;
+
+            if (activeTreatment.AwaitingHarveyReview)
+                return;
+
+            activeTreatment.ObjectivesCompleted = true;
+            activeTreatment.AwaitingHarveyReview = true;
+            activeTreatment.ReadyForReviewDate = SDate.Now();
+
+            var questId = activeTreatment.QuestId;
+            if (string.IsNullOrEmpty(questId) && BuffToQuest.TryGetValue(buffId, out var mappedQuestId))
+                questId = mappedQuestId;
+
+            if (!string.IsNullOrEmpty(questId))
+            {
+                _questService.UpdateQuest(questId, objective: StressQuestCopy.ReadyForReviewObjective);
+            }
+
+            if (TreatmentTopics.GetReadyForReviewTopic(buffId) is { } reviewTopic)
+                ConversationHelper.AddTopic(reviewTopic, 2);
+
+            var hudMessage = optionalMessage ?? StressQuestCopy.ReadyForReviewHud;
+            Game1.addHUDMessage(new HUDMessage(hudMessage, HUDMessage.newQuest_type));
+
+            _monitor.Log(
+                $"[MarkTreatmentReadyForReview] buffId={buffId}, questId={questId ?? "(empty)"}, treatmentKey={activeTreatment.TreatmentKey}, AwaitingHarveyReview=true",
+                LogLevel.Info);
+        }
+
+        /// <summary>Review по episode id (Gotoro flashback и др.).</summary>
+        public void MarkTreatmentReadyForReviewByEpisode(string episodeId, string? optionalMessage = null)
+        {
+            if (_episodeService != null)
+            {
+                _episodeService.MarkTreatmentEpisodeReadyForReview(episodeId, optionalMessage);
+                return;
+            }
+
+            if (!TreatmentEpisodeDefinitions.TryGet(episodeId, out _))
+            {
+                _monitor.Log($"[MarkTreatmentReadyForReviewByEpisode] Unknown episode {episodeId}", LogLevel.Warn);
+                return;
+            }
+
+            var causeIds = _stressLoadService?.GetActiveCauses().Keys ?? Enumerable.Empty<string>();
+            var buffId = TreatmentEpisodeDefinitions.ResolvePrimaryBuffId(episodeId, causeIds);
+            MarkTreatmentReadyForReviewLegacy(buffId, optionalMessage);
+        }
+
         public void CompleteTreatment(string buffId, string message = "Лечение завершено.")
+        {
+            var episode = _data.ActiveTreatmentEpisode;
+            if (episode?.AwaitingHarveyReview == true && _episodeService != null)
+            {
+                _episodeService.CompleteTreatmentEpisode(episode.EpisodeId, message);
+                return;
+            }
+
+            CompleteTreatmentLegacy(buffId, message);
+        }
+
+        private void CompleteTreatmentLegacy(string buffId, string message = "Лечение завершено.")
         {
             var activeTreatment = _data.StressState.GetActiveTreatment(buffId);
             if (activeTreatment == null)
@@ -326,6 +469,10 @@ namespace HarveyStressMeter.Services
                 _monitor.Log($"[CompleteTreatment] ⚠️ Активное лечение для buffId '{buffId}' не найдено — завершение пропущено", LogLevel.Warn);
                 return;
             }
+
+            activeTreatment.ObjectivesCompleted = false;
+            activeTreatment.AwaitingHarveyReview = false;
+            activeTreatment.ReadyForReviewDate = null;
 
             var questId = activeTreatment.QuestId;
             if (string.IsNullOrEmpty(questId) && !BuffToQuest.TryGetValue(buffId, out questId))
@@ -342,13 +489,30 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
-            if (BuffToStressTopic.TryGetValue(buffId, out var stressTopic))
+            ApplyEpisodeCompletionStressReduction(buffId);
+            ApplyCompletionRewards(buffId, message);
+
+            _monitor.Log($"[CompleteTreatment] Legacy завершение для {buffId}", LogLevel.Info);
+        }
+
+        /// <summary>Friendship/mail/Harvey emote после завершения лечения.</summary>
+        public void ApplyCompletionRewards(
+            string buffId,
+            string message,
+            bool removeReviewTopic = true,
+            bool playSoundAndHud = true)
+        {
+            if (removeReviewTopic
+                && TreatmentTopics.GetReadyForReviewTopic(buffId) is { } reviewTopic
+                && ConversationHelper.HasTopic(reviewTopic))
             {
-                if (ConversationHelper.HasTopic(stressTopic.topic))
-                {
-                    ConversationHelper.RemoveTopic(stressTopic.topic);
-                    _monitor.Log($"[CompleteTreatment] Удален топик {stressTopic.topic} после завершения лечения", LogLevel.Debug);
-                }
+                ConversationHelper.RemoveTopic(reviewTopic);
+            }
+
+            if (BuffToStressTopic.TryGetValue(buffId, out var stressTopic)
+                && ConversationHelper.HasTopic(stressTopic.topic))
+            {
+                ConversationHelper.RemoveTopic(stressTopic.topic);
             }
 
             RemoveLegacyTreatmentStartTopic(buffId);
@@ -358,11 +522,16 @@ namespace HarveyStressMeter.Services
             if (immunityDays > 0)
             {
                 _stateService.SetImmunity(buffId, immunityDays);
-                _monitor.Log($"[CompleteTreatment] ✅ Установлен индивидуальный иммунитет на {immunityDays} дней после лечения {buffId}", LogLevel.Info);
+                _monitor.Log(
+                    $"[ApplyCompletionRewards] Иммунитет {immunityDays} дней для {buffId}",
+                    LogLevel.Debug);
             }
 
-            Game1.playSound("discoverMineral");
-            Game1.addHUDMessage(new HUDMessage(message, HUDMessage.newQuest_type));
+            if (playSoundAndHud)
+            {
+                Game1.playSound("discoverMineral");
+                Game1.addHUDMessage(new HUDMessage(message, HUDMessage.newQuest_type));
+            }
 
             var harvey = Game1.getCharacterFromName("Harvey");
             if (harvey?.currentLocation == Game1.currentLocation)
@@ -375,6 +544,69 @@ namespace HarveyStressMeter.Services
                 Game1.player.changeFriendship(100, harvey);
 
             _questService.AddMailForTomorrow(MailIds.GenericDone);
+        }
+
+        private bool CanStartTreatmentForBuff(string buffId, string? episodeId)
+        {
+            if (_data.StressState.HasActiveBuff(buffId) || _buffService.HasBuff(buffId))
+                return true;
+
+            if (string.IsNullOrEmpty(episodeId)
+                || !TreatmentEpisodeDefinitions.TryGet(episodeId, out var definition)
+                || _stressLoadService == null)
+            {
+                return false;
+            }
+
+            if (definition.RelatedCauses.Any(causeId =>
+                    _stressLoadService.GetActiveCauses().TryGetValue(causeId, out var cause) && cause.IsActive))
+            {
+                return true;
+            }
+
+            return definition.EpisodeId == StressEpisodes.GotoroFlashback
+                   && _data.StressLoad.GotoroFlashbackActive;
+        }
+
+        private void ApplyEpisodeCompletionStressReduction(string buffId)
+        {
+            if (_stressLoadService == null)
+                return;
+
+            if (_data.ActiveTreatmentEpisode != null)
+                return;
+
+            var episodeId = _stressLoadService.GetActiveTreatmentEpisodeId();
+            if (!string.IsNullOrEmpty(episodeId)
+                && TreatmentEpisodeDefinitions.TryGet(episodeId, out var definition))
+            {
+                var totalReduction = 0;
+                foreach (var relatedCauseId in definition.RelatedCauses)
+                {
+                    if (!_stressLoadService.GetActiveCauses().ContainsKey(relatedCauseId))
+                        continue;
+
+                    totalReduction += StressCauses.GetBaseWeight(relatedCauseId);
+                    _stressLoadService.RemoveCause(relatedCauseId);
+                }
+
+                _stressLoadService.ReduceStressByTreatment(
+                    Math.Max(totalReduction, 10),
+                    episodeId);
+
+                _monitor.Log(
+                    $"[CompleteTreatment] Episode {episodeId} cleared related causes, load -{totalReduction}",
+                    LogLevel.Debug);
+                return;
+            }
+
+            if (StressCauses.TryGetCauseForBuff(buffId, out var causeId))
+            {
+                _stressLoadService.RemoveCause(causeId);
+                _stressLoadService.ReduceStressByTreatment(
+                    StressCauses.GetBaseWeight(causeId),
+                    _stressLoadService.GetActiveTreatmentEpisodeId());
+            }
         }
 
         public void AddTopicForBuff(string buffId)
@@ -433,16 +665,13 @@ namespace HarveyStressMeter.Services
                     continue;
                 }
 
-                // Проверяем, завершен ли квест
+                // Квест завершён в журнале без mod state — переводим в ожидание разговора с Харви
                 if (!string.IsNullOrEmpty(questId) && _questService.HasQuest(questId))
                 {
                     var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == questId);
-                    if (quest?.completed.Value == true)
+                    if (quest?.completed.Value == true && !treatment.AwaitingHarveyReview)
                     {
-                        _buffService.RemoveBuff(buffId);
-                        _data.StressState.RemoveTreatment(treatmentKey);
-                        removedCount++;
-                        _monitor.Log($"[SyncQuestsAndBuffs] Удалено лечение {treatmentKey}: квест {questId} завершен", LogLevel.Info);
+                        MarkTreatmentReadyForReview(buffId);
                         continue;
                     }
                 }

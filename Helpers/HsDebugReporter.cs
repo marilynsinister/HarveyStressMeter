@@ -91,6 +91,19 @@ namespace HarveyStressMeter.Helpers
             TopicIds.TreatmentStartDarkness,
         };
 
+        private static readonly string[] ReadyForReviewTopicIds =
+        {
+            "topicStressTreatmentTiredReadyForReview",
+            "topicStressTreatmentLonelyReadyForReview",
+            "topicStressTreatmentThunderReadyForReview",
+            "topicStressTreatmentHungerReadyForReview",
+            "topicStressTreatmentOverworkReadyForReview",
+            "topicStressTreatmentNoSleepReadyForReview",
+            "topicStressTreatmentTooColdReadyForReview",
+            "topicStressTreatmentSocialReadyForReview",
+            "topicStressTreatmentDarknessReadyForReview",
+        };
+
         private static readonly string[] CuredTopicIds =
         {
             "topicStressTreatmentTiredCured",
@@ -145,6 +158,13 @@ namespace HarveyStressMeter.Helpers
                 _monitor.Log($"    TreatmentStarted: {treatment.TreatmentStarted}", LogLevel.Info);
                 _monitor.Log($"    IsCured: {treatment.IsCured}", LogLevel.Info);
                 _monitor.Log($"    IsCompleted: {treatment.IsCompleted}", LogLevel.Info);
+                _monitor.Log($"    ObjectivesCompleted: {treatment.ObjectivesCompleted}", LogLevel.Info);
+                _monitor.Log($"    AwaitingHarveyReview: {treatment.AwaitingHarveyReview}", LogLevel.Info);
+                if (treatment.ReadyForReviewDate != null)
+                    _monitor.Log($"    ReadyForReviewDate: {treatment.ReadyForReviewDate}", LogLevel.Info);
+                _monitor.Log(
+                    $"    Next step: {TreatmentNextStep.Resolve(treatment, _stateService.HasBuffInGame(treatment.BuffId))}",
+                    LogLevel.Info);
                 _monitor.Log($"    AddedToGameLog: {treatment.AddedToGameLog}", LogLevel.Info);
                 _monitor.Log($"    IssuedDate: {treatment.IssuedDate}", LogLevel.Info);
                 if (treatment.TreatmentStartedDate != null)
@@ -220,6 +240,7 @@ namespace HarveyStressMeter.Helpers
             WriteTopicGroup("Stress topics", StressTopicIds);
             WriteTopicGroup("Treatment followup topics (C# after consent)", TreatmentFollowupTopicIds);
             WriteTopicGroup("Legacy CP start topics (should be empty)", LegacyTreatmentStartTopicIds);
+            WriteTopicGroup("Ready for review topics (final talk)", ReadyForReviewTopicIds);
             WriteTopicGroup("Cured topics", CuredTopicIds);
         }
 

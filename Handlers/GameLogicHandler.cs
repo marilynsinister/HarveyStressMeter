@@ -26,6 +26,13 @@ namespace HarveyStressMeter.Handlers
         private readonly StateService _stateService;
         private readonly DarknessService _darknessService;
         private readonly StressDialogueService _stressDialogueService;
+        private readonly StressTreatmentReviewService _stressTreatmentReviewService;
+        private readonly StressLoadService _stressLoadService;
+        private readonly ThunderFlashbackService _thunderFlashbackService;
+        private readonly HarveyFlashbackRescueService _harveyFlashbackRescueService;
+        private readonly HarveyCareTrustService _harveyCareTrustService;
+        private readonly HarveySafePersonAuraService _harveySafePersonAuraService;
+        private readonly StressGameplayEffectService _stressGameplayEffectService;
 
         private string? _lastDialogueNpc;
         /// <summary>Один stress debuff за MenuChanged/DialogueBox cycle с Харви.</summary>
@@ -78,7 +85,14 @@ namespace HarveyStressMeter.Handlers
             BuffService buffService,
             StateService stateService,
             DarknessService darknessService,
-            StressDialogueService stressDialogueService)
+            StressDialogueService stressDialogueService,
+            StressTreatmentReviewService stressTreatmentReviewService,
+            StressLoadService stressLoadService,
+            ThunderFlashbackService thunderFlashbackService,
+            HarveyFlashbackRescueService harveyFlashbackRescueService,
+            HarveyCareTrustService harveyCareTrustService,
+            HarveySafePersonAuraService harveySafePersonAuraService,
+            StressGameplayEffectService stressGameplayEffectService)
         {
             _data = data;
             _monitor = monitor;
@@ -88,10 +102,21 @@ namespace HarveyStressMeter.Handlers
             _stateService = stateService;
             _darknessService = darknessService;
             _stressDialogueService = stressDialogueService;
+            _stressTreatmentReviewService = stressTreatmentReviewService;
+            _stressLoadService = stressLoadService;
+            _thunderFlashbackService = thunderFlashbackService;
+            _harveyFlashbackRescueService = harveyFlashbackRescueService;
+            _harveyCareTrustService = harveyCareTrustService;
+            _harveySafePersonAuraService = harveySafePersonAuraService;
+            _stressGameplayEffectService = stressGameplayEffectService;
         }
 
-        /// <summary>Сбрасывает RAM-состояние programmatic stress-диалога (pending/consent).</summary>
-        public void ClearStressDialoguePending() => _stressDialogueService.ClearPendingTreatment();
+        /// <summary>Сбрасывает RAM-состояние programmatic stress-диалога (pending auto-start).</summary>
+        public void ClearStressDialoguePending()
+        {
+            _stressDialogueService.ClearPendingTreatment();
+            _stressTreatmentReviewService.ClearPendingReview();
+        }
 
         public void ResetDailyData()
         {
@@ -106,6 +131,10 @@ namespace HarveyStressMeter.Handlers
             _data.TalkedToHarveyToday = false;
 
             ResetDailyQuestCounters();
+
+            _thunderFlashbackService.ResetDailyState();
+            _harveyFlashbackRescueService.ResetDailyState();
+            _harveyCareTrustService.OnDayStarted();
             
             // Обновляем состояние страха темноты каждый день
             _darknessService.UpdateDailyFearState();
@@ -159,10 +188,12 @@ namespace HarveyStressMeter.Handlers
             }
         }
 
-        public void ProcessGameTick(bool harveyNearby)
+        public void ProcessGameTick(bool _)
         {
             if (!Context.IsWorldReady)
                 return;
+
+            var harveyNearby = _harveySafePersonAuraService.IsHarveyWithinCareAuraRange();
 
             // ⭐ ОПТИМИЗАЦИЯ: Интервальные счетчики
             _harveyCheckCounter++;
@@ -213,12 +244,23 @@ namespace HarveyStressMeter.Handlers
                 {
                     NaturalBuffRemoval(harveyNearby);
                 }
+
+                if (_thunderFlashbackService.State.IsActive)
+                    _thunderFlashbackService.UpdateActiveFlashback(1);
+
+                _harveyFlashbackRescueService.Update(1);
+
+                _stressGameplayEffectService.UpdateEffects();
             }
 
             // === КАЖДЫЕ 10 СЕКУНД: Медленные проверки (90% ⬇️) ===
             if (_tiredCheckCounter >= TIRED_CHECK_INTERVAL)
             {
                 _tiredCheckCounter = 0;
+
+                // Пересчёт StressLoad (гроза, комбо-модификаторы)
+                if (GetHasAnyStressBuff())
+                    _stressLoadService.SyncFromGameState();
 
                 // Проверяем усталость в течение дня
                 if (!_stateService.HasActiveTreatmentState(BuffIds.Tired))
@@ -319,10 +361,21 @@ namespace HarveyStressMeter.Handlers
             
             ApplyQuestLocationBuffs(e.NewLocation);
             TryApplyTooColdStressTrigger();
+
+            _thunderFlashbackService.OnLocationChanged(
+                e.OldLocation?.NameOrUniqueName,
+                e.NewLocation.NameOrUniqueName);
+
+            _harveyFlashbackRescueService.OnLocationChanged(
+                e.OldLocation?.NameOrUniqueName,
+                e.NewLocation.NameOrUniqueName);
         }
 
         public void HandleTimeChanged(TimeChangedEventArgs e)
         {
+            if (e.NewTime / 100 != e.OldTime / 100)
+                _stressLoadService.ApplyHourlyDecay();
+
             // Obmorok from tiredness (at 2:00 am = 2600 in 26-hour time)
             if (e.NewTime == 2600 && Game1.player.Stamina >= 0 && Game1.player.Stamina <= 5)
             {
@@ -341,7 +394,10 @@ namespace HarveyStressMeter.Handlers
             if (Game1.isLightning && e.NewTime % 100 == 0)
             {
                 CheckLightningStressTrigger();
+                _thunderFlashbackService.OnTimeChanged(e.OldTime, e.NewTime);
             }
+
+            _harveySafePersonAuraService.OnTimeChanged(e.OldTime, e.NewTime);
         }
 
         public void CheckDayEndingQuestCompletion()
@@ -350,8 +406,7 @@ namespace HarveyStressMeter.Handlers
             if (_stateService.HasActiveQuestState(QuestIds.NoSleep)
                 && Game1.timeOfDay >= 600 && Game1.timeOfDay <= 2200)
             {
-                _stateService.CompleteTreatment(QuestIds.NoSleep);
-                ConversationHelper.AddTopic("topicStressTreatmentNoSleepCured", 2);
+                _treatmentService.MarkTreatmentReadyForReview(BuffIds.NoSleep);
                 Game1.playSound("questcomplete");
             }
 
@@ -362,9 +417,8 @@ namespace HarveyStressMeter.Handlers
                 && Game1.player.currentLocation is StardewValley.Locations.FarmHouse)
             {
                 _buffService.RemoveBuff(BuffIds.LightAndSafe);
-                ConversationHelper.AddTopic("topicStressTreatmentDarknessCured", 2);
                 Game1.playSound("questcomplete");
-                _stateService.CompleteTreatment(QuestIds.Darkness);
+                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Darkness);
             }
         }
 
@@ -449,6 +503,16 @@ namespace HarveyStressMeter.Handlers
                 return;
             }
 
+            if (_stressTreatmentReviewService.TryArmReviewCompletionOnHarveyTalk(out var reviewBuffId))
+            {
+                _monitor.Log(
+                    $"[Диалог] Treatment review via CP topic (buff={reviewBuffId}) — vanilla dialogue, completion after close",
+                    LogLevel.Info);
+                _lastDialogueNpc = "Harvey";
+                _harveyStressDialogueCycleHandled = true;
+                return;
+            }
+
             if (_harveyStressDialogueCycleHandled)
             {
                 _monitor.Log("[Диалог] Harvey stress dialogue cycle already handled — skip", LogLevel.Debug);
@@ -530,8 +594,13 @@ namespace HarveyStressMeter.Handlers
                 return;
             }
 
-            // Treatment start is controlled only by C# consent flow. CP topics must not start treatment.
+            // Auto-start treatment/quest after programmatic stress start dialogue closes.
             _stressDialogueService.CheckAndStartTreatmentAfterDialogue();
+
+            // Финальное завершение лечения после programmatic review-диалога.
+            _stressTreatmentReviewService.OnReviewDialogueClosed();
+
+            _harveyCareTrustService.TryAwardSupportiveTalk();
 
             // Обновляем прогресс Social квеста
             UpdateSocialQuestProgress(showUiMessage: false);
@@ -608,8 +677,7 @@ namespace HarveyStressMeter.Handlers
                 if (lonelyTreatment.Progress.TalkedUniqueToday >= 3)
                 {
                     Game1.playSound("questcomplete");
-                    _stateService.CompleteTreatment(QuestIds.Lonely);
-                    ConversationHelper.AddTopic("topicStressTreatmentLonelyCured", 2);
+                    _treatmentService.MarkTreatmentReadyForReview(BuffIds.Lonely);
                 }
             }
         }
@@ -681,8 +749,7 @@ namespace HarveyStressMeter.Handlers
                     activeHunger.Progress.AteAnyFood = true;
 
                 Game1.playSound("questcomplete");
-                _stateService.CompleteTreatment(QuestIds.Hunger);
-                ConversationHelper.AddTopic("topicStressTreatmentHungerCured", 2);
+                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Hunger);
             }
             else if (activeHunger != null && !activeHunger.TreatmentStarted)
             {
@@ -720,8 +787,7 @@ namespace HarveyStressMeter.Handlers
                 if (HotDrinkHelper.IsHotDrinkOrWarmingFood(consumed))
                 {
                     Game1.playSound("questcomplete");
-                    _stateService.CompleteTreatment(QuestIds.TooCold);
-                    ConversationHelper.AddTopic("topicStressTreatmentTooColdCured", 2);
+                    _treatmentService.MarkTreatmentReadyForReview(BuffIds.TooCold);
                 }
                 else
                 {
@@ -798,6 +864,9 @@ namespace HarveyStressMeter.Handlers
             _buffService.RemoveBuff(buffId);
             ConversationHelper.RemoveTopic(stressTopic);
             RemoveTreatmentTopicArtifacts(buffId);
+
+            if (StressCauses.TryGetCauseForBuff(buffId, out var causeId))
+                _stressLoadService.RemoveCause(causeId);
 
             if (activeTreatment != null)
             {

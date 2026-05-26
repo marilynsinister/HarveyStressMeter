@@ -80,8 +80,7 @@ namespace HarveyStressMeter.Services
                 _monitor.Log($"[Social Quest] Время с Харви: {socialTreatment.Progress.SecondsNearHarvey} сек", LogLevel.Info);
 
                 Game1.playSound("questcomplete");
-                ConversationHelper.AddTopic("topicStressTreatmentSocialCured", 2);
-                _stateService.CompleteTreatment(QuestIds.Social);
+                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Social);
             }
         }
 
@@ -119,7 +118,7 @@ namespace HarveyStressMeter.Services
                     {
                         progress.EveningInLightSeconds++;
                         if (progress.EveningInLightSeconds >= 180)
-                            _treatmentService.CompleteTreatment(buffId, "Свет сильнее тьмы.");
+                            _treatmentService.MarkTreatmentReadyForReview(buffId);
                     }
                     break;
 
@@ -129,7 +128,7 @@ namespace HarveyStressMeter.Services
                     {
                         progress.WarmSeconds++;
                         if (progress.WarmSeconds >= 120)
-                            _treatmentService.CompleteTreatment(buffId, "Тепло вернуло силы.");
+                            _treatmentService.MarkTreatmentReadyForReview(buffId);
                     }
                     break;
 
@@ -206,12 +205,20 @@ namespace HarveyStressMeter.Services
         private void CompleteThunderTreatment()
         {
             Game1.playSound("questcomplete");
-            ConversationHelper.AddTopic("topicStressTreatmentThunderCured", 2);
-            _stateService.CompleteTreatment(QuestIds.Thunder);
+            _treatmentService.MarkTreatmentReadyForReview(BuffIds.Thunder);
+        }
+
+        private bool IsAwaitingHarveyReview(string questId)
+        {
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(questId);
+            return treatment?.AwaitingHarveyReview == true;
         }
 
         private void UpdateThunderQuestDescription(TreatmentProgress progress)
         {
+            if (IsAwaitingHarveyReview(QuestIds.Thunder))
+                return;
+
             int seconds = Math.Min(progress.SecondsNearHarvey, ThunderSecondsRequired);
             string progressLine = progress.SecondsNearHarvey >= ThunderSecondsRequired
                 ? "✅ Вы пережили грозу вместе!"
@@ -259,8 +266,7 @@ namespace HarveyStressMeter.Services
             if (progress.TiredRestSeconds >= TiredRestSecondsRequired)
             {
                 Game1.playSound("questcomplete");
-                ConversationHelper.AddTopic("topicStressTreatmentTiredCured", 2);
-                _stateService.CompleteTreatment(QuestIds.Tired);
+                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Tired);
             }
         }
 
@@ -321,9 +327,8 @@ namespace HarveyStressMeter.Services
             Game1.playSound("questcomplete");
             ConversationHelper.RemoveTopic(TopicIds.OverworkBreakActive);
             ConversationHelper.RemoveTopic(TopicIds.OverworkBreakInterrupted);
-            ConversationHelper.AddTopic("topicStressTreatmentOverworkCured", 2);
             _buffService.RemoveBuff(BuffIds.OverworkBreak);
-            _stateService.CompleteTreatment(QuestIds.Overwork);
+            _treatmentService.MarkTreatmentReadyForReview(BuffIds.Overwork);
         }
 
         private void UpdateSocialAnxietyProgress(TreatmentProgress progress, bool harveyNearby)
@@ -380,6 +385,9 @@ namespace HarveyStressMeter.Services
 
         public void UpdateQuestDescription(TreatmentProgress progress)
         {
+            if (IsAwaitingHarveyReview(QuestIds.Social))
+                return;
+
             string progressText = GetProgressText(progress);
 
             // Логирование убрано для оптимизации
@@ -441,12 +449,9 @@ namespace HarveyStressMeter.Services
                 _monitor.Log($"[Social Quest] ✅ Квест завершен: 3 разговора + 60 сек с Харви", LogLevel.Info);
                 Game1.addHUDMessage(new HUDMessage("✅ Социальная тренировка завершена! (3 разговора + время с Харви)", HUDMessage.achievement_type));
 
-                // Добавляем топик для реакции Харви на завершение
-                ConversationHelper.AddTopic("topicStressTreatmentSocialCured", 2);
+                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Social);
 
-                _stateService.CompleteTreatment(QuestIds.Social);
-
-                _monitor.Log($"[Social Quest] Квест завершен, дебафф снят, топик реакции добавлен", LogLevel.Info);
+                _monitor.Log($"[Social Quest] Условия выполнены — ожидание разговора с Харви", LogLevel.Info);
                 return;
             }
 
@@ -455,12 +460,9 @@ namespace HarveyStressMeter.Services
                 _monitor.Log($"[Social Quest] ✅ Квест завершен: 5 разговоров", LogLevel.Info);
                 Game1.addHUDMessage(new HUDMessage("✅ Социальная тренировка завершена! (5 разговоров)", HUDMessage.achievement_type));
 
-                // Добавляем топик для реакции Харви на завершение
-                ConversationHelper.AddTopic("topicStressTreatmentSocialCured", 2);
+                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Social);
 
-                _stateService.CompleteTreatment(QuestIds.Social);
-
-                _monitor.Log($"[Social Quest] Квест завершен, дебафф снят, топик реакции добавлен", LogLevel.Info);
+                _monitor.Log($"[Social Quest] Условия выполнены — ожидание разговора с Харви", LogLevel.Info);
                 return;
             }
 

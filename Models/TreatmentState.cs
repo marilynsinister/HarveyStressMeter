@@ -70,6 +70,21 @@ namespace HarveyStressMeter.Models
         /// </summary>
         public bool IsCompleted { get; set; } = false;
 
+        /// <summary>
+        /// Условия назначения/квеста выполнены (ожидается финальный разговор с Харви).
+        /// </summary>
+        public bool ObjectivesCompleted { get; set; } = false;
+
+        /// <summary>
+        /// Лечение ждёт финальной проверки Харви (квест ещё активен, дебафф не снят).
+        /// </summary>
+        public bool AwaitingHarveyReview { get; set; } = false;
+
+        /// <summary>
+        /// Дата перехода в режим ожидания разговора с Харви (логи/отладка).
+        /// </summary>
+        public SDate? ReadyForReviewDate { get; set; } = null;
+
         // ===== ПРОГРЕСС ЛЕЧЕНИЯ =====
         
         /// <summary>
@@ -122,6 +137,9 @@ namespace HarveyStressMeter.Models
             
             if (IsCompleted)
                 return $"🎯 Квест завершен ({CompletedDate?.ToString() ?? "неизвестно"})";
+            
+            if (AwaitingHarveyReview)
+                return $"🗣️ Ожидает разговора с Харви ({ReadyForReviewDate?.ToString() ?? "неизвестно"})";
             
             if (TreatmentStarted)
                 return $"🔄 Лечение активно ({TreatmentStartedDate?.ToString() ?? "неизвестно"})";
