@@ -132,6 +132,7 @@ namespace HarveyStressMeter.Handlers
             _gameLogicHandler.CheckLateSleepPattern();  // ⭐ НОВОЕ: Отслеживание позднего сна
             _stressLoadService.SyncFromGameState();
             _stressLoadService.DecayStress(GetEndOfDayStressDecay());
+            _stressLoadService.NormalizeRecoveryOffsetAtDayEnd();
             SaveData();
         }
 

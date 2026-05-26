@@ -37,7 +37,8 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// Загружает данные о квестах
+        /// Загружает метаданные квестов из mod assets/stress_quests.json (Title, Description, Objective).
+        /// Журнал игры требует те же ID в Data/Quests — их добавляет HarveyOverhaul [CP] (assets/Code/questsStress.json).
         /// </summary>
         private void LoadQuests()
         {

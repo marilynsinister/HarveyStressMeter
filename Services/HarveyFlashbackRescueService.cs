@@ -110,21 +110,28 @@ namespace HarveyStressMeter.Services
             if (State.HarveyRescueTriggeredToday || State.PendingPostRescueTier != null)
                 return;
 
-            if (!CanAttemptRescue(out _, skipTrustGate: false))
+            if (!CanAttemptRescue(out var blockReason))
+            {
+                if (State.ForestSecondsBeforeRescue >= _config.MinForestSecondsBeforeRescue)
+                    LogRescueSkipped(blockReason);
                 return;
+            }
 
             var tier = HarveyFriendshipHelper.ResolveRescueTier(_config.MinHeartsForForestRescue);
             if (tier == null)
+            {
+                LogRescueSkipped($"Harvey hearts < {_config.MinHeartsForForestRescue}");
+                return;
+            }
+
+            var chance = ComputeRescueChance(tier, out var baseChance, out var trustBonus);
+            var roll = Game1.random.NextDouble();
+            LogRescueRoll(tier, baseChance, trustBonus, chance, roll, passed: roll <= chance);
+
+            if (chance <= 0 || roll > chance)
                 return;
 
-            var chance = HarveyFriendshipHelper.GetRescueChance(tier, _config);
-            if (_trustService != null)
-                chance = Math.Min(1.0, chance + _trustService.GetRescueChanceBonus());
-
-            if (chance <= 0 || Game1.random.NextDouble() > chance)
-                return;
-
-            TryTriggerRescue(tier, force: false);
+            TryTriggerRescue(tier, chanceAlreadyPassed: true);
         }
 
         public RescueEvaluation EvaluateRescue(bool ignoreChance = false)
@@ -147,8 +154,13 @@ namespace HarveyStressMeter.Services
             };
 
             eval.Tier = HarveyFriendshipHelper.ResolveRescueTier(_config.MinHeartsForForestRescue);
-            eval.RescueChance = eval.Tier != null
+            eval.TrustLevel = _trustService?.GetTrustLevel() ?? 0;
+            eval.TrustRescueBonus = _trustService?.GetRescueChanceBonus() ?? 0;
+            eval.BaseRescueChance = eval.Tier != null
                 ? HarveyFriendshipHelper.GetRescueChance(eval.Tier, _config)
+                : 0;
+            eval.RescueChance = eval.Tier != null
+                ? Math.Min(1.0, eval.BaseRescueChance + eval.TrustRescueBonus)
                 : 0;
 
             eval.CanAttempt = CanAttemptRescue(out var blockReason, ignoreChance);
@@ -157,7 +169,7 @@ namespace HarveyStressMeter.Services
             return eval;
         }
 
-        public bool TryTriggerRescue(string? tierOverride = null, bool force = false)
+        public bool TryTriggerRescue(string? tierOverride = null, bool force = false, bool chanceAlreadyPassed = false)
         {
             if (!Context.IsWorldReady)
                 return false;
@@ -165,10 +177,10 @@ namespace HarveyStressMeter.Services
             if (!force && !_config.EnableHarveyFlashbackRescue)
                 return false;
 
-            if (!CanAttemptRescue(out var reason, ignoreChance: true, skipTrustGate: force))
+            if (!CanAttemptRescue(out var reason, ignoreChance: true))
             {
                 if (!force)
-                    _monitor.Log($"[FlashbackRescue] Trigger blocked: {reason}", LogLevel.Debug);
+                    LogRescueSkipped(reason);
                 return false;
             }
 
@@ -178,15 +190,25 @@ namespace HarveyStressMeter.Services
 
             if (tier == null)
             {
-                _monitor.Log("[FlashbackRescue] No rescue tier for current relationship.", LogLevel.Warn);
+                LogRescueSkipped($"Harvey hearts < {_config.MinHeartsForForestRescue}");
                 return false;
             }
 
-            if (!force)
+            if (!force && !chanceAlreadyPassed)
             {
-                var chance = HarveyFriendshipHelper.GetRescueChance(tier, _config);
-                if (chance <= 0 || Game1.random.NextDouble() > chance)
+                var chance = ComputeRescueChance(tier, out var baseChance, out var trustBonus);
+                var roll = Game1.random.NextDouble();
+                LogRescueRoll(tier, baseChance, trustBonus, chance, roll, passed: roll <= chance);
+
+                if (chance <= 0 || roll > chance)
                     return false;
+            }
+            else if (force)
+            {
+                _monitor.Log(
+                    $"[FlashbackRescue] Forced trigger: tier={tier}, hearts={HarveyFriendshipHelper.GetHarveyHearts()}, " +
+                    $"trust={_trustService?.GetTrustLevel() ?? 0}",
+                    LogLevel.Debug);
             }
 
             var eventId = FlashbackRescueEventIds.ForTier(tier);
@@ -210,7 +232,12 @@ namespace HarveyStressMeter.Services
             if (!started)
             {
                 ShowFallbackMessage(tier);
-                ApplyPostRescueEffects(tier, eventId, usedFallback: true);
+                MarkRescueConsumedToday(tier, "fallback");
+                ApplyPostRescueEffects(tier, "fallback", usedFallback: true);
+                _monitor.Log(
+                    $"[FlashbackRescue] Fallback rescue applied: tier={tier}, hearts={HarveyFriendshipHelper.GetHarveyHearts()}, " +
+                    $"trust={_trustService?.GetTrustLevel() ?? 0}, eventId=fallback",
+                    LogLevel.Info);
                 return true;
             }
 
@@ -221,16 +248,15 @@ namespace HarveyStressMeter.Services
                     LogLevel.Warn);
             }
 
+            MarkRescueConsumedToday(tier, eventId);
             State.PendingPostRescueTier = tier;
             State.PendingPostRescueEventId = eventId;
-            State.RescueTier = tier;
-            State.HarveyRescueTriggeredToday = true;
-            State.LastRescueDay = (int)Game1.Date.TotalDays;
-            State.LastRescueEventId = eventId;
             _rescueEventWasActive = false;
 
             _monitor.Log(
-                $"[FlashbackRescue] Started event tier={tier}, id={eventId}, cp={usedCp}, forestSeconds={State.ForestSecondsBeforeRescue}",
+                $"[FlashbackRescue] Started event tier={tier}, id={eventId}, cp={usedCp}, " +
+                $"hearts={HarveyFriendshipHelper.GetHarveyHearts()}, trust={_trustService?.GetTrustLevel() ?? 0}, " +
+                $"forestSeconds={State.ForestSecondsBeforeRescue}",
                 LogLevel.Info);
 
             return true;
@@ -293,17 +319,54 @@ namespace HarveyStressMeter.Services
             _trustService?.OnForestRescueCompleted();
             _trustDialogueService?.QueueRescueFollowUpTopic(tier);
 
+            MarkRescueConsumedToday(tier, eventId);
             State.HarveyHelpedStabilizeToday = true;
-            State.RescueTier = tier;
-            State.LastRescueEventId = eventId;
-            State.LastRescueDay = (int)Game1.Date.TotalDays;
             ClearRescuePendingTopic();
 
             _monitor.Log(
-                $"Harvey rescue triggered: tier={tier}, stressReduced={stressReduced}, " +
+                $"[FlashbackRescue] Post-rescue applied: tier={tier}, stressReduced={stressReduced}, " +
                 $"forestSeconds={State.ForestSecondsBeforeRescue}, shelter={_thunderFlashbackService.State.ForestShelterSeconds}/" +
-                $"{_thunderFlashbackService.State.RequiredForestShelterSeconds}, fallback={usedFallback}",
+                $"{_thunderFlashbackService.State.RequiredForestShelterSeconds}, fallback={usedFallback}, eventId={eventId}",
                 LogLevel.Info);
+        }
+
+        private void MarkRescueConsumedToday(string tier, string eventId)
+        {
+            State.HarveyRescueTriggeredToday = true;
+            State.LastRescueDay = (int)Game1.Date.TotalDays;
+            State.RescueTier = tier;
+            State.LastRescueEventId = eventId;
+        }
+
+        private double ComputeRescueChance(string tier, out double baseChance, out double trustBonus)
+        {
+            baseChance = HarveyFriendshipHelper.GetRescueChance(tier, _config);
+            trustBonus = _trustService?.GetRescueChanceBonus() ?? 0;
+            return Math.Min(1.0, baseChance + trustBonus);
+        }
+
+        private void LogRescueSkipped(string? reason)
+        {
+            _monitor.Log(
+                $"[FlashbackRescue] Skipped: {reason ?? "(unknown)"}; hearts={HarveyFriendshipHelper.GetHarveyHearts()}, " +
+                $"trust={_trustService?.GetTrustLevel() ?? 0}, forestSeconds={State.ForestSecondsBeforeRescue}, " +
+                $"triggeredToday={State.HarveyRescueTriggeredToday}, awaitingReview={IsAwaitingHarveyReview()}",
+                LogLevel.Debug);
+        }
+
+        private void LogRescueRoll(
+            string tier,
+            double baseChance,
+            double trustBonus,
+            double totalChance,
+            double roll,
+            bool passed)
+        {
+            _monitor.Log(
+                $"[FlashbackRescue] Roll {(passed ? "passed" : "failed")}: tier={tier}, hearts={HarveyFriendshipHelper.GetHarveyHearts()}, " +
+                $"trust={_trustService?.GetTrustLevel() ?? 0}, base={baseChance:P0}, trustBonus=+{trustBonus:P0}, " +
+                $"total={totalChance:P0}, roll={roll:F3}",
+                LogLevel.Debug);
         }
 
         private static void ApplyFriendshipBonus(int points)
@@ -331,7 +394,7 @@ namespace HarveyStressMeter.Services
             Game1.showGlobalMessage(text);
         }
 
-        private bool CanAttemptRescue(out string? blockReason, bool ignoreChance = false, bool skipTrustGate = false)
+        private bool CanAttemptRescue(out string? blockReason, bool ignoreChance = false)
         {
             blockReason = null;
 
@@ -392,12 +455,6 @@ namespace HarveyStressMeter.Services
             if (HarveyFriendshipHelper.ResolveRescueTier(_config.MinHeartsForForestRescue) == null)
             {
                 blockReason = $"Harvey hearts < {_config.MinHeartsForForestRescue}";
-                return false;
-            }
-
-            if (!skipTrustGate && _trustService != null && !_trustService.CanHarveyForestRescue())
-            {
-                blockReason = "HarveyCareTrust ForestRescue requires TrustLevel >= 3 (SafePerson)";
                 return false;
             }
 
@@ -470,7 +527,9 @@ namespace HarveyStressMeter.Services
             sb.AppendLine($"PendingPostRescue: {State.PendingPostRescueTier ?? "(none)"}");
             sb.AppendLine($"CanAttempt: {eval.CanAttempt}");
             sb.AppendLine($"BlockReason: {eval.BlockReason ?? "(none)"}");
-            sb.AppendLine($"EvalTier: {eval.Tier ?? "(none)"}, chance={eval.RescueChance:P0}");
+            sb.AppendLine($"EvalTier: {eval.Tier ?? "(none)"}, base={eval.BaseRescueChance:P0}, trustBonus=+{eval.TrustRescueBonus:P0}, total={eval.RescueChance:P0}");
+            sb.AppendLine($"TrustLevel: {eval.TrustLevel}");
+            sb.AppendLine($"CooldownDays: {_config.RescueCooldownDays}, marriedBypass={_config.MarriedIgnoresCooldown}");
             sb.AppendLine($"GotoroActive: {eval.GotoroFlashbackActive}, flashback={eval.FlashbackIsActive}, gotoro={eval.IsGotoroFlashback}");
             sb.AppendLine($"Storm: {eval.StormWeather}, forest: {eval.InForest}, hearts: {eval.HarveyHearts}");
             return sb.ToString().TrimEnd();
@@ -493,6 +552,9 @@ namespace HarveyStressMeter.Services
         public int LastRescueDay { get; init; }
         public bool AwaitingHarveyReview { get; init; }
         public string? Tier { get; set; }
+        public double BaseRescueChance { get; set; }
+        public double TrustRescueBonus { get; set; }
+        public int TrustLevel { get; set; }
         public double RescueChance { get; set; }
         public bool CanAttempt { get; set; }
         public string? BlockReason { get; set; }

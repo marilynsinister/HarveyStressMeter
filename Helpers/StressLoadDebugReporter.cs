@@ -30,7 +30,9 @@ namespace HarveyStressMeter.Helpers
             var flashback = flashbackService.State;
 
             sb.AppendLine("=== StressLoad ===");
-            sb.AppendLine($"CurrentStressLoad: {load} (raw {stressLoadService.GetRawStressLoad()})");
+            sb.AppendLine($"CauseLoad: {stressLoadService.GetCauseLoad()}");
+            sb.AppendLine($"StressRecoveryOffset: {stressLoadService.GetStressRecoveryOffset()}");
+            sb.AppendLine($"CurrentStressLoad: {load} (stored {stressLoadService.GetRawStressLoad()})");
             sb.AppendLine($"Severity: {severity}");
             sb.AppendLine($"Primary cause: {stressLoadService.GetPrimaryCause() ?? "(none)"}");
             sb.AppendLine($"HasActiveTreatment: {stressLoadService.HasActiveTreatment()}");

@@ -6,6 +6,13 @@ namespace HarveyStressMeter.Models
     public sealed class StressLoadState
     {
         public int CurrentStressLoad { get; set; }
+
+        /// <summary>Снижение шкалы от отдыха/лечения/ауры при сохранении активных causes.</summary>
+        public int StressRecoveryOffset { get; set; }
+
+        /// <summary>Последний пересчитанный load из causes (до recovery offset).</summary>
+        public int LastCauseLoad { get; set; }
+
         public StressSeverity Severity { get; set; } = StressSeverity.Calm;
         public Dictionary<string, StressCauseState> ActiveCauses { get; set; } = new();
         public string? ActiveEpisodeId { get; set; }

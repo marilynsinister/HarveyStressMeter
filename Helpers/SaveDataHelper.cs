@@ -284,6 +284,8 @@ namespace HarveyStressMeter.Helpers
         private static void CopyStressLoadInto(StressLoadState target, StressLoadState source)
         {
             target.CurrentStressLoad = source.CurrentStressLoad;
+            target.StressRecoveryOffset = source.StressRecoveryOffset;
+            target.LastCauseLoad = source.LastCauseLoad;
             target.Severity = source.Severity;
             target.ActiveEpisodeId = source.ActiveEpisodeId;
             target.ActiveTreatmentEpisodeId = source.ActiveTreatmentEpisodeId;

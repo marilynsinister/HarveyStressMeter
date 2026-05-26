@@ -146,6 +146,11 @@ namespace HarveyStressMeter
             _questService = new QuestService(Monitor);
             _stateService = new StateService(_data, Monitor, _buffService, _questService);
             _stressLoadService = new StressLoadService(_data, _buffService, _stateService, _config, Monitor);
+
+            _harveyCareTrustService = new HarveyCareTrustService(_data, _config, Monitor);
+            _stressLoadService.SetTrustService(_harveyCareTrustService);
+            Monitor.Log("HarveyCareTrustService initialized", LogLevel.Info);
+
             var lightningFrightMessageService = new LightningFrightMessageService(Monitor, _config);
             lightningFrightMessageService.Load(_helper);
             _stressGameplayEffectService = new StressGameplayEffectService(
@@ -168,7 +173,7 @@ namespace HarveyStressMeter
             _treatmentEpisodeService.SetTrustService(_harveyCareTrustService);
             _triggerService = new TriggerService(_data, _buffService, _questService, _stateService, _treatmentService, Monitor);
             _darknessService = new DarknessService(_data, _buffService, _stateService, Monitor);
-            var thunderFlashbackService = new ThunderFlashbackService(
+            _thunderFlashbackService = new ThunderFlashbackService(
                 _data,
                 _stressLoadService,
                 _treatmentService,
@@ -177,7 +182,6 @@ namespace HarveyStressMeter
                 lightningFrightMessageService,
                 _config,
                 Monitor);
-            _thunderFlashbackService = thunderFlashbackService;
             _thunderFlashbackService.SetTrustService(_harveyCareTrustService);
             _harveySafePersonAuraService = new HarveySafePersonAuraService(
                 _data,
@@ -187,15 +191,30 @@ namespace HarveyStressMeter
                 _thunderFlashbackService,
                 Monitor);
             _thunderFlashbackService.SetSafeAuraService(_harveySafePersonAuraService);
+            Monitor.Log("Safe aura wired", LogLevel.Info);
             _harveyFlashbackRescueService = new HarveyFlashbackRescueService(
                 _data,
                 _stressLoadService,
-                thunderFlashbackService,
+                _thunderFlashbackService,
                 _treatmentService,
                 _config,
                 Monitor,
                 _harveyCareTrustService);
+
+            _stressSystemsCoordinator = new StressSystemsCoordinator(
+                _data,
+                _stressLoadService,
+                _treatmentEpisodeService,
+                _thunderFlashbackService,
+                Monitor);
+            Monitor.Log("StressSystemsCoordinator initialized", LogLevel.Info);
+
+            _treatmentEpisodeService.SetCoordinator(_stressSystemsCoordinator);
+            _thunderFlashbackService.SetCoordinator(_stressSystemsCoordinator);
             _harveyFlashbackRescueService.SetCoordinator(_stressSystemsCoordinator);
+            Monitor.Log("Treatment episode service wired", LogLevel.Info);
+            Monitor.Log("Rescue service wired", LogLevel.Info);
+
             _stressTreatmentReviewService = new StressTreatmentReviewService(
                 Monitor,
                 _stateService,
