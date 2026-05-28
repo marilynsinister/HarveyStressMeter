@@ -1,0 +1,105 @@
+{
+  "name": "environment",
+  "description": "MCP environment tools: warp, weather, time — preconditions для rescue, aura, episodes.",
+  "notes": "Блокируются при активном event/menu. После warp проверяй stress_game_context location.",
+  "tests": [
+    {
+      "id": "TC-ENV-001",
+      "title": "Warp to key locations",
+      "preconditions": ["Save loaded", "No event/menu"],
+      "snapshots_before": ["stress_game_context"],
+      "snapshots_after": ["stress_game_context"],
+      "snapshots": ["stress_game_context"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town" }, "expect": ["ok: true"] },
+        { "tool": "stress_game_context", "arguments": {}, "expect": ["Location:"] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": ["ok: true"] },
+        { "tool": "mcp_warp", "arguments": { "location": "Hospital" }, "expect": ["ok: true"] },
+        { "tool": "mcp_warp", "arguments": { "location": "Woods" }, "expect": ["ok: true"] }
+      ],
+      "assertions": [
+        "Each warp returns ok: true",
+        "stress_game_context Location matches last warp",
+        "No event_active error"
+      ]
+    },
+    {
+      "id": "TC-ENV-002",
+      "title": "Weather modes for rescue preconditions",
+      "preconditions": ["Save loaded", "No event"],
+      "snapshots_before": ["stress_game_context"],
+      "snapshots_after": ["stress_rescue_debug"],
+      "snapshots": ["stress_game_context", "stress_rescue_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": ["isLightning: True", "isRaining: True"] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true }, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 2000 }, "expect": [] },
+        { "tool": "stress_rescue_evaluate", "arguments": { "ignore_chance": true }, "expect": ["isStorm: true"] }
+      ],
+      "assertions": [
+        "Rescue evaluate sees storm weather",
+        "isForestLikeLocation true in rescue debug when in Forest"
+      ]
+    },
+    {
+      "id": "TC-ENV-003",
+      "title": "Storm enables AnxietySpike episode candidate",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug", "stress_hud_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressThunder" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CandidateEpisode: AnxietySpike"] }
+      ],
+      "assertions": [
+        "Thunder cause active",
+        "CandidateEpisode AnxietySpike when lightning active"
+      ]
+    },
+    {
+      "id": "TC-ENV-004",
+      "title": "Set time and add minutes",
+      "preconditions": ["No event/menu"],
+      "snapshots_before": ["stress_game_context"],
+      "snapshots_after": ["stress_game_context"],
+      "snapshots": ["stress_game_context"],
+      "steps": [
+        { "tool": "mcp_set_time", "arguments": { "time": 900 }, "expect": [] },
+        { "tool": "stress_game_context", "arguments": {}, "expect": [] },
+        { "tool": "mcp_add_minutes", "arguments": { "minutes": 30 }, "expect": [] },
+        { "tool": "stress_game_context", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "Time advances without Error",
+        "Invalid time 999 returns Error (see TC-NEG time tests)"
+      ]
+    },
+    {
+      "id": "TC-ENV-005",
+      "title": "Warp blocked during active event",
+      "preconditions": ["Can start rescue event"],
+      "snapshots_before": ["mcp_event_snapshot"],
+      "snapshots_after": ["mcp_event_snapshot"],
+      "snapshots": ["mcp_event_snapshot", "stress_game_context"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": [] },
+        { "tool": "mcp_start_event", "arguments": { "event_id": "HarveyStress_GotoroForestRescue_HighTrust", "force": true }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town" }, "expect": ["Error:"] },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": [] }
+      ],
+      "assertions": [
+        "mcp_warp returns Error while event active",
+        "After end event warp works again"
+      ]
+    }
+  ]
+}

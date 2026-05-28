@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using HarveyStressMeter.Constants;
+using HarveyStressMeter.Handlers;
 using HarveyStressMeter.Helpers;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Services;
@@ -37,6 +38,13 @@ namespace HarveyStressMeter.Testing
         private readonly QuestService _questService;
         private readonly StressDialogueService _stressDialogueService;
         private readonly ModResetService _modResetService;
+        private readonly HarveyCareTrustService _harveyCareTrustService;
+        private readonly StressLoadService _stressLoadService;
+        private readonly HarveyFlashbackRescueService _harveyFlashbackRescueService;
+        private readonly HarveySafePersonAuraService _harveySafePersonAuraService;
+        private readonly StressMeterHudService _stressMeterHudService;
+        private readonly TreatmentEpisodeService _treatmentEpisodeService;
+        private readonly GameLogicHandler _gameLogicHandler;
 
         public StressMcpToolHandler(
             IMonitor monitor,
@@ -46,7 +54,14 @@ namespace HarveyStressMeter.Testing
             BuffService buffService,
             QuestService questService,
             StressDialogueService stressDialogueService,
-            ModResetService modResetService)
+            ModResetService modResetService,
+            HarveyCareTrustService harveyCareTrustService,
+            StressLoadService stressLoadService,
+            HarveyFlashbackRescueService harveyFlashbackRescueService,
+            HarveySafePersonAuraService harveySafePersonAuraService,
+            StressMeterHudService stressMeterHudService,
+            TreatmentEpisodeService treatmentEpisodeService,
+            GameLogicHandler gameLogicHandler)
         {
             _monitor = monitor;
             _data = data;
@@ -56,6 +71,13 @@ namespace HarveyStressMeter.Testing
             _questService = questService;
             _stressDialogueService = stressDialogueService;
             _modResetService = modResetService;
+            _harveyCareTrustService = harveyCareTrustService;
+            _stressLoadService = stressLoadService;
+            _harveyFlashbackRescueService = harveyFlashbackRescueService;
+            _harveySafePersonAuraService = harveySafePersonAuraService;
+            _stressMeterHudService = stressMeterHudService;
+            _treatmentEpisodeService = treatmentEpisodeService;
+            _gameLogicHandler = gameLogicHandler;
         }
 
         public string Execute(string toolName, JsonElement? arguments)
@@ -78,9 +100,78 @@ namespace HarveyStressMeter.Testing
                 "stress_choose_response" => ChooseResponse(arguments),
                 "stress_dialogue_advance" => AdvanceDialogue(arguments),
                 "stress_close_dialogue" => CloseDialogue(),
+                "mcp_set_time" => McpEnvironmentTools.SetTime(arguments),
+                "mcp_add_minutes" => McpEnvironmentTools.AddMinutes(arguments),
+                "mcp_set_weather" => McpEnvironmentTools.SetWeather(arguments),
+                "mcp_warp" => McpEnvironmentTools.Warp(arguments),
+                "mcp_wait_seconds" => McpEnvironmentTools.WaitSecondsNotSupportedHere(),
+                "mcp_set_friendship" => McpSocialTools.SetFriendship(arguments),
+                "mcp_set_relationship" => McpSocialTools.SetRelationship(arguments),
+                "mcp_get_friendship" => McpSocialTools.GetFriendship(arguments),
+                "mcp_place_npc" => McpSocialTools.PlaceNpc(arguments),
+                "mcp_add_topic" => McpSocialTools.AddTopic(arguments),
+                "mcp_remove_topic" => McpSocialTools.RemoveTopic(arguments),
+                "mcp_has_topic" => McpSocialTools.HasTopic(arguments),
+                "mcp_list_topics" => McpSocialTools.ListTopics(arguments),
+                "stress_trust_debug" => McpTrustTools.TrustDebug(_harveyCareTrustService),
+                "stress_trust_set" => McpTrustTools.TrustSet(_harveyCareTrustService, arguments),
+                "stress_trust_add" => McpTrustTools.TrustAdd(_harveyCareTrustService, arguments),
+                "stress_trust_remove" => McpTrustTools.TrustRemove(_harveyCareTrustService, arguments),
+                "stress_trust_reset" => McpTrustTools.TrustReset(_harveyCareTrustService),
+                "stress_load_debug" => McpStressLoadTools.LoadDebug(_stressLoadService),
+                "stress_set_load" => McpStressLoadTools.SetLoad(_stressLoadService, arguments),
+                "stress_apply_recovery" => McpStressLoadTools.ApplyRecovery(_stressLoadService, arguments),
+                "stress_clear_recovery_offset" => McpStressLoadTools.ClearRecoveryOffset(_stressLoadService),
+                "stress_gotoro_set_active" => McpStressLoadTools.GotoroSetActive(_stressLoadService, arguments),
+                "stress_force_recalculate" => McpStressLoadTools.ForceRecalculate(_stressLoadService),
+                "stress_rescue_debug" => McpRescueTools.RescueDebug(_harveyFlashbackRescueService),
+                "stress_rescue_evaluate" => McpRescueTools.RescueEvaluate(_harveyFlashbackRescueService, arguments),
+                "stress_rescue_force" => McpRescueTools.RescueForce(_harveyFlashbackRescueService, arguments),
+                "stress_rescue_clear" => McpRescueTools.RescueClear(_harveyFlashbackRescueService),
+                "stress_safe_aura_status" => McpSafeAuraTools.SafeAuraStatus(_harveySafePersonAuraService),
+                "stress_safe_aura_force_tick" => McpSafeAuraTools.SafeAuraForceTick(_harveySafePersonAuraService),
+                "stress_hud_snapshot" => McpHudTools.HudSnapshot(_stressMeterHudService),
+                "stress_treatment_snapshot" => McpHudTools.TreatmentSnapshot(
+                    _data,
+                    _stateService,
+                    _stressLoadService,
+                    _treatmentEpisodeService,
+                    _stressDialogueService),
+                "mcp_event_snapshot" => McpEventTools.EventSnapshot(),
+                "mcp_start_event" => McpEventTools.StartEvent(_monitor, arguments),
+                "mcp_end_event" => McpEventTools.EndEvent(arguments),
+                "mcp_event_advance" => McpEventTools.AdvanceEvent(arguments),
+                "stress_run_test_plan" => McpTestPlanRunner.Run(CreateTestPlanContext(), arguments),
+                "stress_force_start" => McpTreatmentTools.ForceStart(
+                    _treatmentService, _stateService, arguments),
+                "stress_episode_start" => McpTreatmentTools.EpisodeStart(
+                    _treatmentEpisodeService, _stateService, _stressLoadService, arguments),
+                "mcp_eat_item" => McpPlayerActionTools.EatItem(_gameLogicHandler, _stateService, arguments),
+                "mcp_sleep" => McpPlayerActionTools.Sleep(_gameLogicHandler, _stateService, _data, arguments),
+                "mcp_save_game" => McpSaveTools.SaveGame(_data, _stressLoadService, _monitor),
+                "mcp_reload_save" => McpSaveTools.ReloadSave(
+                    _data, _stateService, _stressLoadService, _gameLogicHandler, _monitor),
                 _ => $"Error: unknown tool '{toolName}'.",
             };
         }
+
+        private McpTestPlanContext CreateTestPlanContext() => new()
+        {
+            Monitor = _monitor,
+            Data = _data,
+            TreatmentService = _treatmentService,
+            StateService = _stateService,
+            BuffService = _buffService,
+            QuestService = _questService,
+            StressDialogueService = _stressDialogueService,
+            ModResetService = _modResetService,
+            TrustService = _harveyCareTrustService,
+            StressLoadService = _stressLoadService,
+            RescueService = _harveyFlashbackRescueService,
+            SafeAuraService = _harveySafePersonAuraService,
+            EpisodeService = _treatmentEpisodeService,
+            GameLogicHandler = _gameLogicHandler,
+        };
 
         private string? EventBlockMessage(string operation)
         {
@@ -99,7 +190,27 @@ namespace HarveyStressMeter.Testing
             HarveyDevTalkHelper.TryForceCloseDialogue(_monitor);
             _stressDialogueService.ClearPendingTreatment();
 
+            _harveyFlashbackRescueService.SuppressAutomaticRescue = true;
+            try
+            {
+                for (var i = 0; i < 8 && GameStateHelper.IsEventActive(); i++)
+                {
+                    EventDebugHelper.TryEndEvent(force: true);
+                    GameStateHelper.ClearStaleUiFlags();
+                }
+            }
+            finally
+            {
+                _harveyFlashbackRescueService.SuppressAutomaticRescue = false;
+            }
+
             var result = _modResetService.ResetAll();
+            _harveyFlashbackRescueService.ResetRescueState();
+            GameStateHelper.ForceClearFadeAndWarpFlags();
+            GameStateHelper.ClearStaleUiFlags();
+            _stressLoadService.ClearDebugOverrides();
+            _stressLoadService.SetGotoroFlashbackActive(false);
+            _stressLoadService.Recalculate();
             var sb = new StringBuilder();
             sb.AppendLine("=== stress_reset ===");
             sb.AppendLine($"Removed buffs: {result.RemovedBuffs}");
@@ -112,13 +223,18 @@ namespace HarveyStressMeter.Testing
 
         private string DebugDump()
         {
-            var reporter = new StressDialogueStateReporter(_data, _stateService, _stressDialogueService, _monitor);
-            var sb = new StringBuilder();
-            sb.AppendLine($"ActiveTreatments count: {_data.StressState.ActiveTreatments.Count}");
-            sb.AppendLine($"Active untreated: {string.Join(", ", StressDebuffSelector.GetUntreatedDebuffs(_stateService).DefaultIfEmpty("(none)"))}");
-            sb.AppendLine();
-            sb.Append(reporter.BuildReport());
-            return sb.ToString().TrimEnd();
+            return StressDebugDumpReporter.BuildReport(new StressDebugDumpContext
+            {
+                Monitor = _monitor,
+                Data = _data,
+                StateService = _stateService,
+                StressDialogueService = _stressDialogueService,
+                TrustService = _harveyCareTrustService,
+                StressLoadService = _stressLoadService,
+                RescueService = _harveyFlashbackRescueService,
+                SafeAuraService = _harveySafePersonAuraService,
+                EpisodeService = _treatmentEpisodeService,
+            });
         }
 
         private string DialogueState()

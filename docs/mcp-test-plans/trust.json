@@ -1,0 +1,136 @@
+{
+  "name": "trust",
+  "description": "HarveyCareTrust: cap by relationship, SafePerson unlock, rescue bonuses.",
+  "notes": "Friendship 0 + 160 trust capped; 8 hearts + 160 unlocks SafePerson and forest rescue.",
+  "tests": [
+    {
+      "id": "TC-TRU-001",
+      "title": "Built-in plan trust",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_trust_debug", "stress_debug_dump"],
+      "snapshots": ["stress_trust_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "trust", "stop_on_fail": true },
+          "expect": ["ok: true", "plan: trust", "failed: 0"]
+        }
+      ],
+      "assertions": [
+        "trust-01: SafePersonUnlocked=false at 0 hearts + 160 trust",
+        "trust-02: SafePersonUnlocked=true and CanHarveyForestRescue=true at 8 hearts"
+      ]
+    },
+    {
+      "id": "TC-TRU-002",
+      "title": "Trust cap at 0 hearts",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_trust_debug"],
+      "snapshots": ["stress_trust_debug"],
+      "steps": [
+        { "tool": "stress_trust_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 0, "relationship": "none" }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 160 }, "expect": [] },
+        { "tool": "stress_trust_debug", "arguments": {}, "expect": ["SafePersonUnlocked: False", "TrustPoints: 160"] }
+      ],
+      "assertions": [
+        "EffectiveTrustLevel capped by relationship",
+        "ForestRescueUnlocked false or CanHarveyForestRescue false"
+      ]
+    },
+    {
+      "id": "TC-TRU-003",
+      "title": "SafePerson unlock at 8 hearts",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_trust_debug", "stress_rescue_debug"],
+      "snapshots": ["stress_trust_debug", "stress_rescue_debug"],
+      "steps": [
+        { "tool": "stress_trust_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 2000, "relationship": "none" }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 160 }, "expect": [] },
+        { "tool": "stress_trust_debug", "arguments": {}, "expect": ["SafePersonUnlocked: True"] },
+        { "tool": "stress_rescue_debug", "arguments": {}, "expect": ["CanAttempt:"] }
+      ],
+      "assertions": [
+        "SafePersonUnlocked true",
+        "CanHarveyForestRescue true in trust debug",
+        "RescueChanceBonus > 0 when applicable"
+      ]
+    },
+    {
+      "id": "TC-TRU-004",
+      "title": "Trust add/remove progression",
+      "preconditions": ["stress_trust_reset done"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_trust_debug"],
+      "snapshots": ["stress_trust_debug"],
+      "steps": [
+        { "tool": "stress_trust_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 2000 }, "expect": [] },
+        { "tool": "stress_trust_add", "arguments": { "points": 40, "reason": "mcp-test" }, "expect": ["pointsAdded: 40"] },
+        { "tool": "stress_trust_debug", "arguments": {}, "expect": ["TrustPoints:"] },
+        { "tool": "stress_trust_remove", "arguments": { "points": 20, "reason": "mcp-test" }, "expect": ["pointsRemoved: 20"] },
+        { "tool": "stress_trust_debug", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "TrustPoints net +20 after add/remove",
+        "EffectiveTrustLevel updates in [after] snapshot"
+      ]
+    },
+    {
+      "id": "TC-TRU-005",
+      "title": "Trust remove clamps at zero (excessive remove)",
+      "preconditions": ["Low trust points"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_trust_debug"],
+      "snapshots": ["stress_trust_debug"],
+      "steps": [
+        { "tool": "stress_trust_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 10 }, "expect": [] },
+        { "tool": "stress_trust_remove", "arguments": { "points": 9999 }, "expect": [] },
+        { "tool": "stress_trust_debug", "arguments": {}, "expect": ["TrustPoints: 0"] }
+      ],
+      "assertions": [
+        "Trust points clamped to 0 not negative",
+        "No Error on excessive remove (clamp behavior)"
+      ]
+    },
+    {
+      "id": "TC-TRU-006",
+      "title": "Dating relationship trust cap",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_trust_debug", "stress_rescue_debug"],
+      "snapshots": ["stress_trust_debug", "stress_rescue_debug"],
+      "steps": [
+        { "tool": "stress_trust_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_relationship", "arguments": { "npc": "Harvey", "relationship": "Dating" }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 200 }, "expect": [] },
+        { "tool": "stress_trust_debug", "arguments": {}, "expect": ["SafePersonUnlocked:"] },
+        { "tool": "stress_rescue_evaluate", "arguments": { "ignore_chance": true }, "expect": ["CandidateTier: Dating"] }
+      ],
+      "assertions": [
+        "SafePerson unlock rules apply for Dating",
+        "Rescue tier Dating not HighTrust"
+      ]
+    },
+    {
+      "id": "TC-TRU-007",
+      "title": "Invalid trust operations rejected",
+      "preconditions": ["stress_trust_reset done"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_trust_debug"],
+      "snapshots": ["stress_trust_debug"],
+      "steps": [
+        { "tool": "stress_trust_set", "arguments": { "points": -1 }, "expect": ["Error:"] },
+        { "tool": "stress_trust_add", "arguments": { "points": 0 }, "expect": ["Error:"] },
+        { "tool": "stress_trust_remove", "arguments": { "points": 0 }, "expect": ["Error:"] }
+      ],
+      "assertions": ["All invalid ops return Error without corrupting state"]
+    }
+  ]
+}

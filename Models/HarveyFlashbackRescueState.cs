@@ -23,5 +23,15 @@ namespace HarveyStressMeter.Models
         public string? PendingPostRescueTier { get; set; }
 
         public string? PendingPostRescueEventId { get; set; }
+
+        /// <summary>Локация игрока на момент старта rescue event (для post-warp).</summary>
+        public string? RescueTriggerLocation { get; set; }
+
+        public int RescueTriggerTileX { get; set; }
+
+        public int RescueTriggerTileY { get; set; }
+
+        /// <summary>После rescue event вернуть игрока на безопасный тайл (когда закроется диалог).</summary>
+        public bool PendingPositionRestore { get; set; }
     }
 }

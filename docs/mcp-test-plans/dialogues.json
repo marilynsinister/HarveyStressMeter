@@ -1,0 +1,151 @@
+{
+  "name": "dialogues",
+  "description": "Stress dialogue pipeline: Tired debuff, talk Harvey, responses, close, pending cleared.",
+  "notes": "Требует чистый context (no event/menu). При блокировке — SKIPPED с stress_game_context.",
+  "tests": [
+    {
+      "id": "TC-DLG-001",
+      "title": "Built-in plan dialogues",
+      "preconditions": ["Save loaded", "EventActive=false", "No open menu"],
+      "snapshots_before": ["stress_dialogue_state", "stress_game_context"],
+      "snapshots_after": ["stress_dialogue_state", "stress_treatment_snapshot"],
+      "snapshots": ["stress_dialogue_state", "stress_treatment_snapshot", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_game_context", "arguments": {}, "expect": ["EventActive=false"] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "dialogues", "stop_on_fail": true },
+          "expect": ["ok: true", "plan: dialogues"]
+        }
+      ],
+      "assertions": [
+        "dlg-01: untreated Tired present",
+        "dlg-03: talk Harvey succeeds or dlg-02 SKIPPED with reason",
+        "dlg-05: pending auto-start cleared"
+      ]
+    },
+    {
+      "id": "TC-DLG-002",
+      "title": "Manual talk Harvey with Tired",
+      "preconditions": ["stress_reset", "Harvey reachable"],
+      "snapshots_before": ["stress_dialogue_state", "stress_treatment_snapshot"],
+      "snapshots_after": ["stress_dialogue_state", "stress_treatment_snapshot"],
+      "snapshots": ["stress_dialogue_state", "stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Town", "x": 46, "y": 57 }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town", "x": 47, "y": 57 }, "expect": [] },
+        { "tool": "stress_talk_harvey", "arguments": { "no_warp": true }, "expect": [] },
+        { "tool": "stress_list_responses", "arguments": {}, "expect": [] },
+        { "tool": "stress_close_dialogue", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "stress_treatment_snapshot PendingTreatment buffId empty or expected",
+        "No corrupted pending episode id",
+        "stress_game_context DialogueBoxActive=false after close"
+      ]
+    },
+    {
+      "id": "TC-DLG-003",
+      "title": "Block talk during active event",
+      "preconditions": ["Rescue or CP event can be started for block test"],
+      "snapshots_before": ["stress_game_context", "mcp_event_snapshot"],
+      "snapshots_after": ["stress_game_context"],
+      "snapshots": ["stress_game_context", "mcp_event_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true, "sync_topics": true }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": [] },
+        {
+          "tool": "mcp_start_event",
+          "arguments": { "event_id": "HarveyStress_GotoroForestRescue_HighTrust", "force": true },
+          "expect": []
+        },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": ["Error:"] },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": [] }
+      ],
+      "assertions": [
+        "stress_talk_harvey blocked while eventActive",
+        "After mcp_end_event: eventActive=false"
+      ]
+    },
+    {
+      "id": "TC-DLG-004",
+      "title": "Programmatic show_dialogue for untreated debuff",
+      "preconditions": ["stress_reset", "No menu/event"],
+      "snapshots_before": ["stress_dialogue_state"],
+      "snapshots_after": ["stress_dialogue_state"],
+      "snapshots": ["stress_dialogue_state", "stress_game_context"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_show_dialogue", "arguments": {}, "expect": ["stress_show_dialogue: opened for buffStressHunger"] },
+        { "tool": "stress_list_responses", "arguments": {}, "expect": ["HasDialogueBox="] },
+        { "tool": "stress_close_dialogue", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "Dialogue opens without warp to Harvey",
+        "Pending cleared after close"
+      ]
+    },
+    {
+      "id": "TC-DLG-005",
+      "title": "Consent accept flow (legacy)",
+      "preconditions": ["Dialogue open via talk Harvey"],
+      "snapshots_before": ["stress_dialogue_state"],
+      "snapshots_after": ["stress_dialogue_state", "stress_treatment_snapshot"],
+      "snapshots": ["stress_dialogue_state", "stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Town", "x": 46, "y": 57 }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town", "x": 47, "y": 57 }, "expect": [] },
+        { "tool": "stress_talk_harvey", "arguments": { "no_warp": true }, "expect": [] },
+        { "tool": "stress_consent", "arguments": { "choice": "accept" }, "expect": [], "notes": "May Error if no consent question yet — advance first" },
+        { "tool": "stress_close_dialogue", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "If consent succeeds: pending treatment may be set",
+        "If Error: use stress_dialogue_advance then retry consent"
+      ]
+    },
+    {
+      "id": "TC-DLG-006",
+      "title": "Choose response by index",
+      "preconditions": ["Dialogue with #$y question open"],
+      "snapshots_before": ["stress_dialogue_state"],
+      "snapshots_after": ["stress_dialogue_state"],
+      "snapshots": ["stress_dialogue_state"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressLonely" }, "expect": [] },
+        { "tool": "stress_show_dialogue", "arguments": {}, "expect": [] },
+        { "tool": "stress_dialogue_advance", "arguments": { "steps": 3 }, "expect": [] },
+        { "tool": "stress_list_responses", "arguments": {}, "expect": [] },
+        { "tool": "stress_choose_response", "arguments": { "index": 0 }, "expect": [], "notes": "Skip if Count=0" },
+        { "tool": "stress_close_dialogue", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "choose-response succeeds when responses listed",
+        "No stuck DialogueBox after close"
+      ]
+    },
+    {
+      "id": "TC-DLG-007",
+      "title": "show_dialogue Error when no untreated debuff",
+      "preconditions": ["stress_reset clean state"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_dialogue_state"],
+      "snapshots": ["stress_treatment_snapshot", "stress_dialogue_state"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_show_dialogue", "arguments": {}, "expect": ["Error: no untreated stress debuff"] }
+      ],
+      "assertions": ["No DialogueBox opened"]
+    }
+  ]
+}

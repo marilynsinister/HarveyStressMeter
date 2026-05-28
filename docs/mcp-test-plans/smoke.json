@@ -1,0 +1,69 @@
+{
+  "name": "smoke",
+  "description": "Базовый smoke: world ready, debug dump, reset, add/remove одного debuff.",
+  "notes": "План id в runner: smoke. Запускай первым после загрузки сейва. stop_on_fail=true.",
+  "tests": [
+    {
+      "id": "TC-SMOKE-001",
+      "title": "Built-in plan smoke",
+      "preconditions": ["Save loaded", "EnableStressMcp=true", "No event/menu"],
+      "snapshots_before": ["stress_game_context", "stress_debug_dump"],
+      "snapshots_after": ["stress_treatment_snapshot", "stress_debug_dump"],
+      "snapshots": ["stress_game_context", "stress_debug_dump", "stress_treatment_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_game_context", "arguments": {}, "expect": ["EventActive=false"] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "smoke", "stop_on_fail": true },
+          "expect": ["ok: true", "plan: smoke", "failed: 0"]
+        }
+      ],
+      "assertions": [
+        "smoke-01: IsWorldReady=true",
+        "smoke-02: stress_debug_dump readable",
+        "smoke-03: ActiveTreatments count=0 after reset",
+        "smoke-04..07: buffStressTired add/remove cycle PASS"
+      ]
+    },
+    {
+      "id": "TC-SMOKE-002",
+      "title": "Manual reset + debug dump baseline",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_debug_dump"],
+      "snapshots_after": ["stress_debug_dump", "stress_treatment_snapshot"],
+      "snapshots": ["stress_debug_dump", "stress_treatment_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": ["ActiveTreatments count: 0"] },
+        { "tool": "stress_debug_dump", "arguments": {}, "expect": ["WorldReady:", "SummaryFlags:"] },
+        { "tool": "stress_treatment_snapshot", "arguments": {}, "expect": ["ActiveDebuffs:", "ActiveTreatments:"] }
+      ],
+      "assertions": [
+        "WorldReady: true in debug dump",
+        "SummaryFlags does not contain EVENT_ACTIVE",
+        "CurrentStressLoad >= 0"
+      ]
+    },
+    {
+      "id": "TC-SMOKE-003",
+      "title": "Single debuff round-trip without built-in plan",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot", "stress_load_debug"],
+      "snapshots": ["stress_treatment_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressLonely" }, "expect": ["Applied stress debuff"] },
+        { "tool": "stress_treatment_snapshot", "arguments": {}, "expect": ["buffStressLonely"] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CurrentStressLoad:"] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressLonely" }, "expect": ["Removed stress state"] },
+        { "tool": "stress_treatment_snapshot", "arguments": {}, "expect": ["ActiveDebuffs: (none)", "ActiveDebuffs:"] }
+      ],
+      "assertions": [
+        "hasBuffInGame true after add",
+        "hasBuffInGame false after remove",
+        "Load recalculated after remove"
+      ]
+    }
+  ]
+}

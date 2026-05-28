@@ -1,0 +1,174 @@
+TOTAL SCRIPTS: 58
+
+=== HIGH (29) ===
+  [active] HarveyMod_TreatmentPlanMeeting @ Hospital (events.json)
+           quickQuestion + (break)x3
+           first3: Hospital_Ambient | 5 7 | farmer 5 5 3 Harvey 4 5 1
+  [active] HarveyOverhaulStory.E4_PierBreath @ Beach (events.json)
+           quickQuestion + (break)x2
+           first3: ocean | 39 23 | farmer 40 17 2 Harvey 39 23 1
+  [active] HarveyOverhaulStory.E5_StormBeside @ Hospital (events.json)
+           quickQuestion + (break)x2, setSkipActions (#)
+           first3: none | 10 19 | farmer 10 19 0 Harvey 10 18 2
+  [active] HarveyOverhaulStory.E6_SayItOutLoud @ Hospital (events.json)
+           cmd3 farmer ne pervyj: ┬лHarvey 10 18 2 farmer 10 19 0┬╗, quickQuestion + (break)x2, setSkipActions (#)
+           first3: none | 10 16 | Harvey 10 18 2 farmer 10 19 0
+  [active] acceptWalk @ Farm (events.json)
+           fork-subevent (╨╜╨╡╤В ╤Б╤В╨░╨╜╨┤╨░╤А╤В╨╜╨╛╨│╨╛ header)
+  [active] declineFood @ BusStop (events.json)
+           fork-subevent (╨╜╨╡╤В ╤Б╤В╨░╨╜╨┤╨░╤А╤В╨╜╨╛╨│╨╛ header)
+  [active] eventHarveyCheckFarmerOutsideAfter22 @ Farm (events.json)
+           quickQuestion + (break)x2
+           first3: continue | 64 15 | farmer 64 16 2 Harvey 64 18 0
+  [active] eventHarveyMedicalCheck @ Hospital (events.json)
+           cmd3 farmer ne pervyj: ┬лHarvey 10 14 2┬╗, quickQuestion + (break)x2
+           first3: Hospital_Ambient | 10 15 | Harvey 10 14 2
+  [active] eventHarveyMedicalCheck_Dating @ Hospital (events.json)
+           cmd3 farmer ne pervyj: ┬лHarvey 10 14 2┬╗, quickQuestion + (break)x2
+           first3: Hospital_Ambient | 10 15 | Harvey 10 14 2
+  [active] eventHarveyMorningCheckup @ Farm (events.json)
+           quickQuestion + (break)x2
+           first3: continue | 64 15 | farmer 64 16 2 Harvey 64 17 0
+  [active] eventHarveyStormComfortDesert @ Desert (events.json)
+           quickQuestion + (break)x3
+           first3: rain | 15 23 | farmer 15 23 2 Harvey 1000 1000 0
+  [active] eventHarveyStormComfortFarm @ Farm (events.json)
+           quickQuestion + (break)x3
+           first3: none | 64 15 | farmer 64 16 2 Harvey 64 18 0
+  [active] eventHarveyStormComfortForest @ Forest (events.json)
+           quickQuestion + (break)x3
+           first3: rain | 23 13 | farmer 23 13 1 Harvey 1000 1000 0
+  [active] eventHarveyStormComfortMine @ Mine (events.json)
+           quickQuestion + (break)x3
+           first3: rain | 15 5 | farmer 15 5 2 Harvey 1000 1000 0
+  [active] eventHarveyStormComfortMountain @ Custom_AdventurerSummit (events.json)
+           quickQuestion + (break)x3
+           first3: rain | 41 27 | farmer 41 28 1 Harvey 1000 1000 0
+  [active] eventHarveyStormComfortTown @ Town (events.json)
+           quickQuestion + (break)x3
+           first3: none | 39 73 | farmer 39 73 2 Harvey 1000 1000 0 Gus 1000 10
+  [active] eventHarveyTreatmentCollapse @ Hospital (events.json)
+           message Harvey (╨╜╨╡ speak) тАФ ╨╜╨╡╤Б╤В╨░╨╜╨┤╨░╤А╤В╨╜╤Л╨╣ ╤Б╨╕╨╜╤В╨░╨║╤Б╨╕╤Б
+           first3: none | -1000 -1000 | farmer 1000 1000 0 Harvey 1000 1000 0
+  [active] eventRescueOperation @ Woods (events.json)
+           cmd1 ╨╜╨╡ ╨╝╤Г╨╖╤Л╨║╨░: ┬лthunder_small┬╗, quickQuestion + (break)x3
+           first3: thunder_small | -1000 -1000 | farmer 1000 1000 0 Harvey 1000 1000 0 Lewis 1
+  [active] refuseCheckup @ BusStop (events.json)
+           fork-subevent (╨╜╨╡╤В ╤Б╤В╨░╨╜╨┤╨░╤А╤В╨╜╨╛╨│╨╛ header)
+  [active] HarveySkullPromise @ SkullCave (eventsCare.json)
+           fork-subevent (╨╜╨╡╤В ╤Б╤В╨░╨╜╨┤╨░╤А╤В╨╜╨╛╨│╨╛ header)
+  [active] declineFood @ BusStop (eventsCare.json)
+           fork-subevent (╨╜╨╡╤В ╤Б╤В╨░╨╜╨┤╨░╤А╤В╨╜╨╛╨│╨╛ header)
+  [active] eventHarveyExhaustion @ Hospital (eventsCare.json)
+           ╤Б╨╗╤Н╤И ╨▓ ╤В╨╡╨║╤Б╤В╨╡ speak ("80/50", "110/70")
+           first3: none | -1000 -1000 | farmer 1000 1000 1 Harvey 1000 1000 1
+  [active] eventHarveyFirstVisit @ Farm (eventsCare.json)
+           quickQuestion + (break)x3
+           first3: continue | 64 15 | farmer 64 16 2 Harvey 64 18 0
+  [active] eventHarveySecondVisit @ Farm (eventsCare.json)
+           quickQuestion + (break)x3
+           first3: continue | 64 15 | farmer 64 16 2 Harvey 64 18 0
+  [active] irregularEating @ BusStop (eventsCare.json)
+           fork-subevent (╨╜╨╡╤В ╤Б╤В╨░╨╜╨┤╨░╤А╤В╨╜╨╛╨│╨╛ header)
+  [active] refuseCheckup @ BusStop (eventsCare.json)
+           fork-subevent (╨╜╨╡╤В ╤Б╤В╨░╨╜╨┤╨░╤А╤В╨╜╨╛╨│╨╛ header)
+  [NOT linked] MyMod_HarveyStormComfortForest @ Forest (events_for_mode_new_formatted.json)
+           quickQuestion + (break)x3, JSON-array (╨▓╨╡╤В╨║╨╕ ╨╛╤В╨┤╨╡╨╗╤М╨╜╤Л╨╝╨╕ ╤Н╨╗╨╡╨╝╨╡╨╜╤В╨░╨╝╨╕)
+           first3: rain | 58 25 | farmer 58 25 0 Harvey 1000 1000 0
+  [NOT linked] MyMod_HarveyStressTiredCheck @ Hospital (events_for_mode_new_formatted.json)
+           quickQuestion + (break)x3, JSON-array (╨▓╨╡╤В╨║╨╕ ╨╛╤В╨┤╨╡╨╗╤М╨╜╤Л╨╝╨╕ ╤Н╨╗╨╡╨╝╨╡╨╜╤В╨░╨╝╨╕)
+           first3: Hospital_Ambient | 13 6 | farmer 15 8 3 Harvey 13 6 1
+  [NOT linked] MyMod_HarveyUrgentFarmVisit @ Farm (events_for_mode_new_formatted.json)
+           JSON-array (╨▓╨╡╤В╨║╨╕ ╨╛╤В╨┤╨╡╨╗╤М╨╜╤Л╨╝╨╕ ╤Н╨╗╨╡╨╝╨╡╨╜╤В╨░╨╝╨╕)
+           first3: spring_day_ambient | 64 15 | farmer 64 16 2 Harvey 64 18 0
+
+=== MED (17) ===
+  [active] HarveyMod_BirthdayHospital_Dating @ Hospital (events.json)
+           cmd3 farmer ne pervyj: ┬лHarvey 10 14 2 farmer 10 19 0┬╗
+           first3: spring_day_ambient | 10 15 | Harvey 10 14 2 farmer 10 19 0
+  [active] HarveyMod_BirthdayHospital_Friend @ Hospital (events.json)
+           cmd3 farmer ne pervyj: ┬лHarvey 10 14 2 farmer 10 19 0┬╗
+           first3: spring_day_ambient | 10 15 | Harvey 10 14 2 farmer 10 19 0
+  [active] HarveyMod_NightCrisis_Dating @ Hospital (events.json)
+           cmd3 farmer ne pervyj: ┬лHarvey 15 8 3 farmer 10 7 1┬╗
+           first3: nightTime | 15 8 | Harvey 15 8 3 farmer 10 7 1
+  [active] HarveyMod_NightCrisis_PreDating @ Hospital (events.json)
+           cmd3 farmer ne pervyj: ┬лHarvey 15 8 3 farmer 10 7 1┬╗
+           first3: nightTime | 15 8 | Harvey 15 8 3 farmer 10 7 1
+  [active] HarveyOverhaulStory.E1_SlipperyPath @ BusStop (events.json)
+           setSkipActions (#)
+           first3: none | 52 24 | farmer 20 23 1 Harvey 26 22 3
+  [active] HarveyOverhaulStory.E2_InsistentExam @ Hospital (events.json)
+           cmd3 farmer ne pervyj: ┬лHarvey 1 5 2 farmer 5 10 0┬╗, setSkipActions (#)
+           first3: Hospital_Ambient | 6 10 | Harvey 1 5 2 farmer 5 10 0
+  [active] HarveyOverhaulStory.E3_ForestApothecary @ Forest (events.json)
+           setSkipActions (#)
+           first3: none | 50 13 | farmer 50 13 1 Harvey 51 13 3
+  [active] HarveyOverhaulStory.E7_TownSip_Sunny @ Town (events.json)
+           setSkipActions (#)
+           first3: none | 26 22 | farmer 26 22 1 Harvey 27 22 3
+  [active] HarveyOverhaulStory.E8_QuietShelf @ ArchaeologyHouse (events.json)
+           setSkipActions (#)
+           first3: none | 18 9 | farmer 18 9 2 Gunther 11 9 0 Harvey -1000 -10
+  [active] eventHarveyFirstMeeting @ BusStop (events.json)
+           question, fork
+           first3: none | 19 23 | farmer 19 23 1 Harvey 27 23 3
+  [active] eventHarveyFirstWalk @ Farm (events.json)
+           question, fork
+           first3: continue | 64 15 | farmer 64 16 2 Harvey 64 18 0
+  [active] eventHarveyCheckup @ BusStop (eventsCare.json)
+           question, fork
+           first3: none | 5 9 | farmer 2 5 1 Harvey 1 5 3
+  [active] eventHarveyFirstMeeting @ BusStop (eventsCare.json)
+           question, fork
+           first3: continue | 19 23 | farmer 19 23 1 Harvey 27 23 3
+  [active] eventHarveySkullCavePrevention @ SkullCave (eventsCare.json)
+           quickQuestion, fork
+           first3: continue | 5 5 | farmer 5 5 0 Harvey 7 7 0
+  [active] eventHarveyMineRescue @ Mine (eventsMineRescue.json)
+           ╤Г╨╢╨╡ one-liner
+           first3: none | -1000 -1000 | farmer 17 7 2 Harvey 1000 1000 0
+  [active] eventHarveyMineRescueDating @ Mine (eventsMineRescue.json)
+           ╤Г╨╢╨╡ one-liner
+           first3: none | -1000 -1000 | farmer 17 7 2 Harvey 1000 1000 0
+  [active] eventHarveyMinorMineRescue @ Mine (eventsMineRescue.json)
+           ╤Г╨╢╨╡ one-liner
+           first3: none | -1000 -1000 | farmer 17 7 2 Harvey 17 10 0
+
+=== SAFE (12) ===
+  [active] HarveyMod_FirstTreatment @ Hospital (events.json)
+           OK
+           first3: Hospital_Ambient | 4 6 | farmer 5 9 0 Harvey 4 5 2
+  [active] eventHarveyCheckHealthFarmer @ Farm (events.json)
+           OK
+           first3: continue | 64 15 | farmer 64 16 2 Harvey 64 18 0
+  [active] eventHarveyFirstDate @ Forest (events.json)
+           OK
+           first3: kindadumbautumn | 65 45 | farmer 65 38 2 Harvey 65 46 1
+  [active] eventHarveyLateNightCollapse @ Town (events.json)
+           OK
+           first3: continue | 37 59 | farmer 37 59 3 Harvey 1000 1000 0
+  [active] eventHarveyMountainDate @ Mountain (events.json)
+           OK
+           first3: spring_day_ambient | 45 22 | farmer 41 19 3 Harvey 46 22 3
+  [active] eventHarveyPropose @ Beach (events.json)
+           OK
+           first3: night_market | 40 16 | farmer 40 7 2 Harvey 39 23 2
+  [active] eventHarveyRoomCheckup @ HarveyRoom (events.json)
+           OK
+           first3: continue | 8 9 | farmer 1000 1000 0 Harvey 9 9 3
+  [active] eventHarveyRoomCheckup2 @ HarveyRoom (events.json)
+           OK
+           first3: continue | 8 9 | farmer 1000 1000 0 Harvey 9 9 3
+  [active] eventHarveyTraumaExam @ Hospital (events.json)
+           OK
+           first3: none | 5 6 | farmer 5 6 3 Harvey 4 6 1
+  [active] eventStayInHospital @ Hospital (events.json)
+           OK
+           first3: none | 9 16 | farmer 9 16 1 Harvey 10 16 3
+  [active] eventHarveyEmergencyCare @ Hospital (eventsCare.json)
+           OK
+           first3: none | -1000 -1000 | farmer 1000 1000 0 Harvey 1000 1000 0
+  [active] eventHarveyMineInterception @ Mine (eventsCare.json)
+           OK
+           first3: EarthMine | 17 7 | farmer 17 7 0 Harvey 17 10 0

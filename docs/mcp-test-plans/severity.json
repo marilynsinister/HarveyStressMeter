@@ -1,0 +1,116 @@
+{
+  "name": "severity",
+  "description": "StressSeverity tiers: Calm, Mild, High, Critical через stress_set_load и Gotoro override.",
+  "notes": "Пороги по умолчанию: Mild=25, High=50, Critical=75. Смотри thresholdMild/High/Critical в stress_load_debug.",
+  "tests": [
+    {
+      "id": "TC-SEV-001",
+      "title": "Calm baseline after reset",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug", "stress_hud_snapshot"],
+      "snapshots": ["stress_load_debug", "stress_hud_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Severity: Calm"] },
+        { "tool": "stress_hud_snapshot", "arguments": {}, "expect": ["severity: Calm"] }
+      ],
+      "assertions": [
+        "CurrentStressLoad below MildThreshold",
+        "SummaryFlags may not contain HIGH_SEVERITY"
+      ]
+    },
+    {
+      "id": "TC-SEV-002",
+      "title": "Mild tier via stress_set_load",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug", "stress_hud_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_set_load", "arguments": { "value": 30 }, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Severity: Mild", "CurrentStressLoad: 30"] }
+      ],
+      "assertions": [
+        "CurrentStressLoad >= thresholdMild",
+        "CurrentStressLoad < thresholdHigh"
+      ]
+    },
+    {
+      "id": "TC-SEV-003",
+      "title": "High tier via stress_set_load",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_set_load", "arguments": { "value": 55 }, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Severity: High"] }
+      ],
+      "assertions": [
+        "CurrentStressLoad >= thresholdHigh",
+        "CurrentStressLoad < thresholdCritical"
+      ]
+    },
+    {
+      "id": "TC-SEV-004",
+      "title": "Critical tier via stress_set_load",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug", "stress_hud_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_set_load", "arguments": { "value": 80 }, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Severity: Critical"] },
+        { "tool": "stress_hud_snapshot", "arguments": {}, "expect": ["severity: Critical"] }
+      ],
+      "assertions": [
+        "CurrentStressLoad >= thresholdCritical",
+        "maxStressLoad not exceeded"
+      ]
+    },
+    {
+      "id": "TC-SEV-005",
+      "title": "Gotoro flashback forces Critical regardless of load",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_set_load", "arguments": { "value": 10 }, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true }, "expect": ["Severity: Critical"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["GotoroFlashbackActive: True", "Severity: Critical"] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": false }, "expect": [] }
+      ],
+      "assertions": [
+        "Severity Critical while GotoroFlashbackActive even at low load",
+        "CandidateEpisode GotoroFlashback when cause active"
+      ]
+    },
+    {
+      "id": "TC-SEV-006",
+      "title": "Recovery lowers severity band without removing causes",
+      "preconditions": ["High load with active debuff"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_set_load", "arguments": { "value": 60 }, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Severity: High"] },
+        { "tool": "stress_apply_recovery", "arguments": { "amount": 20, "reason": "severity-test" }, "expect": ["severityAfter:"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "severityAfter <= severityBefore in apply_recovery output",
+        "Overwork cause still active after recovery offset",
+        "CurrentStressLoad decreased"
+      ]
+    }
+  ]
+}

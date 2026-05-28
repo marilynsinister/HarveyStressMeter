@@ -1,9 +1,12 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Services;
 using StardewModdingAPI;
+using StardewModdingAPI.Utilities;
 using StardewValley;
 
 namespace HarveyStressMeter.Helpers
@@ -64,6 +67,127 @@ namespace HarveyStressMeter.Helpers
                 sb.AppendLine(FormatTreatmentLine(treatment, stateService));
 
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>DEV/MCP: machine-readable treatment snapshot for AI tests.</summary>
+        public static string BuildMcpSnapshot(
+            SaveData data,
+            StateService stateService,
+            StressLoadService stressLoadService,
+            TreatmentEpisodeService episodeService,
+            StressDialogueService stressDialogueService)
+        {
+            var episode = data.ActiveTreatmentEpisode;
+            var selection = episodeService.EvaluateSelection();
+            var dialogue = stressDialogueService.GetDebugSnapshot();
+            var untreated = StressDebuffSelector.GetUntreatedDebuffs(stateService);
+            var activeDebuffs = GetActiveDebuffs(stateService);
+            var stressTopics = ListStressTopics();
+            var stressQuests = ListStressQuests(data, stateService, episode);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("ok: true");
+            sb.AppendLine($"ActiveTreatments count: {data.StressState.ActiveTreatments.Count}");
+            sb.AppendLine($"UntreatedDebuffs: {(untreated.Count > 0 ? string.Join(", ", untreated) : "(none)")}");
+            sb.AppendLine($"ActiveDebuffs: {(activeDebuffs.Count > 0 ? string.Join(", ", activeDebuffs) : "(none)")}");
+            sb.AppendLine($"CurrentEpisode: {episode?.EpisodeId ?? "(none)"}");
+            sb.AppendLine($"CandidateEpisode: {stressLoadService.GetCandidateEpisode() ?? selection.EpisodeId ?? "(none)"}");
+            sb.AppendLine($"PendingTreatment buffId: {dialogue.PendingAutoStartBuffId ?? "(none)"}");
+            sb.AppendLine($"PendingTreatment episodeId: {dialogue.PendingAutoStartEpisodeId ?? "(none)"}");
+            sb.AppendLine($"SelectionAction: {selection.Action}");
+            sb.AppendLine($"SelectionReason: {selection.Reason ?? "(none)"}");
+            sb.AppendLine($"AwaitingHarveyReview: {stressLoadService.IsAwaitingHarveyReview()}");
+            sb.AppendLine($"StressQuests: {(stressQuests.Count > 0 ? string.Join(", ", stressQuests) : "(none)")}");
+            sb.AppendLine($"StressTopics: {(stressTopics.Count > 0 ? string.Join(", ", stressTopics) : "(none)")}");
+
+            if (data.StressState.ActiveTreatments.Count == 0)
+            {
+                sb.AppendLine("treatments: (none)");
+                return sb.ToString().TrimEnd();
+            }
+
+            sb.AppendLine("treatments:");
+            foreach (var treatment in data.StressState.ActiveTreatments.Values.OrderBy(t => t.TreatmentKey))
+                sb.AppendLine(FormatTreatmentMcpBlock(treatment, stateService));
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private static List<string> GetActiveDebuffs(StateService stateService)
+        {
+            var result = new List<string>();
+            foreach (var buffId in TreatmentTopics.ImplementedBuffIds)
+            {
+                if (stateService.HasBuffInGame(buffId))
+                    result.Add(buffId);
+            }
+
+            return result;
+        }
+
+        private static List<string> ListStressTopics()
+        {
+            var result = new List<string>();
+            foreach (var topicId in Game1.player.activeDialogueEvents.Keys)
+            {
+                if (topicId.Contains("topicStress", StringComparison.OrdinalIgnoreCase))
+                    result.Add($"{topicId}({Game1.player.activeDialogueEvents[topicId]})");
+            }
+
+            result.Sort(StringComparer.OrdinalIgnoreCase);
+            return result;
+        }
+
+        private static List<string> ListStressQuests(
+            SaveData data,
+            StateService stateService,
+            TreatmentEpisodeState? episode)
+        {
+            var quests = new HashSet<string>(StringComparer.Ordinal);
+
+            if (!string.IsNullOrEmpty(episode?.QuestId))
+                quests.Add(episode.QuestId);
+
+            foreach (var treatment in data.StressState.ActiveTreatments.Values)
+            {
+                if (!string.IsNullOrEmpty(treatment.QuestId))
+                    quests.Add(treatment.QuestId);
+            }
+
+            return quests
+                .Where(q => Game1.player.hasQuest(q))
+                .OrderBy(q => q, StringComparer.Ordinal)
+                .ToList();
+        }
+
+        private static string FormatTreatmentMcpBlock(TreatmentState treatment, StateService stateService)
+        {
+            var hasBuff = stateService.HasBuffInGame(treatment.BuffId);
+            var reviewTopic = TreatmentTopics.GetReadyForReviewTopic(treatment.BuffId);
+            var reviewTopicActive = reviewTopic != null && ConversationHelper.HasTopic(reviewTopic);
+            StressCauses.TryGetCauseForBuff(treatment.BuffId, out var causeId);
+            var startDate = treatment.TreatmentStartedDate ?? treatment.IssuedDate;
+            var daysActive = Math.Max(0, SDate.Now().DaysSinceStart - startDate.DaysSinceStart);
+            var missedPrescription = hasBuff && !treatment.TreatmentStarted && !treatment.IsCured;
+
+            return string.Join('\n',
+            [
+                $"  - treatmentKey={treatment.TreatmentKey}",
+                $"    buffId={treatment.BuffId}",
+                $"    cause={causeId ?? "(none)"}",
+                $"    started={treatment.TreatmentStarted}",
+                $"    completed={treatment.IsCompleted}",
+                $"    cured={treatment.IsCured}",
+                $"    readyForReview={treatment.AwaitingHarveyReview}",
+                $"    objectivesCompleted={treatment.ObjectivesCompleted}",
+                $"    questId={treatment.QuestId ?? "(empty)"}",
+                $"    questInJournal={(!string.IsNullOrEmpty(treatment.QuestId) && Game1.player.hasQuest(treatment.QuestId))}",
+                $"    daysActive={daysActive}",
+                $"    hasBuffInGame={hasBuff}",
+                $"    readyForReviewTopic={reviewTopic ?? "(n/a)"} active={reviewTopicActive}",
+                $"    missedPrescription={missedPrescription}",
+                $"    nextStep={TreatmentNextStep.Resolve(treatment, hasBuff)}",
+            ]);
         }
 
         public static void ShowHud(string message)

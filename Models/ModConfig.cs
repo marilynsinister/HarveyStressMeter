@@ -39,9 +39,14 @@ namespace HarveyStressMeter.Models
 
         public StressHudAnchor Anchor { get; set; } = StressHudAnchor.BottomRight;
 
-        public int OffsetX { get; set; } = 24;
+        /// <summary>Vertical bar left of vanilla stamina (recommended for BottomRight).</summary>
+        public bool VerticalStressMeter { get; set; } = true;
 
-        public int OffsetY { get; set; } = 72;
+        /// <summary>Margin from the right UI edge (stamina/toolbar reserve when vertical).</summary>
+        public int OffsetX { get; set; } = 112;
+
+        /// <summary>Margin from the bottom of the viewport.</summary>
+        public int OffsetY { get; set; } = 16;
 
         public float Scale { get; set; } = 1f;
 

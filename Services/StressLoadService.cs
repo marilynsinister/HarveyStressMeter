@@ -21,6 +21,7 @@ namespace HarveyStressMeter.Services
         private readonly ModConfig _config;
         private readonly IMonitor _monitor;
         private HarveyCareTrustService? _trustService;
+        private int _debugCauseLoadFloor;
 
         private StressLoadState State => _data.StressLoad;
 
@@ -55,19 +56,110 @@ namespace HarveyStressMeter.Services
         {
             Recalculate();
             var target = Math.Clamp(value, 0, GetMaxStressLoad());
-            State.StressRecoveryOffset = Math.Clamp(State.LastCauseLoad - target, 0, State.LastCauseLoad);
-            State.CurrentStressLoad = Math.Clamp(
-                State.LastCauseLoad - State.StressRecoveryOffset,
-                0,
-                GetMaxStressLoad());
-            ApplySeverityAndEpisode();
-            SyncTreatmentFlags();
+            var causeLoad = State.LastCauseLoad;
+
+            if (target > causeLoad)
+            {
+                _debugCauseLoadFloor = target;
+                State.StressRecoveryOffset = 0;
+            }
+            else
+            {
+                _debugCauseLoadFloor = 0;
+                State.StressRecoveryOffset = Math.Clamp(causeLoad - target, 0, causeLoad);
+            }
+
+            ApplyDebugAdjustedLoad();
             State.LastUpdatedTime = Game1.timeOfDay;
 
             _monitor.Log(
                 $"[StressLoad] Debug set load={GetCurrentStressLoad()} " +
-                $"(cause={GetCauseLoad()}, offset={GetStressRecoveryOffset()}, {State.Severity})",
+                $"(cause={GetCauseLoad()}, floor={_debugCauseLoadFloor}, offset={GetStressRecoveryOffset()}, {State.Severity})",
                 LogLevel.Debug);
+        }
+
+        /// <summary>DEV/MCP: сбросить временные debug override (floor).</summary>
+        public void ClearDebugOverrides()
+        {
+            _debugCauseLoadFloor = 0;
+        }
+
+        /// <summary>DEV/MCP: увеличить StressRecoveryOffset без удаления active causes.</summary>
+        public void DebugApplyRecoveryOffset(int amount, string? reason = null)
+        {
+            if (amount <= 0)
+                return;
+
+            ApplyRecovery(amount);
+
+            _monitor.Log(
+                $"[StressLoad] Debug recovery +{amount} ({reason ?? "mcp"}), " +
+                $"load={GetCurrentStressLoad()} (cause={GetCauseLoad()}, offset={GetStressRecoveryOffset()}, {State.Severity})",
+                LogLevel.Debug);
+        }
+
+        /// <summary>DEV/MCP: сбросить StressRecoveryOffset и пересчитать CurrentStressLoad.</summary>
+        public void DebugClearRecoveryOffset()
+        {
+            State.StressRecoveryOffset = 0;
+            Recalculate();
+
+            _monitor.Log(
+                $"[StressLoad] Debug cleared recovery offset, load={GetCurrentStressLoad()} " +
+                $"(cause={GetCauseLoad()}, {State.Severity})",
+                LogLevel.Debug);
+        }
+
+        /// <summary>DEV/MCP: assert-friendly snapshot для MCP stress_load_debug.</summary>
+        public string BuildMcpSnapshot()
+        {
+            var active = State.ActiveCauses.Values.Where(c => c.IsActive).ToList();
+            var activeCount = active.Count;
+            var baseWeightSum = active.Sum(c => c.Weight);
+            var multiCauseBonus = activeCount >= 5 ? 20 : activeCount >= 3 ? 10 : 0;
+            var weatherBonus = active.Any(c => c.CauseId == StressCauses.Thunder) && Game1.isLightning ? 15 : 0;
+            var gotoroBonus = State.GotoroFlashbackActive
+                              || active.Any(c => c.CauseId == StressCauses.GotoroFlashback)
+                ? 50
+                : 0;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("ok: true");
+            sb.AppendLine($"CauseLoad: {GetCauseLoad()}");
+            sb.AppendLine($"StressRecoveryOffset: {GetStressRecoveryOffset()}");
+            sb.AppendLine($"CurrentStressLoad: {GetCurrentStressLoad()}");
+            sb.AppendLine($"LastCauseLoad: {State.LastCauseLoad}");
+            sb.AppendLine($"Severity: {State.Severity}");
+            sb.AppendLine($"PrimaryCause: {State.LastPrimaryCause ?? "(none)"}");
+            sb.AppendLine($"GotoroFlashbackActive: {State.GotoroFlashbackActive}");
+            sb.AppendLine($"CandidateEpisode: {GetCandidateEpisode() ?? "(none)"}");
+            sb.AppendLine($"thresholdMild: {_config.MildThreshold}");
+            sb.AppendLine($"thresholdHigh: {_config.HighThreshold}");
+            sb.AppendLine($"thresholdCritical: {_config.CriticalThreshold}");
+            sb.AppendLine($"maxStressLoad: {GetMaxStressLoad()}");
+            sb.AppendLine($"baseCauseWeightSum: {baseWeightSum}");
+            sb.AppendLine($"multiCauseBonus: {multiCauseBonus}");
+            sb.AppendLine($"weatherBonus: {weatherBonus}");
+            sb.AppendLine($"gotoroBonus: {gotoroBonus}");
+            sb.AppendLine($"isLightning: {Game1.isLightning}");
+            sb.AppendLine($"activeCauseCount: {activeCount}");
+            sb.AppendLine("ActiveCauses:");
+
+            if (active.Count == 0)
+            {
+                sb.AppendLine("  (none)");
+            }
+            else
+            {
+                foreach (var cause in active.OrderByDescending(c => c.Weight))
+                {
+                    sb.AppendLine(
+                        $"  cause: {cause.CauseId}, weight: {cause.Weight}, buff: {cause.SourceBuffId}, " +
+                        $"severe: {cause.IsSevere}, selfResolve: {cause.CanSelfResolve}");
+                }
+            }
+
+            return sb.ToString().TrimEnd();
         }
 
         public int GetRawStressLoad() => State.CurrentStressLoad;
@@ -98,6 +190,8 @@ namespace HarveyStressMeter.Services
         public bool HasActiveTreatment() => State.HasActiveTreatment;
 
         public bool IsAwaitingHarveyReview() => State.AwaitingHarveyReview;
+
+        public bool IsGotoroFlashbackActive() => State.GotoroFlashbackActive;
 
         /// <summary>Добавляет или активирует причину стресса.</summary>
         public void AddCause(string causeId, string? sourceBuffId = null, int? weightOverride = null)
@@ -265,9 +359,27 @@ namespace HarveyStressMeter.Services
                 0,
                 GetMaxStressLoad());
             State.LastPrimaryCause = ResolvePrimaryCause(active);
+            ApplyDebugAdjustedLoad();
+            State.LastUpdatedTime = Game1.timeOfDay;
+        }
+
+        private void ApplyDebugAdjustedLoad()
+        {
+            if (_debugCauseLoadFloor <= 0)
+            {
+                ApplySeverityAndEpisode();
+                SyncTreatmentFlags();
+                return;
+            }
+
+            var effectiveCauseLoad = Math.Max(State.LastCauseLoad, _debugCauseLoadFloor);
+            State.StressRecoveryOffset = Math.Min(State.StressRecoveryOffset, effectiveCauseLoad);
+            State.CurrentStressLoad = Math.Clamp(
+                effectiveCauseLoad - State.StressRecoveryOffset,
+                0,
+                GetMaxStressLoad());
             ApplySeverityAndEpisode();
             SyncTreatmentFlags();
-            State.LastUpdatedTime = Game1.timeOfDay;
         }
 
         /// <summary>Частично «откатывает» recovery offset в конце дня, если causes остаются активными.</summary>

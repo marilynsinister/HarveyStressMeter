@@ -1,0 +1,252 @@
+{
+  "name": "negative",
+  "description": "Негативные и guard-case тесты: invalid args, blocked context, inconsistent state detection.",
+  "notes": "Ожидай Error: или явный FAIL в assertions. Не исправляй код во время прогона.",
+  "tests": [
+    {
+      "id": "TC-NEG-001",
+      "title": "Invalid buff_id on add",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "" }, "expect": ["Error:"] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "not_a_buff" }, "expect": ["Error:"] }
+      ],
+      "assertions": [
+        "Both calls return Error:",
+        "ActiveDebuffs unchanged"
+      ]
+    },
+    {
+      "id": "TC-NEG-002",
+      "title": "Invalid test plan name",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_game_context"],
+      "snapshots_after": ["stress_game_context"],
+      "snapshots": ["stress_game_context"],
+      "steps": [
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "not_a_real_plan" },
+          "expect": ["Error: plan must be"]
+        }
+      ],
+      "assertions": [
+        "Response is Error not ok: true"
+      ]
+    },
+    {
+      "id": "TC-NEG-003",
+      "title": "Warp invalid location",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_game_context"],
+      "snapshots_after": ["stress_game_context"],
+      "snapshots": ["stress_game_context"],
+      "steps": [
+        {
+          "tool": "mcp_warp",
+          "arguments": { "location": "NonExistentLocationXYZ" },
+          "expect": ["Error:"]
+        }
+      ],
+      "assertions": [
+        "Error returned for unknown location",
+        "Player location unchanged in game_context"
+      ]
+    },
+    {
+      "id": "TC-NEG-004",
+      "title": "Negative recovery amount rejected",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_apply_recovery",
+          "arguments": { "amount": -5 },
+          "expect": ["Error:"]
+        }
+      ],
+      "assertions": [
+        "StressRecoveryOffset not corrupted",
+        "CurrentStressLoad not negative"
+      ]
+    },
+    {
+      "id": "TC-NEG-005",
+      "title": "Start second event while event active",
+      "preconditions": ["Can start one rescue event"],
+      "snapshots_before": ["mcp_event_snapshot"],
+      "snapshots_after": ["mcp_event_snapshot"],
+      "snapshots": ["mcp_event_snapshot", "stress_game_context"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": [] },
+        {
+          "tool": "mcp_start_event",
+          "arguments": { "event_id": "HarveyStress_GotoroForestRescue_HighTrust", "force": true },
+          "expect": []
+        },
+        { "tool": "mcp_event_snapshot", "arguments": {}, "expect": ["eventActive: true"] },
+        {
+          "tool": "mcp_start_event",
+          "arguments": { "event_id": "HarveyStress_GotoroForestRescue_MidTrust", "force": true },
+          "expect": ["Error:", "event_already_active"]
+        },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": [] }
+      ],
+      "assertions": [
+        "Second start blocked",
+        "After end: eventActive false, playerCanMove true"
+      ]
+    },
+    {
+      "id": "TC-NEG-006",
+      "title": "Load negative value rejected",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        {
+          "tool": "stress_set_load",
+          "arguments": { "value": -1 },
+          "expect": ["Error:"]
+        },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CurrentStressLoad:"] }
+      ],
+      "assertions": [
+        "CurrentStressLoad >= 0 in snapshot"
+      ]
+    },
+    {
+      "id": "TC-NEG-007",
+      "title": "Safe aura force tick blocked during event",
+      "preconditions": ["Active CP event"],
+      "snapshots_before": ["stress_safe_aura_status"],
+      "snapshots_after": ["stress_safe_aura_status"],
+      "snapshots": ["stress_safe_aura_status", "mcp_event_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": [] },
+        {
+          "tool": "mcp_start_event",
+          "arguments": { "event_id": "HarveyStress_GotoroForestRescue_HighTrust", "force": true },
+          "expect": []
+        },
+        { "tool": "stress_safe_aura_force_tick", "arguments": {}, "expect": ["BlockReason:", "ok: false"] },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": [] }
+      ],
+      "assertions": [
+        "force_tick does not run during event",
+        "No silent load change during blocked tick"
+      ]
+    },
+    {
+      "id": "TC-NEG-008",
+      "title": "Trust remove excessive points clamps to zero",
+      "preconditions": ["stress_trust_reset done"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_trust_debug"],
+      "snapshots": ["stress_trust_debug"],
+      "steps": [
+        { "tool": "stress_trust_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 10 }, "expect": [] },
+        {
+          "tool": "stress_trust_remove",
+          "arguments": { "points": 9999 },
+          "expect": ["pointsRemoved: 9999"]
+        },
+        { "tool": "stress_trust_debug", "arguments": {}, "expect": ["TrustPoints: 0"] }
+      ],
+      "assertions": [
+        "Trust points clamped to 0 not negative",
+        "No Error on excessive remove"
+      ]
+    },
+    {
+      "id": "TC-NEG-009",
+      "title": "Invalid Stardew time rejected",
+      "preconditions": ["No event"],
+      "snapshots_before": ["stress_game_context"],
+      "snapshots_after": ["stress_game_context"],
+      "snapshots": ["stress_game_context"],
+      "steps": [
+        { "tool": "mcp_set_time", "arguments": { "time": 999 }, "expect": ["Error:"] },
+        { "tool": "mcp_add_minutes", "arguments": { "minutes": -1 }, "expect": ["Error:"] }
+      ],
+      "assertions": ["Game time unchanged after invalid set"]
+    },
+    {
+      "id": "TC-NEG-010",
+      "title": "Invalid weather rejected",
+      "preconditions": ["No event"],
+      "snapshots_before": ["stress_game_context"],
+      "snapshots_after": ["stress_game_context"],
+      "snapshots": ["stress_game_context"],
+      "steps": [
+        { "tool": "mcp_set_weather", "arguments": { "weather": "hurricane" }, "expect": ["Error:"] }
+      ],
+      "assertions": ["Weather not changed to invalid value"]
+    },
+    {
+      "id": "TC-NEG-011",
+      "title": "Rescue force invalid tier",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_rescue_debug"],
+      "snapshots_after": ["stress_rescue_debug"],
+      "snapshots": ["stress_rescue_debug"],
+      "steps": [
+        { "tool": "stress_rescue_force", "arguments": { "tier": "UltraTrust", "force": true }, "expect": ["Error:"] }
+      ],
+      "assertions": ["Error lists valid tiers"]
+    },
+    {
+      "id": "TC-NEG-012",
+      "title": "Dialogue tools without open DialogueBox",
+      "preconditions": ["No menu open"],
+      "snapshots_before": ["stress_dialogue_state"],
+      "snapshots_after": ["stress_dialogue_state"],
+      "snapshots": ["stress_dialogue_state"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_consent", "arguments": { "choice": "accept" }, "expect": ["Error: no DialogueBox"] },
+        { "tool": "stress_choose_response", "arguments": { "index": 0 }, "expect": ["Error: no DialogueBox"] },
+        { "tool": "stress_dialogue_advance", "arguments": { "steps": 1 }, "expect": ["Error: no DialogueBox"] }
+      ],
+      "assertions": ["All return Error without opening dialogue first"]
+    },
+    {
+      "id": "TC-NEG-013",
+      "title": "Remove debuff not in ImplementedBuffIds",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressNotReal" }, "expect": ["Error:"] }
+      ],
+      "assertions": ["Same validation as add_debuff"]
+    },
+    {
+      "id": "TC-NEG-014",
+      "title": "Friendship points out of range",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_trust_debug"],
+      "snapshots": ["stress_trust_debug"],
+      "steps": [
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 99999 }, "expect": ["Error:"] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "NotAnNpc", "points": 100 }, "expect": ["Error:"] }
+      ],
+      "assertions": ["Invalid npc or points rejected"]
+    }
+  ]
+}

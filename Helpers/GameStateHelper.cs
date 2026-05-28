@@ -240,6 +240,82 @@ namespace HarveyStressMeter.Helpers
 
         public static bool IsStormWeather()
             => Game1.isLightning;
+
+        /// <summary>
+        /// True when a real dialogue/menu blocks MCP environment tools (ignores stale dialogueUp).
+        /// </summary>
+        public static bool IsEnvironmentDialogueBlocking()
+        {
+            if (Game1.activeClickableMenu != null)
+                return true;
+
+            if (!Game1.dialogueUp)
+                return false;
+
+            var speaker = Game1.currentSpeaker;
+            return speaker?.CurrentDialogue is { Count: > 0 };
+        }
+
+        /// <summary>Force-close menus opened by MCP/event tests.</summary>
+        public static void ForceCloseActiveMenu()
+        {
+            for (var i = 0; i < 8 && Game1.activeClickableMenu != null; i++)
+            {
+                try
+                {
+                    Game1.exitActiveMenu();
+                }
+                catch
+                {
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Clears ghost dialogueUp/eventUp and restores movement after MCP/event cleanup.
+        /// </summary>
+        public static void ClearStaleUiFlags()
+        {
+            if (Game1.activeClickableMenu == null)
+            {
+                Game1.dialogueUp = false;
+
+                if (!IsEventActive())
+                    Game1.currentSpeaker = null;
+            }
+
+            if (!IsEventActive())
+                Game1.eventUp = false;
+
+            try
+            {
+                Game1.player?.forceCanMove();
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+
+        /// <summary>Clears fade/warp flags left by performWarpFarmer / debug warps.</summary>
+        public static void ForceClearFadeAndWarpFlags()
+        {
+            Game1.locationRequest = null;
+            Game1.fadeClear();
+            Game1.globalFade = false;
+
+            try
+            {
+                Game1.globalFadeToClear();
+            }
+            catch
+            {
+                // ignored
+            }
+
+            Game1.globalFade = false;
+        }
     }
 }
 

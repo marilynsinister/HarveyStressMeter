@@ -1,0 +1,124 @@
+{
+  "name": "stressload",
+  "description": "Multi-cause StressLoad: Hunger, Tired, TooCold; activeCauseCount >= 3.",
+  "notes": "Используй stress_force_recalculate если load не обновился после add debuff.",
+  "tests": [
+    {
+      "id": "TC-LOAD-001",
+      "title": "Built-in plan stressload",
+      "preconditions": ["Save loaded", "No event/menu"],
+      "snapshots_before": ["stress_load_debug", "stress_debug_dump"],
+      "snapshots_after": ["stress_load_debug", "stress_debug_dump"],
+      "snapshots": ["stress_load_debug", "stress_debug_dump", "stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "stressload", "stop_on_fail": true },
+          "expect": ["ok: true", "plan: stressload", "failed: 0"]
+        }
+      ],
+      "assertions": [
+        "load-02: CurrentStressLoad > 0 after Hunger",
+        "load-04: CurrentStressLoad after 3 debuffs > single-cause baseline",
+        "load-05: activeCauseCount >= 3"
+      ]
+    },
+    {
+      "id": "TC-LOAD-002",
+      "title": "Manual multi-cause load progression",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug", "stress_debug_dump"],
+      "snapshots": ["stress_load_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CurrentStressLoad:"] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTooCold" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": ["ok: true"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["activeCauseCount:"] }
+      ],
+      "assertions": [
+        "Final CurrentStressLoad >= 0",
+        "activeCauseCount >= 3",
+        "Severity field present in stress_load_debug",
+        "SummaryFlags contains HAS_ACTIVE_STRESS"
+      ]
+    },
+    {
+      "id": "TC-LOAD-003",
+      "title": "Load formula consistency",
+      "preconditions": ["TC-LOAD-002 data or repeat setup"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CauseLoad:", "StressRecoveryOffset:", "CurrentStressLoad:"] }
+      ],
+      "assertions": [
+        "CurrentStressLoad is not negative",
+        "CurrentStressLoad <= maxStressLoad from snapshot",
+        "StressRecoveryOffset <= CauseLoad when causes active"
+      ]
+    },
+    {
+      "id": "TC-LOAD-004",
+      "title": "Gotoro flashback adds cause and Critical severity",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug", "stress_hud_snapshot"],
+      "snapshots": ["stress_load_debug", "stress_hud_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true, "sync_topics": true }, "expect": ["GotoroFlashbackActive: True"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Severity: Critical", "GotoroFlashback"] },
+        { "tool": "stress_hud_snapshot", "arguments": {}, "expect": ["severity: Critical"] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": false, "sync_topics": true }, "expect": [] }
+      ],
+      "assertions": [
+        "GotoroFlashback cause in ActiveCauses",
+        "Load increases when flashback active"
+      ]
+    },
+    {
+      "id": "TC-LOAD-005",
+      "title": "stress_set_load debug override",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        { "tool": "stress_set_load", "arguments": { "value": 45 }, "expect": ["[after]"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CurrentStressLoad: 45"] }
+      ],
+      "assertions": [
+        "Causes unchanged after set_load",
+        "Recovery offset adjusted to match target load"
+      ]
+    },
+    {
+      "id": "TC-LOAD-006",
+      "title": "Primary cause selection with multiple debuffs",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_hud_snapshot"],
+      "snapshots": ["stress_load_debug", "stress_hud_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressNoSleep" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["primaryCause:"] },
+        { "tool": "stress_hud_snapshot", "arguments": {}, "expect": ["primaryCause:"] }
+      ],
+      "assertions": [
+        "HUD primaryCause matches load_debug primaryCause",
+        "CandidateEpisode Burnout when both Overwork and NoSleep active"
+      ]
+    }
+  ]
+}

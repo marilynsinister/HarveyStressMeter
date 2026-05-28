@@ -1,0 +1,282 @@
+{
+  "name": "gotoro_rescue",
+  "description": "Gotoro forest rescue: evaluate (deterministic), force prep, CP event tiers, topic cleanup.",
+  "notes": "Random roll тестируй отдельно. Для условий всегда ignore_chance=true. Event start через stress_rescue_force + mcp_start_event.",
+  "tests": [
+    {
+      "id": "TC-GR-001",
+      "title": "Built-in plan gotoro_rescue evaluate",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_rescue_debug", "stress_load_debug"],
+      "snapshots_after": ["stress_rescue_debug", "stress_debug_dump"],
+      "snapshots": ["stress_rescue_debug", "stress_load_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "gotoro_rescue", "stop_on_fail": false },
+          "expect": ["ok: true", "plan: gotoro_rescue"]
+        }
+      ],
+      "assertions": [
+        "rescue-01: GotoroFlashback active, Severity=Critical",
+        "rescue evaluate step PASS or SKIPPED on event start only"
+      ]
+    },
+    {
+      "id": "TC-GR-002",
+      "title": "Deterministic rescue evaluate HighTrust",
+      "preconditions": ["stress_reset", "8+ hearts Harvey"],
+      "snapshots_before": ["stress_rescue_debug"],
+      "snapshots_after": ["stress_rescue_debug"],
+      "snapshots": ["stress_rescue_debug", "stress_trust_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 2000, "relationship": "none" }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest", "x": 50, "y": 50 }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true, "sync_topics": true }, "expect": [] },
+        {
+          "tool": "stress_rescue_evaluate",
+          "arguments": { "ignore_chance": true },
+          "expect": ["CandidateTier: HighTrust", "CanAttempt:"]
+        }
+      ],
+      "assertions": [
+        "ignore_chance path does not perform random roll",
+        "CandidateTier matches friendship (HighTrust not Dating/Married)"
+      ]
+    },
+    {
+      "id": "TC-GR-MID",
+      "title": "CP event MidTrust Forest",
+      "preconditions": ["6-7 hearts", "storm", "Forest"],
+      "snapshots_before": ["stress_debug_dump", "mcp_event_snapshot"],
+      "snapshots_after": ["stress_debug_dump", "mcp_event_snapshot"],
+      "snapshots": ["stress_debug_dump", "stress_rescue_debug", "mcp_event_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 1750, "relationship": "none" }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true, "sync_topics": true }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "MidTrust", "force": true }, "expect": [] },
+        {
+          "tool": "mcp_start_event",
+          "arguments": { "event_id": "HarveyStress_GotoroForestRescue_MidTrust", "force": true },
+          "expect": []
+        },
+        { "tool": "mcp_event_advance", "arguments": { "steps": 25, "force": true }, "expect": [] },
+        { "tool": "mcp_event_snapshot", "arguments": {}, "expect": ["eventActive: false"] },
+        { "tool": "mcp_has_topic", "arguments": { "topic": "topicStressGotoroForestRescuePending" }, "expect": ["hasTopic: false"] }
+      ],
+      "assertions": [
+        "eventActive false after event",
+        "playerCanMove true",
+        "pending topic cleared",
+        "topicStressGotoroForestRescueDone may be present (CP)"
+      ]
+    },
+    {
+      "id": "TC-GR-HIGH",
+      "title": "CP event HighTrust Forest",
+      "preconditions": ["8+ hearts", "not dating/married"],
+      "snapshots_before": ["stress_debug_dump", "mcp_event_snapshot"],
+      "snapshots_after": ["stress_debug_dump", "mcp_has_topic"],
+      "snapshots": ["stress_debug_dump", "mcp_event_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 2000, "relationship": "none" }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": [] },
+        {
+          "tool": "mcp_start_event",
+          "arguments": { "event_id": "HarveyStress_GotoroForestRescue_HighTrust", "force": true },
+          "expect": []
+        },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": [] }
+      ],
+      "assertions": [
+        "Correct event id for tier",
+        "No RESCUE_PENDING in SummaryFlags after cleanup"
+      ]
+    },
+    {
+      "id": "TC-GR-DATE",
+      "title": "CP event Dating tier",
+      "preconditions": ["Dating Harvey", "storm", "Forest"],
+      "snapshots_before": ["stress_rescue_debug"],
+      "snapshots_after": ["stress_debug_dump"],
+      "snapshots": ["stress_rescue_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_relationship", "arguments": { "npc": "Harvey", "relationship": "Dating" }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "Dating", "force": true }, "expect": [] },
+        {
+          "tool": "stress_rescue_evaluate",
+          "arguments": { "ignore_chance": true },
+          "expect": ["CandidateTier: Dating"]
+        },
+        {
+          "tool": "mcp_start_event",
+          "arguments": { "event_id": "HarveyStress_GotoroForestRescue_Dating", "force": true },
+          "expect": []
+        },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": [] }
+      ],
+      "assertions": [
+        "CandidateTier Dating not HighTrust",
+        "Event id contains Dating"
+      ]
+    },
+    {
+      "id": "TC-GR-MARR",
+      "title": "CP event Married tier",
+      "preconditions": ["Married Harvey"],
+      "snapshots_before": ["stress_rescue_debug"],
+      "snapshots_after": ["stress_debug_dump"],
+      "snapshots": ["stress_rescue_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_relationship", "arguments": { "npc": "Harvey", "relationship": "Married" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "Married", "force": true }, "expect": [] },
+        {
+          "tool": "mcp_start_event",
+          "arguments": { "event_id": "HarveyStress_GotoroForestRescue_Married", "force": true },
+          "expect": []
+        },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": [] }
+      ],
+      "assertions": [
+        "Married tier selected despite high friendship",
+        "SummaryFlags no wrong-tier indicators"
+      ]
+    },
+    {
+      "id": "TC-GR-LOC",
+      "title": "Same event in Woods location",
+      "preconditions": ["HighTrust setup"],
+      "snapshots_before": ["mcp_event_snapshot"],
+      "snapshots_after": ["mcp_event_snapshot"],
+      "snapshots": ["mcp_event_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Woods" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": [] },
+        {
+          "tool": "mcp_start_event",
+          "arguments": { "event_id": "HarveyStress_GotoroForestRescue_HighTrust", "force": true },
+          "expect": []
+        },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": [] }
+      ],
+      "assertions": [
+        "CP script found in Woods (UsedCpScript if reported)",
+        "No event_not_found error"
+      ]
+    },
+    {
+      "id": "TC-GR-ROLL",
+      "title": "Random roll separate test",
+      "notes": "Единственный тест с ignore_chance=false; результат non-deterministic — log roll value.",
+      "preconditions": ["Rescue context ready"],
+      "snapshots_before": ["stress_rescue_debug"],
+      "snapshots_after": ["stress_rescue_debug"],
+      "snapshots": ["stress_rescue_debug"],
+      "steps": [
+        {
+          "tool": "stress_rescue_evaluate",
+          "arguments": { "ignore_chance": false },
+          "expect": ["RollPerformed:", "PassedRoll:"]
+        }
+      ],
+      "assertions": [
+        "Do not use this step for PASS/FAIL of tier selection",
+        "Record RollValue and PassedRoll in report only"
+      ]
+    },
+    {
+      "id": "TC-GR-BLOCK",
+      "title": "Rescue blocked outside forest",
+      "preconditions": ["HighTrust setup"],
+      "snapshots_before": ["stress_rescue_debug"],
+      "snapshots_after": ["stress_rescue_debug"],
+      "snapshots": ["stress_rescue_debug", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true, "sync_topics": true }, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 2000 }, "expect": [] },
+        { "tool": "stress_rescue_evaluate", "arguments": { "ignore_chance": true }, "expect": ["CanAttempt: False"] }
+      ],
+      "assertions": [
+        "BlockReason mentions location or forest",
+        "isForestLikeLocation false in rescue debug"
+      ]
+    },
+    {
+      "id": "TC-GR-NOSTORM",
+      "title": "Rescue blocked without storm",
+      "preconditions": ["Forest location"],
+      "snapshots_before": ["stress_rescue_debug"],
+      "snapshots_after": ["stress_rescue_debug"],
+      "snapshots": ["stress_rescue_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "sun" }, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true }, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 2000 }, "expect": [] },
+        { "tool": "stress_rescue_evaluate", "arguments": { "ignore_chance": true }, "expect": [] }
+      ],
+      "assertions": [
+        "CanAttempt false or warning about storm in force output",
+        "isStorm false in evaluate snapshot"
+      ]
+    },
+    {
+      "id": "TC-GR-CLEAR",
+      "title": "stress_rescue_clear pending topic",
+      "preconditions": ["Rescue force prepared"],
+      "snapshots_before": ["mcp_has_topic"],
+      "snapshots_after": ["mcp_has_topic", "stress_rescue_debug"],
+      "snapshots": ["mcp_has_topic", "stress_rescue_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": [] },
+        { "tool": "stress_rescue_clear", "arguments": {}, "expect": [] },
+        { "tool": "mcp_has_topic", "arguments": { "topic": "topicStressGotoroForestRescuePending" }, "expect": ["hasTopic: false"] }
+      ],
+      "assertions": [
+        "Pending topic removed",
+        "Rescue debug reflects cleared pending state"
+      ]
+    },
+    {
+      "id": "TC-GR-LOWTRUST",
+      "title": "Rescue blocked with low friendship",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_rescue_debug"],
+      "snapshots_after": ["stress_rescue_debug"],
+      "snapshots": ["stress_rescue_debug", "stress_trust_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true }, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 250 }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 0 }, "expect": [] },
+        { "tool": "stress_rescue_evaluate", "arguments": { "ignore_chance": true }, "expect": ["CanAttempt: False"] }
+      ],
+      "assertions": [
+        "BlockReason mentions trust, hearts, or SafePerson",
+        "CanHarveyForestRescue false in trust debug"
+      ]
+    }
+  ]
+}

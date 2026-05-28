@@ -74,6 +74,78 @@ namespace HarveyStressMeter.Services
 
         public void SetDebugOverlay(bool visible) => _debugOverlayVisible = visible;
 
+        /// <summary>DEV/MCP: machine-readable HUD snapshot (read-only).</summary>
+        public string BuildMcpSnapshot()
+        {
+            var load = _stressLoadService.GetCurrentStressLoad();
+            var maxLoad = _stressLoadService.GetMaxStressLoad();
+            var severity = _stressLoadService.GetSeverity();
+            var debugMode = IsDebugMode();
+            var compactVisible = ShouldDrawCompactMeter(debugMode);
+            var anyHud = ShouldDrawAnyHud();
+            var primaryTreatment = StressDebuffSelector.GetPrimaryTreatmentAwaitingReview(_stateService)
+                ?? _data.StressState.GetActiveTreatmentsWithQuests().FirstOrDefault();
+            var episode = _data.ActiveTreatmentEpisode;
+            var activeCauses = _stressLoadService.GetActiveCauses()
+                .Where(kvp => kvp.Value.IsActive)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            var sb = new StringBuilder();
+            sb.AppendLine("ok: true");
+            sb.AppendLine($"visible: {anyHud && compactVisible}");
+            sb.AppendLine($"compactMeterVisible: {compactVisible}");
+            sb.AppendLine($"debugOverlayVisible: {ShouldDrawDebugOverlay(debugMode)}");
+            sb.AppendLine($"enabledInConfig: {_config.ShowStressMeter}");
+            sb.AppendLine($"showOnlyWhenStressed: {_config.ShowOnlyWhenStressed}");
+            sb.AppendLine($"currentStressLoad: {load}");
+            sb.AppendLine($"rawStressLoad: {_stressLoadService.GetRawStressLoad()}");
+            sb.AppendLine($"maxStressLoad: {maxLoad}");
+            sb.AppendLine($"severity: {severity}");
+            sb.AppendLine($"barPercent: {load / (float)maxLoad:0.###}");
+            sb.AppendLine($"activeCauses: {(activeCauses.Count > 0 ? string.Join(", ", activeCauses) : "(none)")}");
+            sb.AppendLine($"primaryCause: {_stressLoadService.GetPrimaryCause() ?? "(none)"}");
+            sb.AppendLine($"activeTreatmentId: {primaryTreatment?.BuffId ?? "(none)"}");
+            sb.AppendLine($"activeEpisodeId: {_stressLoadService.GetActiveEpisodeId() ?? episode?.EpisodeId ?? "(none)"}");
+            sb.AppendLine($"activeTreatmentEpisodeId: {_stressLoadService.GetActiveTreatmentEpisodeId() ?? "(none)"}");
+            sb.AppendLine($"currentQuestId: {ResolveCurrentQuestId(primaryTreatment, episode)}");
+            sb.AppendLine($"displayText: {BuildDisplayText(load, severity, debugMode)}");
+            sb.AppendLine($"anchor: {_config.Anchor}");
+            sb.AppendLine($"verticalMeter: {_config.VerticalStressMeter}");
+            sb.AppendLine($"meterTextureLoaded: {_meterTexture != null}");
+            sb.AppendLine($"eventActive: {GameStateHelper.IsEventActive()}");
+            sb.AppendLine($"menuActive: {Game1.activeClickableMenu != null}");
+            sb.AppendLine($"festivalUi: {IsFestivalUiContext()}");
+
+            if (!_config.ShowStressMeter)
+                sb.AppendLine("warning: ShowStressMeter=false in config — compact meter disabled.");
+
+            if (_meterTexture == null)
+                sb.AppendLine("warning: stress_meter.png not loaded — vector bar fallback.");
+
+            if (!Context.IsWorldReady)
+                sb.AppendLine("warning: world not ready — HUD may not render.");
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private static string ResolveCurrentQuestId(TreatmentState? primaryTreatment, TreatmentEpisodeState? episode)
+        {
+            if (!string.IsNullOrEmpty(episode?.QuestId))
+                return episode.QuestId;
+
+            if (!string.IsNullOrEmpty(primaryTreatment?.QuestId))
+                return primaryTreatment.QuestId;
+
+            return "(none)";
+        }
+
+        private static string BuildDisplayText(int load, StressSeverity severity, bool debugMode)
+        {
+            var label = GetSeverityLabel(severity);
+            return debugMode || load > 0 ? $"{label} {load}" : label;
+        }
+
         private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
         {
             try
@@ -246,31 +318,31 @@ namespace HarveyStressMeter.Services
 
         private void DrawCompactMeter(SpriteBatch spriteBatch, bool debugMode)
         {
+            if (_config.VerticalStressMeter && _config.Anchor == StressHudAnchor.BottomRight)
+                DrawVerticalCompactMeter(spriteBatch, debugMode);
+            else
+                DrawHorizontalCompactMeter(spriteBatch, debugMode);
+        }
+
+        private void DrawHorizontalCompactMeter(SpriteBatch spriteBatch, bool debugMode)
+        {
             var load = _stressLoadService.GetCurrentStressLoad();
             var severity = _stressLoadService.GetSeverity();
             var label = GetSeverityLabel(severity);
             var colors = GetSeverityColors(severity);
-
-            float pulse = 1f;
-            if (_pulseTicks > 0)
-                pulse = 0.75f + 0.25f * MathF.Sin(_pulseTicks * 0.25f);
+            float opacity = GetMeterOpacity(out var pulse);
 
             int barWidth = (int)(128 * _config.Scale);
             int barHeight = Math.Max(6, (int)(8 * _config.Scale));
             int padding = Math.Max(4, (int)(4 * _config.Scale));
             var origin = ResolveAnchorOrigin(barWidth, barHeight + padding + Game1.smallFont.LineSpacing);
 
-            float opacity = Math.Clamp(_config.Opacity, 0.1f, 1f) * pulse;
-
             var backRect = new Rectangle(origin.X, origin.Y, barWidth, barHeight);
             DrawFilledRect(spriteBatch, backRect, colors.Background * opacity);
 
             int fillWidth = (int)(barWidth * (load / (float)_stressLoadService.GetMaxStressLoad()));
             if (fillWidth > 0)
-            {
-                var fillRect = new Rectangle(origin.X, origin.Y, fillWidth, barHeight);
-                DrawFilledRect(spriteBatch, fillRect, colors.Fill * opacity);
-            }
+                DrawFilledRect(spriteBatch, new Rectangle(origin.X, origin.Y, fillWidth, barHeight), colors.Fill * opacity);
 
             if (severity >= StressSeverity.Critical && _pulseTicks > 0)
             {
@@ -278,26 +350,103 @@ namespace HarveyStressMeter.Services
                 DrawFilledRect(spriteBatch, glowRect, colors.Fill * (0.25f * pulse));
             }
 
-            var text = _config.ShowDebugNumbers || debugMode
+            DrawMeterLabel(spriteBatch, label, load, debugMode, colors.Text, opacity,
+                origin.X, origin.Y + barHeight + 2, barWidth, centerHorizontally: true);
+        }
+
+        /// <summary>Vertical bar to the left of vanilla stamina (bottom-right cluster).</summary>
+        private void DrawVerticalCompactMeter(SpriteBatch spriteBatch, bool debugMode)
+        {
+            var load = _stressLoadService.GetCurrentStressLoad();
+            var severity = _stressLoadService.GetSeverity();
+            var label = GetSeverityShortLabel(severity);
+            var colors = GetSeverityColors(severity);
+            float opacity = GetMeterOpacity(out var pulse);
+
+            int barThickness = Math.Max(8, (int)(10 * _config.Scale));
+            int barLength = (int)(128 * _config.Scale);
+            int labelPadding = Math.Max(4, (int)(4 * _config.Scale));
+            var viewport = Game1.uiViewport;
+            int marginRight = Math.Max(72, _config.OffsetX);
+            int marginBottom = Math.Max(12, _config.OffsetY);
+
+            int x = viewport.Width - marginRight - barThickness;
+            int y = viewport.Height - marginBottom - barLength;
+
+            var backRect = new Rectangle(x, y, barThickness, barLength);
+            DrawFilledRect(spriteBatch, backRect, colors.Background * opacity);
+
+            int fillHeight = (int)(barLength * (load / (float)_stressLoadService.GetMaxStressLoad()));
+            if (fillHeight > 0)
+            {
+                var fillRect = new Rectangle(x, y + barLength - fillHeight, barThickness, fillHeight);
+                DrawFilledRect(spriteBatch, fillRect, colors.Fill * opacity);
+            }
+
+            if (severity >= StressSeverity.Critical && _pulseTicks > 0)
+            {
+                var glowRect = new Rectangle(x - 1, y - 1, barThickness + 2, barLength + 2);
+                DrawFilledRect(spriteBatch, glowRect, colors.Fill * (0.25f * pulse));
+            }
+
+            var text = _config.ShowDebugNumbers || debugMode ? $"{label} {load}" : label;
+            var textSize = Game1.smallFont.MeasureString(text);
+            var textPos = new Vector2(
+                x - textSize.X - labelPadding,
+                y + barLength - textSize.Y);
+
+            DrawMeterLabel(spriteBatch, text, load, debugMode, colors.Text, opacity, textPos, drawValueInLabel: false);
+        }
+
+        private float GetMeterOpacity(out float pulse)
+        {
+            pulse = 1f;
+            if (_pulseTicks > 0)
+                pulse = 0.75f + 0.25f * MathF.Sin(_pulseTicks * 0.25f);
+
+            return Math.Clamp(_config.Opacity, 0.1f, 1f) * pulse;
+        }
+
+        private void DrawMeterLabel(
+            SpriteBatch spriteBatch,
+            string label,
+            int load,
+            bool debugMode,
+            Color textColor,
+            float opacity,
+            Vector2 textPos,
+            bool drawValueInLabel = true,
+            bool centerHorizontally = false,
+            int centerWidth = 0)
+        {
+            var text = drawValueInLabel && (_config.ShowDebugNumbers || debugMode)
                 ? $"{label} {load}"
                 : label;
 
-            var textSize = Game1.smallFont.MeasureString(text);
-            var textPos = new Vector2(
-                origin.X + (barWidth - textSize.X) / 2f,
-                origin.Y + barHeight + 2);
+            if (centerHorizontally && centerWidth > 0)
+            {
+                var textSize = Game1.smallFont.MeasureString(text);
+                textPos.X += (centerWidth - textSize.X) / 2f;
+            }
 
-            spriteBatch.DrawString(
-                Game1.smallFont,
-                text,
-                textPos + new Vector2(1, 1),
-                Color.Black * (opacity * 0.7f));
+            spriteBatch.DrawString(Game1.smallFont, text, textPos + new Vector2(1, 1), Color.Black * (opacity * 0.7f));
+            spriteBatch.DrawString(Game1.smallFont, text, textPos, textColor * opacity);
+        }
 
-            spriteBatch.DrawString(
-                Game1.smallFont,
-                text,
-                textPos,
-                colors.Text * opacity);
+        private void DrawMeterLabel(
+            SpriteBatch spriteBatch,
+            string label,
+            int load,
+            bool debugMode,
+            Color textColor,
+            float opacity,
+            float x,
+            float y,
+            int centerWidth,
+            bool centerHorizontally)
+        {
+            DrawMeterLabel(spriteBatch, label, load, debugMode, textColor, opacity,
+                new Vector2(x, y), drawValueInLabel: true, centerHorizontally: centerHorizontally, centerWidth: centerWidth);
         }
 
         private void DrawDebugOverlay(SpriteBatch spriteBatch)
@@ -412,6 +561,14 @@ namespace HarveyStressMeter.Services
             StressSeverity.Critical => "Критический стресс",
             StressSeverity.High => "Высокий стресс",
             StressSeverity.Mild => "Напряжение",
+            _ => "Спокойно",
+        };
+
+        private static string GetSeverityShortLabel(StressSeverity severity) => severity switch
+        {
+            StressSeverity.Critical => "Критич.",
+            StressSeverity.High => "Высокий",
+            StressSeverity.Mild => "Напряж.",
             _ => "Спокойно",
         };
 

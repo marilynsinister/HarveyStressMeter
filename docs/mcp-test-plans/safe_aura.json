@@ -1,0 +1,128 @@
+{
+  "name": "safe_aura",
+  "description": "Safe Person Aura: proximity, trust unlock, force tick decay.",
+  "notes": "Используй stress_safe_aura_force_tick вместо длинного wait. Harvey должен быть рядом в Town.",
+  "tests": [
+    {
+      "id": "TC-AURA-001",
+      "title": "Built-in plan safe_aura",
+      "preconditions": ["Save loaded", "No event/menu"],
+      "snapshots_before": ["stress_safe_aura_status", "stress_trust_debug"],
+      "snapshots_after": ["stress_safe_aura_status", "stress_load_debug"],
+      "snapshots": ["stress_safe_aura_status", "stress_load_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "safe_aura", "stop_on_fail": true },
+          "expect": ["ok: true", "plan: safe_aura"]
+        }
+      ],
+      "assertions": [
+        "aura-02: unlocked=true and active=true when Harvey near in Town",
+        "Or SKIPPED if placement blocked with clear reason"
+      ]
+    },
+    {
+      "id": "TC-AURA-002",
+      "title": "Manual safe aura near Harvey",
+      "preconditions": ["SafePerson unlocked", "Town location"],
+      "snapshots_before": ["stress_safe_aura_status", "stress_load_debug"],
+      "snapshots_after": ["stress_safe_aura_status", "stress_load_debug"],
+      "snapshots": ["stress_safe_aura_status", "stress_load_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_trust_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 1750, "relationship": "none" }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 160 }, "expect": [] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Town", "x": 46, "y": 57 }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town", "x": 47, "y": 57 }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_safe_aura_status", "arguments": {}, "expect": ["unlocked: true", "active: true"] }
+      ],
+      "assertions": [
+        "distanceToHarvey within maxDistance",
+        "active true when context safe",
+        "SummaryFlags may contain SAFE_AURA_ACTIVE"
+      ]
+    },
+    {
+      "id": "TC-AURA-003",
+      "title": "Force tick reduces load",
+      "preconditions": ["TC-AURA-002 setup", "aura active", "no event/menu"],
+      "snapshots_before": ["stress_load_debug", "stress_safe_aura_status"],
+      "snapshots_after": ["stress_load_debug", "stress_safe_aura_status"],
+      "snapshots": ["stress_load_debug", "stress_safe_aura_status"],
+      "steps": [
+        { "tool": "stress_load_debug", "arguments": {}, "expect": [] },
+        { "tool": "stress_safe_aura_force_tick", "arguments": {}, "expect": ["ok: true"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "CurrentStressLoad after <= before OR recoveryOffset increased",
+        "No Error from force_tick when context safe"
+      ]
+    },
+    {
+      "id": "TC-AURA-004",
+      "title": "Aura inactive when Harvey far",
+      "preconditions": ["SafePerson unlocked"],
+      "snapshots_before": ["stress_safe_aura_status"],
+      "snapshots_after": ["stress_safe_aura_status"],
+      "snapshots": ["stress_safe_aura_status"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 2000 }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 160 }, "expect": [] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Hospital", "x": 16, "y": 10 }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "stress_safe_aura_status", "arguments": {}, "expect": ["active: false"] }
+      ],
+      "assertions": [
+        "harveyNearby false or active false",
+        "reasonInactive explains distance or location"
+      ]
+    },
+    {
+      "id": "TC-AURA-005",
+      "title": "Aura locked without SafePerson unlock",
+      "preconditions": ["Low friendship + trust"],
+      "snapshots_before": ["stress_safe_aura_status", "stress_trust_debug"],
+      "snapshots_after": ["stress_safe_aura_status"],
+      "snapshots": ["stress_safe_aura_status", "stress_trust_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_trust_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 500, "relationship": "none" }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 160 }, "expect": [] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Town", "x": 46, "y": 57 }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town", "x": 47, "y": 57 }, "expect": [] },
+        { "tool": "stress_safe_aura_status", "arguments": {}, "expect": ["unlocked: false"] }
+      ],
+      "assertions": [
+        "active false when SafePerson not unlocked",
+        "reasonInactive mentions unlock or trust"
+      ]
+    },
+    {
+      "id": "TC-AURA-006",
+      "title": "Force tick blocked with open menu",
+      "preconditions": ["Dialogue open"],
+      "snapshots_before": ["stress_safe_aura_status"],
+      "snapshots_after": ["stress_safe_aura_status"],
+      "snapshots": ["stress_safe_aura_status", "stress_dialogue_state"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_show_dialogue", "arguments": {}, "expect": [] },
+        { "tool": "stress_safe_aura_force_tick", "arguments": {}, "expect": ["applied: false"] },
+        { "tool": "stress_close_dialogue", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "blockReason set when dialogue/menu open",
+        "Tick succeeds after dialogue closed and Harvey near (optional follow-up)"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,196 @@
+{
+  "name": "all_debuffs",
+  "description": "Add/remove matrix для 9 реализованных stress debuff через MCP.",
+  "notes": "Каждый buff тест изолирован stress_reset. Buff IDs из TreatmentTopics.ImplementedBuffIds.",
+  "tests": [
+    {
+      "id": "TC-DEB-001",
+      "title": "Built-in plan all_debuffs",
+      "preconditions": ["Save loaded", "No event/menu"],
+      "snapshots_before": ["stress_treatment_snapshot", "stress_debug_dump"],
+      "snapshots_after": ["stress_treatment_snapshot", "stress_debug_dump"],
+      "snapshots": ["stress_treatment_snapshot", "stress_debug_dump", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "all_debuffs", "stop_on_fail": true },
+          "expect": ["ok: true", "plan: all_debuffs", "failed: 0"]
+        }
+      ],
+      "assertions": [
+        "All debuffs-*-add steps PASS",
+        "All debuffs-*-remove steps PASS",
+        "After plan ActiveTreatments count=0"
+      ]
+    },
+    {
+      "id": "TC-DEB-Tired",
+      "title": "Manual add/remove buffStressTired",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot", "stress_load_debug"],
+      "snapshots": ["stress_treatment_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": ["Applied stress debuff: buffStressTired"] },
+        { "tool": "stress_treatment_snapshot", "arguments": {}, "expect": ["ActiveDebuffs:", "buffStressTired"] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": ["Removed stress state"] }
+      ],
+      "assertions": [
+        "After add: buffStressTired in ActiveDebuffs",
+        "After remove: buffStressTired not in ActiveDebuffs"
+      ]
+    },
+    {
+      "id": "TC-DEB-Hunger",
+      "title": "Manual add/remove buffStressHunger",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] }
+      ],
+      "assertions": ["CauseLoad increases after Hunger add", "Load recalculated after remove"]
+    },
+    {
+      "id": "TC-DEB-Lonely",
+      "title": "Manual add/remove buffStressLonely",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_treatment_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressLonely" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Lonely"] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressLonely" }, "expect": [] }
+      ],
+      "assertions": ["Lonely cause active after add", "Cause removed after debuff remove"]
+    },
+    {
+      "id": "TC-DEB-Thunder",
+      "title": "Manual add/remove buffStressThunder",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressThunder" }, "expect": [] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressThunder" }, "expect": [] }
+      ],
+      "assertions": ["Thunder debuff in ImplementedBuffIds matrix"]
+    },
+    {
+      "id": "TC-DEB-Overwork",
+      "title": "Manual add/remove buffStressOverwork",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_treatment_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Overwork"] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] }
+      ],
+      "assertions": ["Overwork cause contributes to CauseLoad"]
+    },
+    {
+      "id": "TC-DEB-NoSleep",
+      "title": "Manual add/remove buffStressNoSleep",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressNoSleep" }, "expect": [] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressNoSleep" }, "expect": [] }
+      ],
+      "assertions": ["NoSleep debuff add/remove clean"]
+    },
+    {
+      "id": "TC-DEB-TooCold",
+      "title": "Manual add/remove buffStressTooCold",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTooCold" }, "expect": [] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressTooCold" }, "expect": [] }
+      ],
+      "assertions": ["TooCold debuff add/remove clean"]
+    },
+    {
+      "id": "TC-DEB-Darkness",
+      "title": "Manual add/remove buffStressDarkness",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_treatment_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressDarkness" }, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Darkness"] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressDarkness" }, "expect": [] }
+      ],
+      "assertions": ["Darkness cause active"]
+    },
+    {
+      "id": "TC-DEB-Social",
+      "title": "Manual add/remove buffStressSocial",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressSocial" }, "expect": [] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressSocial" }, "expect": [] }
+      ],
+      "assertions": ["Social debuff add/remove clean"]
+    },
+    {
+      "id": "TC-DEB-Multi",
+      "title": "Stack multiple debuffs then reset",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot", "stress_load_debug"],
+      "snapshots": ["stress_treatment_snapshot", "stress_load_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressLonely" }, "expect": [] },
+        { "tool": "stress_treatment_snapshot", "arguments": {}, "expect": ["ActiveDebuffs:"] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["activeCauseCount:"] },
+        { "tool": "stress_reset", "arguments": {}, "expect": ["ActiveTreatments count: 0"] }
+      ],
+      "assertions": [
+        "activeCauseCount >= 3 before final reset",
+        "stress_reset clears all debuffs and treatments"
+      ]
+    },
+    {
+      "id": "TC-DEB-Invalid",
+      "title": "Reject unknown buff_id",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressNotReal" }, "expect": ["Error:"] }
+      ],
+      "assertions": ["Response starts with Error:", "No new ActiveDebuffs"]
+    }
+  ]
+}

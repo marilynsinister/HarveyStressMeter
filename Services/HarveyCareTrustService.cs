@@ -240,6 +240,38 @@ namespace HarveyStressMeter.Services
             RefreshTrustLevelAndUnlocks();
         }
 
+        /// <summary>DEV/MCP: add trust points without production side-effects (LastTrustGainDay, etc.).</summary>
+        public void AddTrustPointsForDebug(int points, string? reason = null)
+        {
+            if (points <= 0)
+                return;
+
+            var before = State.TrustPoints;
+            State.TrustPoints = Math.Min(before + points, _config.MaxHarveyCareTrustPoints);
+            RefreshTrustLevelAndUnlocks();
+
+            _monitor.Log(
+                $"[HarveyCareTrust] MCP +{points} ({reason ?? "mcp"}) → {State.TrustPoints} pts, " +
+                $"effective level {GetTrustLevel()}",
+                LogLevel.Debug);
+        }
+
+        /// <summary>DEV/MCP: remove trust points, bypassing PenalizeTrust cooldown.</summary>
+        public void RemoveTrustPointsForDebug(int points, string? reason = null)
+        {
+            if (points <= 0)
+                return;
+
+            var before = State.TrustPoints;
+            State.TrustPoints = Math.Max(0, State.TrustPoints - points);
+            RefreshTrustLevelAndUnlocks();
+
+            _monitor.Log(
+                $"[HarveyCareTrust] MCP -{Math.Min(points, before)} ({reason ?? "mcp"}) → {State.TrustPoints} pts, " +
+                $"effective level {GetTrustLevel()}",
+                LogLevel.Debug);
+        }
+
         public string BuildDebugSnapshot()
         {
             var level = GetTrustLevel();
@@ -259,6 +291,52 @@ namespace HarveyStressMeter.Services
             sb.AppendLine($"DaysSinceLastSuccess: {State.DaysSinceLastSuccessfulAssignment}");
             sb.AppendLine($"AssignmentBoostDaysRemaining: {State.AssignmentBoostDaysRemaining}");
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>DEV/MCP: machine-readable snapshot for AI assert-friendly MCP tools.</summary>
+        public string BuildMcpSnapshot()
+        {
+            var cap = GetMaxTrustLevelForRelationship();
+            var sb = new StringBuilder();
+            sb.AppendLine("ok: true");
+            sb.AppendLine($"TrustPoints: {State.TrustPoints}");
+            sb.AppendLine($"RawTrustLevel: {GetRawTrustLevel()} ({HarveyCareTrustLevels.GetDisplayName(GetRawTrustLevel())})");
+            sb.AppendLine($"EffectiveTrustLevel: {GetTrustLevel()} ({HarveyCareTrustLevels.GetDisplayName(GetTrustLevel())})");
+            sb.AppendLine($"FriendshipPointsWithHarvey: {GetHarveyFriendshipPoints()}");
+            sb.AppendLine($"HeartsWithHarvey: {HarveyFriendshipHelper.GetHarveyHearts()}");
+            sb.AppendLine($"RelationshipStatus: {GetHarveyRelationshipStatus()}");
+            sb.AppendLine($"Cap: {cap} ({HarveyCareTrustLevels.GetDisplayName(cap)})");
+            sb.AppendLine($"SafePersonUnlocked: {IsHarveySafePersonUnlocked()}");
+            sb.AppendLine($"ForestRescueUnlocked: {State.ForestRescueUnlocked}");
+            sb.AppendLine($"CanHarveyForestRescue: {CanHarveyForestRescue()}");
+            sb.AppendLine($"EffectiveStressGainMultiplier: {GetEffectiveStressGainMultiplier():0.###}");
+            sb.AppendLine($"TreatmentReductionBonus: {GetTreatmentStressReductionBonus()}");
+            sb.AppendLine($"RescueChanceBonus: {GetRescueChanceBonus():0.###}");
+            sb.AppendLine($"FlashbackStabilizationMultiplier: {GetFlashbackStabilizationMultiplier():0.###}");
+            sb.AppendLine($"IgnoredAssignments: {State.IgnoredAssignments}");
+            sb.AppendLine($"DaysSinceLastSuccessfulAssignment: {State.DaysSinceLastSuccessfulAssignment}");
+            sb.AppendLine($"TrustIgnoredAssignmentDaysThreshold: {_config.TrustIgnoredAssignmentDays}");
+            sb.AppendLine($"LastTrustPenaltyDay: {State.LastTrustPenaltyDay}");
+            sb.AppendLine($"TrustPenaltyCooldownDays: {_config.TrustPenaltyCooldownDays}");
+            sb.AppendLine($"AssignmentBoostDaysRemaining: {State.AssignmentBoostDaysRemaining}");
+            sb.AppendLine($"GroundingDialogueUnlocked: {State.GroundingDialogueUnlocked}");
+            return sb.ToString().TrimEnd();
+        }
+
+        private static int GetHarveyFriendshipPoints()
+            => Game1.player.friendshipData.TryGetValue("Harvey", out var friendship)
+                ? friendship.Points
+                : 0;
+
+        private static string GetHarveyRelationshipStatus()
+        {
+            if (HarveyFriendshipHelper.IsMarriedToHarvey())
+                return "Married";
+
+            if (HarveyFriendshipHelper.IsDatingHarvey())
+                return "Dating";
+
+            return "none";
         }
 
         private void EvaluateIgnoredAssignmentPenalty()

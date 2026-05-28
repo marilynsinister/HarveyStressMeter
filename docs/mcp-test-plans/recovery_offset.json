@@ -1,0 +1,132 @@
+{
+  "name": "recovery_offset",
+  "description": "Recovery offset снижает CurrentStressLoad, но active cause Overwork остаётся.",
+  "notes": "Plan id в runner: recovery. Используй stress_apply_recovery вместо длинного wait.",
+  "tests": [
+    {
+      "id": "TC-RECV-001",
+      "title": "Built-in plan recovery",
+      "preconditions": ["Save loaded", "No event/menu"],
+      "snapshots_before": ["stress_load_debug", "stress_treatment_snapshot"],
+      "snapshots_after": ["stress_load_debug", "stress_treatment_snapshot"],
+      "snapshots": ["stress_load_debug", "stress_treatment_snapshot", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "recovery", "stop_on_fail": true },
+          "expect": ["ok: true", "plan: recovery", "failed: 0"]
+        }
+      ],
+      "assertions": [
+        "recv-02: CurrentStressLoad decreased after recovery",
+        "recv-03: Overwork cause still active"
+      ]
+    },
+    {
+      "id": "TC-RECV-002",
+      "title": "Manual apply recovery offset 10",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_apply_recovery",
+          "arguments": { "amount": 10, "reason": "mcp-test-plan" },
+          "expect": ["ok: true"]
+        },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["StressRecoveryOffset:"] }
+      ],
+      "assertions": [
+        "CurrentStressLoad after < CurrentStressLoad before",
+        "StressRecoveryOffset >= 10",
+        "ActiveCauses still lists Overwork"
+      ]
+    },
+    {
+      "id": "TC-RECV-003",
+      "title": "Clear recovery offset restores load",
+      "preconditions": ["TC-RECV-002 completed or repeat setup"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_clear_recovery_offset", "arguments": {}, "expect": ["ok: true"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["StressRecoveryOffset: 0"] }
+      ],
+      "assertions": [
+        "StressRecoveryOffset equals 0",
+        "CurrentStressLoad increases vs offset state (causes unchanged)"
+      ]
+    },
+    {
+      "id": "TC-RECV-004",
+      "title": "Multiple recovery applications stack offset",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_apply_recovery", "arguments": { "amount": 5, "reason": "stack-1" }, "expect": ["ok: true"] },
+        { "tool": "stress_apply_recovery", "arguments": { "amount": 5, "reason": "stack-2" }, "expect": ["ok: true"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["StressRecoveryOffset:"] }
+      ],
+      "assertions": [
+        "Offset >= 10 after two applications",
+        "CurrentStressLoad decreased cumulatively"
+      ]
+    },
+    {
+      "id": "TC-RECV-005",
+      "title": "Recovery capped by CauseLoad",
+      "preconditions": ["Low load debuff only"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": [] },
+        { "tool": "stress_apply_recovery", "arguments": { "amount": 100, "reason": "cap-test" }, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "CurrentStressLoad not negative after large recovery",
+        "StressRecoveryOffset <= CauseLoad"
+      ]
+    },
+    {
+      "id": "TC-RECV-006",
+      "title": "Safe aura recovery stacks with manual offset",
+      "preconditions": ["Aura active near Harvey"],
+      "snapshots_before": ["stress_load_debug", "stress_safe_aura_status"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug", "stress_safe_aura_status"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 1750 }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 160 }, "expect": [] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Town", "x": 46, "y": 57 }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town", "x": 47, "y": 57 }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_apply_recovery", "arguments": { "amount": 5, "reason": "manual" }, "expect": [] },
+        { "tool": "stress_safe_aura_force_tick", "arguments": {}, "expect": ["applied: true"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "Combined recovery reduces load further or increases offset",
+        "Causes remain active"
+      ]
+    }
+  ]
+}

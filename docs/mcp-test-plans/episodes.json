@@ -1,0 +1,162 @@
+{
+  "name": "episodes",
+  "description": "Treatment episodes: Burnout, PhysicalExhaustion candidate selection; start episode (gap).",
+  "notes": "stress_episode_start не реализован — skip_if_missing_tool на start шагах.",
+  "tests": [
+    {
+      "id": "TC-EPI-001",
+      "title": "Built-in plan episodes",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_load_debug", "stress_treatment_snapshot"],
+      "snapshots_after": ["stress_load_debug", "stress_treatment_snapshot"],
+      "snapshots": ["stress_load_debug", "stress_treatment_snapshot", "stress_hud_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "episodes", "stop_on_fail": false },
+          "expect": ["ok: true", "plan: episodes"]
+        }
+      ],
+      "assertions": [
+        "ep-01: CandidateEpisode=Burnout after Overwork+NoSleep",
+        "ep-03: CandidateEpisode=PhysicalExhaustion after Hunger+TooCold+Tired",
+        "ep-02 and ep-04 SKIPPED (stress_episode_start missing)"
+      ]
+    },
+    {
+      "id": "TC-EPI-002",
+      "title": "Burnout candidate manual setup",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug", "stress_hud_snapshot"],
+      "snapshots": ["stress_load_debug", "stress_hud_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressNoSleep" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CandidateEpisode: Burnout"] }
+      ],
+      "assertions": [
+        "CandidateEpisode equals Burnout",
+        "CurrentEpisode none until episode started"
+      ]
+    },
+    {
+      "id": "TC-EPI-003",
+      "title": "Start Burnout episode",
+      "preconditions": ["TC-EPI-002 setup"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot", "stress_hud_snapshot"],
+      "steps": [
+        {
+          "tool": "stress_episode_start",
+          "arguments": { "episode_id": "Burnout" },
+          "expect": ["ok: true", "episode_id: Burnout"]
+        }
+      ],
+      "assertions": [
+        "If tool exists: single episode quest active, no duplicate quests"
+      ]
+    },
+    {
+      "id": "TC-EPI-004",
+      "title": "PhysicalExhaustion candidate manual setup",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_hud_snapshot"],
+      "snapshots": ["stress_load_debug", "stress_hud_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTooCold" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CandidateEpisode: PhysicalExhaustion"] },
+        { "tool": "stress_hud_snapshot", "arguments": {}, "expect": ["candidateEpisode:"] }
+      ],
+      "assertions": [
+        "PhysicalExhaustion selected over Burnout when Overwork absent",
+        "CurrentEpisode none until started"
+      ]
+    },
+    {
+      "id": "TC-EPI-005",
+      "title": "AnxietySpike candidate (Thunder + storm)",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug", "stress_hud_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressThunder" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CandidateEpisode: AnxietySpike"] }
+      ],
+      "assertions": [
+        "Lightning required for AnxietySpike",
+        "Without storm: candidate may differ — document in report"
+      ]
+    },
+    {
+      "id": "TC-EPI-006",
+      "title": "SocialShutdown candidate (Social + Lonely)",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressSocial" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressLonely" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CandidateEpisode: SocialShutdown"] }
+      ],
+      "assertions": ["Both Social and Lonely causes active"]
+    },
+    {
+      "id": "TC-EPI-007",
+      "title": "GotoroFlashback episode candidate",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug", "stress_rescue_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true, "sync_topics": true }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CandidateEpisode: GotoroFlashback", "Severity: Critical"] },
+        { "tool": "stress_rescue_debug", "arguments": {}, "expect": ["GotoroFlashbackActive:"] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": false, "sync_topics": true }, "expect": [] }
+      ],
+      "assertions": [
+        "GotoroFlashback takes priority as candidate episode",
+        "Rescue mechanics tied to same flashback state"
+      ]
+    },
+    {
+      "id": "TC-EPI-008",
+      "title": "Episode priority when multiple candidates possible",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["stress_load_debug"],
+      "snapshots": ["stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressNoSleep" }, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["CandidateEpisode:"] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": false }, "expect": [] }
+      ],
+      "assertions": [
+        "Document which episode wins when Gotoro + Burnout both match",
+        "Severity Critical while Gotoro active"
+      ]
+    }
+  ]
+}

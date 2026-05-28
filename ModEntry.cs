@@ -54,6 +54,8 @@ namespace HarveyStressMeter
         private Harmony? _harmony;
         private StressMcpServer? _stressMcpServer;
         private StressMcpToolHandler? _stressMcpToolHandler;
+        private readonly McpWaitService _mcpWaitService = new();
+        private readonly McpWarpService _mcpWarpService = new();
         private readonly ConcurrentQueue<(string Tool, JsonElement? Args, TaskCompletionSource<string> Completion)> _mcpCommandQueue = new();
 
         public override void Entry(IModHelper helper)
@@ -84,7 +86,14 @@ namespace HarveyStressMeter
                 _buffService,
                 _questService,
                 _stressDialogueService,
-                _modResetService);
+                _modResetService,
+                _harveyCareTrustService,
+                _stressLoadService,
+                _harveyFlashbackRescueService,
+                _harveySafePersonAuraService,
+                _stressMeterHudService,
+                _treatmentEpisodeService,
+                _gameLogicHandler);
 
             if (_config.EnableStressMcp)
             {
@@ -99,18 +108,51 @@ namespace HarveyStressMeter
             var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             _mcpCommandQueue.Enqueue((toolName, arguments, completion));
 
-            if (!completion.Task.Wait(TimeSpan.FromSeconds(30)))
-                return "Error: timeout waiting for game thread (30s). Is the game running?";
+            var timeout = ResolveMcpToolTimeout(toolName, arguments);
+            if (!completion.Task.Wait(timeout))
+            {
+                return toolName == "mcp_wait_seconds"
+                    ? $"Error: timeout waiting for mcp_wait_seconds ({timeout.TotalSeconds:0}s)."
+                    : "Error: timeout waiting for game thread (30s). Is the game running?";
+            }
 
             return completion.Task.GetAwaiter().GetResult();
         }
 
+        private static TimeSpan ResolveMcpToolTimeout(string toolName, JsonElement? arguments)
+        {
+            if (string.Equals(toolName, "mcp_warp", StringComparison.Ordinal))
+                return TimeSpan.FromSeconds(20);
+
+            if (!string.Equals(toolName, "mcp_wait_seconds", StringComparison.Ordinal))
+                return TimeSpan.FromSeconds(30);
+
+            if (arguments is { ValueKind: JsonValueKind.Object } args
+                && args.TryGetProperty("seconds", out var el)
+                && el.TryGetInt32(out var seconds)
+                && seconds >= 0)
+            {
+                return TimeSpan.FromSeconds(Math.Max(30, seconds + 15));
+            }
+
+            return TimeSpan.FromSeconds(30);
+        }
+
         private void OnProcessMcpCommandQueue(object? sender, StardewModdingAPI.Events.UpdateTickedEventArgs e)
         {
+            _mcpWaitService.Tick();
+            _mcpWarpService.Tick();
+
             while (_mcpCommandQueue.TryDequeue(out var item))
             {
                 try
                 {
+                    if (_mcpWaitService.TryHandle(item.Tool, item.Args, item.Completion))
+                        continue;
+
+                    if (_mcpWarpService.TryHandle(item.Tool, item.Args, item.Completion))
+                        continue;
+
                     item.Completion.TrySetResult(_stressMcpToolHandler!.Execute(item.Tool, item.Args));
                 }
                 catch (Exception ex)

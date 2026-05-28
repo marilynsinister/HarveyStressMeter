@@ -232,13 +232,16 @@ namespace HarveyStressMeter.Helpers
         /// <summary>Закрывает любое активное меню (в т.ч. DialogueBox на #$y) — для MCP cleanup.</summary>
         public static bool TryForceCloseDialogue(IMonitor monitor)
         {
-            if (Game1.activeClickableMenu == null)
-                return false;
+            var hadMenu = Game1.activeClickableMenu != null;
+            if (hadMenu)
+            {
+                var menuName = Game1.activeClickableMenu!.GetType().Name;
+                GameStateHelper.ForceCloseActiveMenu();
+                monitor.Log($"[DEV/TEST] force-closed menu: {menuName}", LogLevel.Info);
+            }
 
-            var menuName = Game1.activeClickableMenu.GetType().Name;
-            Game1.exitActiveMenu();
-            monitor.Log($"[DEV/TEST] force-closed menu: {menuName}", LogLevel.Info);
-            return true;
+            GameStateHelper.ClearStaleUiFlags();
+            return hadMenu;
         }
 
         public static int AdvanceDialogue(IMonitor monitor, int steps = 1)

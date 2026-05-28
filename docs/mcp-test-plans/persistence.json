@@ -1,0 +1,117 @@
+{
+  "name": "persistence",
+  "description": "Save/load persistence of stress state, recovery offset, rescue mod state.",
+  "notes": "mcp_save_game / mcp_reload_save пишут mod SaveData в CustomData слота (не полный SDV save).",
+  "tests": [
+    {
+      "id": "TC-PER-001",
+      "title": "Built-in plan persistence",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_debug_dump", "stress_load_debug"],
+      "snapshots_after": ["stress_debug_dump"],
+      "snapshots": ["stress_debug_dump", "stress_load_debug", "stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "persistence", "stop_on_fail": true },
+          "expect": ["ok: true", "plan: persistence", "failed: 0"]
+        }
+      ],
+      "assertions": [
+        "per-02: StressRecoveryOffset restored after reload",
+        "per-03: RescueTier and GotoroFlashback restored from mod save"
+      ]
+    },
+    {
+      "id": "TC-PER-002",
+      "title": "Recovery offset survives save/load",
+      "preconditions": ["Active stress causes", "recovery offset applied"],
+      "snapshots_before": ["stress_load_debug", "stress_debug_dump"],
+      "snapshots_after": ["stress_load_debug", "stress_debug_dump"],
+      "snapshots": ["stress_load_debug", "stress_debug_dump", "stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_apply_recovery", "arguments": { "amount": 15, "reason": "persistence-test" }, "expect": ["ok: true"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["StressRecoveryOffset:"] },
+        { "tool": "mcp_save_game", "arguments": {}, "expect": ["ok: true"] },
+        { "tool": "stress_apply_recovery", "arguments": { "amount": 50, "reason": "corrupt-before-reload" }, "expect": ["ok: true"] },
+        { "tool": "mcp_reload_save", "arguments": {}, "expect": ["ok: true"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["StressRecoveryOffset:"] }
+      ],
+      "assertions": [
+        "StressRecoveryOffset after reload matches saved value (>= 15)",
+        "Corrupted higher offset not kept after reload"
+      ]
+    },
+    {
+      "id": "TC-PER-003",
+      "title": "Rescue mod state persistence",
+      "preconditions": ["Rescue prepared via stress_rescue_force"],
+      "snapshots_before": ["stress_rescue_debug"],
+      "snapshots_after": ["stress_rescue_debug"],
+      "snapshots": ["stress_rescue_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": ["ok: true"] },
+        { "tool": "stress_rescue_debug", "arguments": {}, "expect": ["RescueTier:"] },
+        { "tool": "mcp_save_game", "arguments": {}, "expect": ["ok: true"] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": false }, "expect": [] },
+        { "tool": "mcp_reload_save", "arguments": {}, "expect": ["ok: true"] },
+        { "tool": "stress_rescue_debug", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["GotoroFlashbackActive:"] }
+      ],
+      "assertions": [
+        "RescueTier restored after reload",
+        "GotoroFlashbackActive matches saved state"
+      ]
+    },
+    {
+      "id": "TC-PER-004",
+      "title": "In-session state consistency (no save tools)",
+      "notes": "Проверка без save/reload — то что доступно сейчас.",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_debug_dump", "stress_load_debug"],
+      "snapshots_after": ["stress_debug_dump"],
+      "snapshots": ["stress_debug_dump", "stress_load_debug", "stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_apply_recovery", "arguments": { "amount": 12, "reason": "session-test" }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 80 }, "expect": [] },
+        { "tool": "stress_debug_dump", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["StressRecoveryOffset:"] },
+        { "tool": "stress_trust_debug", "arguments": {}, "expect": ["TrustPoints: 80"] },
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["StressRecoveryOffset: 0"] },
+        { "tool": "stress_trust_debug", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "Debug dump reflects combined stress+trust state before reset",
+        "stress_reset clears offset and treatments (trust may reset per mod reset rules — document)"
+      ]
+    },
+    {
+      "id": "TC-PER-005",
+      "title": "Gotoro flashback state round-trip in session",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_load_debug"],
+      "snapshots_after": ["mcp_has_topic"],
+      "snapshots": ["stress_load_debug", "mcp_has_topic", "stress_rescue_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true, "sync_topics": true }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": [] },
+        { "tool": "stress_rescue_clear", "arguments": {}, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": false, "sync_topics": true }, "expect": [] },
+        { "tool": "mcp_has_topic", "arguments": { "topic": "topicStressGotoroFlashbackActive" }, "expect": ["hasTopic: false"] }
+      ],
+      "assertions": [
+        "Flashback and pending topics cleaned in session",
+        "Severity returns toward Calm after gotoro off and reset causes"
+      ]
+    }
+  ]
+}

@@ -376,6 +376,10 @@ namespace HarveyStressMeter.Helpers
             target.RescueTier = source.RescueTier;
             target.PendingPostRescueTier = source.PendingPostRescueTier;
             target.PendingPostRescueEventId = source.PendingPostRescueEventId;
+            target.RescueTriggerLocation = source.RescueTriggerLocation;
+            target.RescueTriggerTileX = source.RescueTriggerTileX;
+            target.RescueTriggerTileY = source.RescueTriggerTileY;
+            target.PendingPositionRestore = source.PendingPositionRestore;
         }
 
         private static TreatmentEpisodeState? CloneTreatmentEpisodeState(TreatmentEpisodeState? source)

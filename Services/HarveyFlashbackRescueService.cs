@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Helpers;
@@ -24,6 +25,9 @@ namespace HarveyStressMeter.Services
         private StressSystemsCoordinator? _coordinator;
 
         private bool _rescueEventWasActive;
+
+        /// <summary>MCP test plans: block Update() from auto-starting rescue events mid-step.</summary>
+        public bool SuppressAutomaticRescue { get; set; }
 
         public HarveyFlashbackRescueService(
             SaveData data,
@@ -68,6 +72,10 @@ namespace HarveyStressMeter.Services
             State.LastRescueEventId = null;
             State.PendingPostRescueTier = null;
             State.PendingPostRescueEventId = null;
+            State.RescueTriggerLocation = null;
+            State.RescueTriggerTileX = 0;
+            State.RescueTriggerTileY = 0;
+            State.PendingPositionRestore = false;
             _rescueEventWasActive = false;
             ClearRescuePendingTopic();
         }
@@ -86,9 +94,10 @@ namespace HarveyStressMeter.Services
 
         public void Update(int elapsedSeconds = 1)
         {
-            if (!Context.IsWorldReady || !_config.EnableHarveyFlashbackRescue)
+            if (!Context.IsWorldReady || !_config.EnableHarveyFlashbackRescue || SuppressAutomaticRescue)
                 return;
 
+            TryRestorePendingPlayerPosition();
             TryCompletePendingPostRescue();
 
             if (elapsedSeconds <= 0)
@@ -222,6 +231,8 @@ namespace HarveyStressMeter.Services
             if (!ConversationHelper.HasTopic(TopicIds.GotoroForestRescuePending))
                 ConversationHelper.AddTopic(TopicIds.GotoroForestRescuePending, 0);
 
+            RescuePlayerPositionHelper.CaptureTriggerPosition(State);
+
             var started = EventStartHelper.TryStartRescueEvent(
                 location,
                 eventId,
@@ -279,10 +290,22 @@ namespace HarveyStressMeter.Services
             var tier = State.PendingPostRescueTier;
             var eventId = State.PendingPostRescueEventId ?? FlashbackRescueEventIds.ForTier(tier!);
             ApplyPostRescueEffects(tier!, eventId, usedFallback: false);
+            State.PendingPositionRestore = !string.IsNullOrEmpty(State.RescueTriggerLocation);
             State.PendingPostRescueTier = null;
             State.PendingPostRescueEventId = null;
             _rescueEventWasActive = false;
             ClearRescuePendingTopic();
+        }
+
+        private void TryRestorePendingPlayerPosition()
+        {
+            if (!State.PendingPositionRestore)
+                return;
+
+            if (GameStateHelper.IsEventActive() || Game1.dialogueUp)
+                return;
+
+            RescuePlayerPositionHelper.TryRestorePlayerPosition(State, _monitor, out _);
         }
 
         private void ApplyPostRescueEffects(string tier, string eventId, bool usedFallback)
@@ -525,6 +548,8 @@ namespace HarveyStressMeter.Services
             sb.AppendLine($"ForestSecondsBeforeRescue: {State.ForestSecondsBeforeRescue} (min {_config.MinForestSecondsBeforeRescue})");
             sb.AppendLine($"RescueTier: {State.RescueTier ?? "(none)"}");
             sb.AppendLine($"PendingPostRescue: {State.PendingPostRescueTier ?? "(none)"}");
+            sb.AppendLine($"PendingPositionRestore: {State.PendingPositionRestore}");
+            sb.AppendLine($"RescueTrigger: {State.RescueTriggerLocation ?? "(none)"} ({State.RescueTriggerTileX},{State.RescueTriggerTileY})");
             sb.AppendLine($"CanAttempt: {eval.CanAttempt}");
             sb.AppendLine($"BlockReason: {eval.BlockReason ?? "(none)"}");
             sb.AppendLine($"EvalTier: {eval.Tier ?? "(none)"}, base={eval.BaseRescueChance:P0}, trustBonus=+{eval.TrustRescueBonus:P0}, total={eval.RescueChance:P0}");
@@ -534,6 +559,251 @@ namespace HarveyStressMeter.Services
             sb.AppendLine($"Storm: {eval.StormWeather}, forest: {eval.InForest}, hearts: {eval.HarveyHearts}");
             return sb.ToString().TrimEnd();
         }
+
+        /// <summary>DEV/MCP: assert-friendly rescue snapshot (does not roll or trigger events).</summary>
+        public string BuildMcpSnapshot()
+        {
+            var eval = EvaluateRescue(ignoreChance: true);
+            var sb = new StringBuilder();
+            sb.AppendLine("ok: true");
+            sb.AppendLine($"GotoroFlashbackActive: {_data.StressLoad.GotoroFlashbackActive}");
+            sb.AppendLine($"FlashbackIsActive: {_thunderFlashbackService.State.IsActive}");
+            sb.AppendLine($"IsGotoroFlashback: {_thunderFlashbackService.State.IsGotoroFlashback}");
+            sb.AppendLine($"hasTopicStressGotoroFlashbackActive: {ConversationHelper.HasTopic(TopicIds.GotoroFlashbackActive)}");
+            sb.AppendLine($"hasTopicStressGotoroForestRescuePending: {ConversationHelper.HasTopic(TopicIds.GotoroForestRescuePending)}");
+            sb.AppendLine($"LocationName: {Game1.currentLocation?.NameOrUniqueName ?? Game1.currentLocation?.Name ?? "null"}");
+            sb.AppendLine($"IsForestLikeLocation: {GameStateHelper.IsForestShelterLocation()}");
+            sb.AppendLine($"SupportsForestRescueLocations: Forest, Woods, SecretWoods");
+            sb.AppendLine(FormatWeatherLine());
+            sb.AppendLine($"IsStorm: {GameStateHelper.IsStormWeather()}");
+            sb.AppendLine($"FriendshipPoints: {GetHarveyFriendshipPoints()}");
+            sb.AppendLine($"Hearts: {HarveyFriendshipHelper.GetHarveyHearts()}");
+            sb.AppendLine($"RelationshipStatus: {GetHarveyRelationshipStatus()}");
+            sb.AppendLine($"TrustLevel: {eval.TrustLevel}");
+            sb.AppendLine($"SafePersonUnlocked: {_trustService?.IsHarveySafePersonUnlocked() ?? false}");
+            sb.AppendLine($"ForestRescueUnlocked: {_trustService?.State.ForestRescueUnlocked ?? false}");
+            sb.AppendLine($"LastRescueDay: {State.LastRescueDay}");
+            sb.AppendLine($"CooldownDays: {_config.RescueCooldownDays}");
+            sb.AppendLine($"CooldownElapsed: {IsCooldownElapsed()}");
+            sb.AppendLine($"FestivalDay: {IsFestivalDay()}");
+            sb.AppendLine($"ForestSecondsBeforeRescue: {State.ForestSecondsBeforeRescue}");
+            sb.AppendLine($"MinForestSecondsBeforeRescue: {_config.MinForestSecondsBeforeRescue}");
+            sb.AppendLine($"RescueTriggeredToday: {State.HarveyRescueTriggeredToday}");
+            sb.AppendLine($"CanAttempt: {eval.CanAttempt}");
+            sb.AppendLine($"BlockReason: {eval.BlockReason ?? "(none)"}");
+            sb.AppendLine($"CandidateTier: {eval.Tier ?? "(none)"}");
+            sb.AppendLine($"RescueChance: {eval.RescueChance:0.###}");
+            sb.AppendLine($"BaseChance: {eval.BaseRescueChance:0.###}");
+            sb.AppendLine($"TrustBonus: {eval.TrustRescueBonus:0.###}");
+            sb.AppendLine($"FinalChance: {eval.RescueChance:0.###}");
+            sb.AppendLine($"CandidateEventId: {(eval.Tier != null ? FlashbackRescueEventIds.ForTier(eval.Tier) : "(none)")}");
+            sb.AppendLine($"Enabled: {_config.EnableHarveyFlashbackRescue}");
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>DEV/MCP: evaluate rescue conditions; optional random roll without triggering event.</summary>
+        public RescueRollEvaluation EvaluateRescueWithRoll(bool ignoreChance = false)
+        {
+            var eval = EvaluateRescue(ignoreChance: true);
+            var result = new RescueRollEvaluation { Evaluation = eval };
+
+            if (!eval.CanAttempt)
+                return result;
+
+            if (ignoreChance)
+            {
+                result.RollPerformed = false;
+                result.PassedRoll = true;
+                return result;
+            }
+
+            var roll = Game1.random.NextDouble();
+            result.RollPerformed = true;
+            result.RollValue = roll;
+            result.PassedRoll = roll <= eval.RescueChance;
+            return result;
+        }
+
+        /// <summary>DEV/MCP: prepare rescue topics/state for CP without starting the event.</summary>
+        public RescuePrepareResult PrepareRescueDebug(string? tierArg, bool force)
+        {
+            var result = new RescuePrepareResult
+            {
+                TopicsBeforeFlashback = ConversationHelper.HasTopic(TopicIds.GotoroFlashbackActive),
+                TopicsBeforePending = ConversationHelper.HasTopic(TopicIds.GotoroForestRescuePending),
+            };
+
+            var naturalTier = HarveyFriendshipHelper.ResolveRescueTier(_config.MinHeartsForForestRescue);
+            var resolvedTier = ResolveRequestedTier(tierArg, naturalTier);
+            result.Tier = resolvedTier ?? naturalTier;
+            result.NaturalTier = naturalTier;
+
+            if (resolvedTier != null
+                && naturalTier != null
+                && !string.Equals(resolvedTier, naturalTier, StringComparison.Ordinal))
+            {
+                result.Warning =
+                    $"requested tier '{resolvedTier}' does not match relationship tier '{naturalTier}'";
+            }
+
+            if (!force)
+            {
+                var eval = EvaluateRescue(ignoreChance: true);
+                result.CanAttempt = eval.CanAttempt;
+                result.BlockReason = eval.BlockReason;
+                FillPrepareSnapshots(result);
+                return result;
+            }
+
+            EnsureGotoroFlashbackContextForMcp();
+
+            if (!ConversationHelper.HasTopic(TopicIds.GotoroFlashbackActive))
+                Game1.player.activeDialogueEvents[TopicIds.GotoroFlashbackActive] = 0;
+
+            if (!ConversationHelper.HasTopic(TopicIds.GotoroForestRescuePending))
+                Game1.player.activeDialogueEvents[TopicIds.GotoroForestRescuePending] = 0;
+
+            State.ForestSecondsBeforeRescue = Math.Max(
+                State.ForestSecondsBeforeRescue,
+                _config.MinForestSecondsBeforeRescue);
+
+            if (result.Tier != null)
+                State.RescueTier = result.Tier;
+
+            var postEval = EvaluateRescue(ignoreChance: true);
+            result.CanAttempt = postEval.CanAttempt;
+            result.BlockReason = postEval.BlockReason;
+            FillPrepareSnapshots(result);
+            return result;
+        }
+
+        /// <summary>DEV/MCP: remove rescue pending topic only (Gotoro flashback state unchanged).</summary>
+        public void ClearRescuePendingForMcp()
+            => ClearRescuePendingTopic();
+
+        private void EnsureGotoroFlashbackContextForMcp()
+        {
+            _stressLoadService.SetGotoroFlashbackActive(true);
+
+            if (!_thunderFlashbackService.State.IsActive
+                || !_thunderFlashbackService.State.IsGotoroFlashback)
+            {
+                _thunderFlashbackService.State.IsActive = true;
+                _thunderFlashbackService.State.IsGotoroFlashback = true;
+                _thunderFlashbackService.State.WasTriggeredToday = true;
+                _thunderFlashbackService.State.TriggerLocation =
+                    Game1.currentLocation?.NameOrUniqueName ?? Game1.currentLocation?.Name;
+                _thunderFlashbackService.State.TriggerTime = Game1.timeOfDay;
+            }
+        }
+
+        private string? ResolveRequestedTier(string? tierArg, string? naturalTier)
+        {
+            if (string.IsNullOrWhiteSpace(tierArg)
+                || string.Equals(tierArg, "auto", StringComparison.OrdinalIgnoreCase))
+            {
+                return naturalTier;
+            }
+
+            return FlashbackRescueTiers.TryParse(tierArg, out var parsed) ? parsed : null;
+        }
+
+        private void FillPrepareSnapshots(RescuePrepareResult result)
+        {
+            result.TopicsAfterFlashback = ConversationHelper.HasTopic(TopicIds.GotoroFlashbackActive);
+            result.TopicsAfterPending = ConversationHelper.HasTopic(TopicIds.GotoroForestRescuePending);
+            result.LocationName = Game1.currentLocation?.NameOrUniqueName ?? Game1.currentLocation?.Name ?? "null";
+            result.IsForestLikeLocation = GameStateHelper.IsForestShelterLocation();
+            result.Weather = FormatWeatherSummary();
+            result.IsStorm = GameStateHelper.IsStormWeather();
+            result.Hearts = HarveyFriendshipHelper.GetHarveyHearts();
+            result.RelationshipStatus = GetHarveyRelationshipStatus();
+            result.FriendshipPoints = GetHarveyFriendshipPoints();
+        }
+
+        private static string FormatWeatherLine()
+        {
+            var parts = new List<string>();
+            if (Game1.isRaining)
+                parts.Add("rain");
+            if (Game1.isLightning)
+                parts.Add("storm");
+            if (Game1.isSnowing)
+                parts.Add("snow");
+            if (Game1.isDebrisWeather)
+                parts.Add("wind");
+            if (parts.Count == 0)
+                parts.Add("sun");
+            return $"Weather: {string.Join(",", parts)}";
+        }
+
+        private static string FormatWeatherSummary()
+        {
+            if (Game1.isLightning)
+                return "storm";
+            if (Game1.isRaining)
+                return "rain";
+            if (Game1.isSnowing)
+                return "snow";
+            if (Game1.isDebrisWeather)
+                return "wind";
+            return "sun";
+        }
+
+        private static int GetHarveyFriendshipPoints()
+            => Game1.player.friendshipData.TryGetValue("Harvey", out var friendship)
+                ? friendship.Points
+                : 0;
+
+        private static string GetHarveyRelationshipStatus()
+        {
+            if (HarveyFriendshipHelper.IsMarriedToHarvey())
+                return "Married";
+            if (HarveyFriendshipHelper.IsDatingHarvey())
+                return "Dating";
+            return "none";
+        }
+
+        private static bool IsFestivalDay()
+        {
+            try
+            {
+                return Game1.isFestival();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    public sealed class RescueRollEvaluation
+    {
+        public RescueEvaluation Evaluation { get; init; } = new();
+        public bool RollPerformed { get; set; }
+        public double? RollValue { get; set; }
+        public bool? PassedRoll { get; set; }
+        public bool PendingTopicAdded => false;
+    }
+
+    public sealed class RescuePrepareResult
+    {
+        public string? Tier { get; set; }
+        public string? NaturalTier { get; set; }
+        public string? Warning { get; set; }
+        public bool CanAttempt { get; set; }
+        public string? BlockReason { get; set; }
+        public bool TopicsBeforeFlashback { get; set; }
+        public bool TopicsBeforePending { get; set; }
+        public bool TopicsAfterFlashback { get; set; }
+        public bool TopicsAfterPending { get; set; }
+        public string? LocationName { get; set; }
+        public bool IsForestLikeLocation { get; set; }
+        public string? Weather { get; set; }
+        public bool IsStorm { get; set; }
+        public int Hearts { get; set; }
+        public int FriendshipPoints { get; set; }
+        public string? RelationshipStatus { get; set; }
     }
 
     public sealed class RescueEvaluation

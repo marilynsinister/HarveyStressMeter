@@ -28,6 +28,8 @@ namespace HarveyStressMeter.Helpers
                 sb.AppendLine($"speak Harvey \"{Escape(speak)}\"/");
 
             sb.AppendLine("pause 400/");
+            sb.AppendLine("stopIgnoringCollisions farmer/");
+            sb.AppendLine("stopIgnoringCollisions Harvey/");
             sb.AppendLine($"end dialogue Harvey \"{Escape(GetClosingLine(tier))}\"");
 
             return sb.ToString().TrimEnd();

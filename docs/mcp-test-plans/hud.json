@@ -1,0 +1,84 @@
+{
+  "name": "hud",
+  "description": "Stress Meter HUD: visibility, load bar, severity, causes, episode overlay.",
+  "notes": "stress_hud_snapshot read-only. visible зависит от ModConfig.ShowStressMeter и ShowOnlyWhenStressed.",
+  "tests": [
+    {
+      "id": "TC-HUD-001",
+      "title": "HUD baseline after reset (calm)",
+      "preconditions": ["Save loaded", "stress_reset done"],
+      "snapshots_before": ["stress_hud_snapshot"],
+      "snapshots_after": ["stress_hud_snapshot", "stress_load_debug"],
+      "snapshots": ["stress_hud_snapshot", "stress_load_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_hud_snapshot", "arguments": {}, "expect": ["ok: true", "currentStressLoad:", "severity:"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Severity:"] }
+      ],
+      "assertions": [
+        "HUD severity matches stress_load_debug Severity",
+        "barPercent between 0 and 1",
+        "activeCauses empty or (none) when no debuffs"
+      ]
+    },
+    {
+      "id": "TC-HUD-002",
+      "title": "HUD reflects multi-cause stress",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_hud_snapshot"],
+      "snapshots_after": ["stress_hud_snapshot", "stress_load_debug"],
+      "snapshots": ["stress_hud_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTooCold" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_hud_snapshot", "arguments": {}, "expect": ["currentStressLoad:", "activeCauses:"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["activeCauseCount:"] }
+      ],
+      "assertions": [
+        "HUD currentStressLoad equals load_debug CurrentStressLoad",
+        "HUD activeCauses lists at least 3 causes",
+        "compactMeterVisible true when load above mild threshold OR config allows always-on"
+      ]
+    },
+    {
+      "id": "TC-HUD-003",
+      "title": "HUD + treatment snapshot consistency",
+      "preconditions": ["Active debuff present"],
+      "snapshots_before": ["stress_hud_snapshot", "stress_treatment_snapshot"],
+      "snapshots_after": ["stress_hud_snapshot", "stress_treatment_snapshot"],
+      "snapshots": ["stress_hud_snapshot", "stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_force_recalculate", "arguments": {}, "expect": [] },
+        { "tool": "stress_hud_snapshot", "arguments": {}, "expect": ["primaryCause:", "activeTreatmentId:"] },
+        { "tool": "stress_treatment_snapshot", "arguments": {}, "expect": ["ActiveDebuffs:", "buffStressOverwork"] }
+      ],
+      "assertions": [
+        "activeTreatmentId buffStressOverwork or (none) if not started",
+        "primaryCause maps to Overwork cause when debuff active"
+      ]
+    },
+    {
+      "id": "TC-HUD-004",
+      "title": "HUD after Gotoro critical severity",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_hud_snapshot"],
+      "snapshots_after": ["stress_hud_snapshot", "stress_load_debug"],
+      "snapshots": ["stress_hud_snapshot", "stress_load_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true, "sync_topics": true }, "expect": ["Severity: Critical"] },
+        { "tool": "stress_hud_snapshot", "arguments": {}, "expect": ["severity: Critical"] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": false, "sync_topics": true }, "expect": [] }
+      ],
+      "assertions": [
+        "HUD severity Critical when Gotoro flashback active",
+        "candidateEpisode may show GotoroFlashback in load debug"
+      ]
+    }
+  ]
+}

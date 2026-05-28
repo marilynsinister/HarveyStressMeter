@@ -1,0 +1,124 @@
+{
+  "name": "social_topics",
+  "description": "Friendship, relationship, NPC placement, conversation topics для trust/rescue/treatment.",
+  "notes": "Topics синхронизируются stress_gotoro_set_active sync_topics. Treatment topics ставятся при старте лечения.",
+  "tests": [
+    {
+      "id": "TC-SOC-001",
+      "title": "Friendship get/set Harvey",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_trust_debug"],
+      "snapshots": ["stress_trust_debug", "mcp_get_friendship via stress debug"],
+      "steps": [
+        { "tool": "stress_trust_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_get_friendship", "arguments": { "npc": "Harvey" }, "expect": ["ok: true", "points:"] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 1750, "relationship": "none" }, "expect": ["ok: true", "heartsApprox:"] },
+        { "tool": "mcp_get_friendship", "arguments": { "npc": "Harvey" }, "expect": ["points: 1750"] }
+      ],
+      "assertions": [
+        "Friendship points persist until reset",
+        "Trust EffectiveTrustLevel reflects relationship cap"
+      ]
+    },
+    {
+      "id": "TC-SOC-002",
+      "title": "Relationship Dating and Married",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_trust_debug"],
+      "snapshots_after": ["stress_rescue_debug"],
+      "snapshots": ["stress_trust_debug", "stress_rescue_debug"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_relationship", "arguments": { "npc": "Harvey", "relationship": "Dating" }, "expect": ["relationship: Dating"] },
+        { "tool": "stress_trust_debug", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_relationship", "arguments": { "npc": "Harvey", "relationship": "Married" }, "expect": ["relationship: Married"] },
+        { "tool": "stress_rescue_debug", "arguments": {}, "expect": ["relationshipStatus:"] }
+      ],
+      "assertions": [
+        "Rescue tier prefers Dating/Married over HighTrust when relationship set",
+        "Invalid relationship returns Error"
+      ]
+    },
+    {
+      "id": "TC-SOC-003",
+      "title": "Place Harvey near player",
+      "preconditions": ["No event/menu"],
+      "snapshots_before": ["stress_game_context"],
+      "snapshots_after": ["stress_safe_aura_status"],
+      "snapshots": ["stress_game_context", "stress_safe_aura_status"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "points": 1750 }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 160 }, "expect": [] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Town", "x": 46, "y": 57 }, "expect": ["ok: true", "newTile:"] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town", "x": 47, "y": 57 }, "expect": [] },
+        { "tool": "stress_safe_aura_status", "arguments": {}, "expect": ["harveyNearby:", "distanceToHarvey:"] }
+      ],
+      "assertions": [
+        "Harvey newLocation Town",
+        "distanceToHarvey within aura max when unlocked"
+      ]
+    },
+    {
+      "id": "TC-SOC-004",
+      "title": "Gotoro topic sync via stress_gotoro_set_active",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["mcp_list_topics"],
+      "snapshots_after": ["mcp_has_topic"],
+      "snapshots": ["mcp_list_topics", "mcp_has_topic"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true, "sync_topics": true }, "expect": ["hasFlashbackTopic: True"] },
+        { "tool": "mcp_has_topic", "arguments": { "topic": "topicStressGotoroFlashbackActive" }, "expect": ["hasTopic: true"] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": false, "sync_topics": true }, "expect": ["hasFlashbackTopic: False"] },
+        { "tool": "mcp_has_topic", "arguments": { "topic": "topicStressGotoroFlashbackActive" }, "expect": ["hasTopic: false"] }
+      ],
+      "assertions": [
+        "Flashback topic added/removed with sync_topics",
+        "Load debug GotoroFlashbackActive matches topic state"
+      ]
+    },
+    {
+      "id": "TC-SOC-005",
+      "title": "Manual topic add/remove",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["mcp_list_topics"],
+      "snapshots_after": ["mcp_has_topic"],
+      "snapshots": ["mcp_list_topics", "mcp_has_topic"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_add_topic", "arguments": { "topic": "topicStressTestMcpOnly", "days": 1 }, "expect": ["ok: true"] },
+        { "tool": "mcp_has_topic", "arguments": { "topic": "topicStressTestMcpOnly" }, "expect": ["hasTopic: true"] },
+        { "tool": "mcp_remove_topic", "arguments": { "topic": "topicStressTestMcpOnly" }, "expect": [] },
+        { "tool": "mcp_has_topic", "arguments": { "topic": "topicStressTestMcpOnly" }, "expect": ["hasTopic: false"] }
+      ],
+      "assertions": [
+        "Topic round-trip without corrupting treatment topics",
+        "stress_reset clears mod topics but not vanilla"
+      ]
+    },
+    {
+      "id": "TC-SOC-006",
+      "title": "Rescue pending topic lifecycle",
+      "preconditions": ["Forest storm rescue setup"],
+      "snapshots_before": ["stress_rescue_debug"],
+      "snapshots_after": ["mcp_has_topic"],
+      "snapshots": ["stress_rescue_debug", "mcp_has_topic"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true, "sync_topics": true }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": ["topicsPendingAfter:"] },
+        { "tool": "mcp_has_topic", "arguments": { "topic": "topicStressGotoroForestRescuePending" }, "expect": [] },
+        { "tool": "stress_rescue_clear", "arguments": {}, "expect": [] },
+        { "tool": "mcp_has_topic", "arguments": { "topic": "topicStressGotoroForestRescuePending" }, "expect": ["hasTopic: false"] }
+      ],
+      "assertions": [
+        "stress_rescue_clear removes pending topic only",
+        "Flashback topic may remain until gotoro_set_active false"
+      ]
+    }
+  ]
+}

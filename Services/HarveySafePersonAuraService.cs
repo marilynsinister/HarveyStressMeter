@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Helpers;
 using HarveyStressMeter.Models;
@@ -159,10 +160,93 @@ namespace HarveyStressMeter.Services
             TryShowAuraMessage();
         }
 
+        /// <summary>DEV/MCP: machine-readable safe aura snapshot (read-only).</summary>
+        public string BuildMcpSnapshot()
+        {
+            var eval = EvaluateProximity();
+            var harvey = Game1.getCharacterFromName("Harvey");
+            var reduction = CalculateStressReduction();
+            var flashbackMult = GetActiveFlashbackStabilizationMultiplier();
+            var sb = new StringBuilder();
+            sb.AppendLine("ok: true");
+            sb.AppendLine($"unlocked: {_trustService.IsHarveySafePersonUnlocked()}");
+            sb.AppendLine($"enabled: {_config.EnableHarveySafePersonAura}");
+            sb.AppendLine($"active: {eval.SafeAuraActive}");
+            sb.AppendLine($"harveyNearby: {eval.HarveyNearby}");
+            sb.AppendLine($"reasonInactive: {ResolveInactiveReason(eval)}");
+            sb.AppendLine($"playerLocation: {Game1.currentLocation?.NameOrUniqueName ?? Game1.currentLocation?.Name ?? "null"}");
+            sb.AppendLine($"harveyLocation: {harvey?.currentLocation?.NameOrUniqueName ?? harvey?.currentLocation?.Name ?? "(not loaded)"}");
+            sb.AppendLine($"distanceToHarvey: {FormatDistance(eval.DistanceTiles)}");
+            sb.AppendLine($"maxDistance: {eval.EffectiveMaxDistanceTiles:0.###}");
+            sb.AppendLine($"trustPoints: {_trustService.State.TrustPoints}");
+            sb.AppendLine($"effectiveTrustLevel: {_trustService.GetTrustLevel()} ({HarveyCareTrustLevels.GetDisplayName(_trustService.GetTrustLevel())})");
+            sb.AppendLine($"relationshipStatus: {GetRelationshipStatus()}");
+            sb.AppendLine($"currentStressLoad: {_stressLoadService.GetCurrentStressLoad()}");
+            sb.AppendLine($"recoveryOffset: {_stressLoadService.GetStressRecoveryOffset()}");
+            sb.AppendLine($"expectedRecoveryPerTick: {reduction}");
+            sb.AppendLine($"decayIntervalMinutes: {_config.SafeAuraDecayIntervalMinutes}");
+            sb.AppendLine($"flashbackStabilizationMultiplier: {flashbackMult:0.###}");
+            sb.AppendLine($"flashbackStabilizationInsteadOfDecay: {ShouldApplyFlashbackStabilizationInsteadOfDecay()}");
+            sb.AppendLine($"shelterSecondsPerDecayPoint: {ShelterSecondsPerDecayPoint}");
+            sb.AppendLine($"lastAppliedAt: {FormatLastAppliedAt()}");
+            sb.AppendLine($"lastDecayAmount: {State.LastDecayAmount}");
+            sb.AppendLine($"lastProcessTime: {State.LastProcessTime}");
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>DEV/MCP: run one safe aura tick when context is safe (no event/menu/dialogue).</summary>
+        public SafeAuraForceTickResult DebugForceTick()
+        {
+            var result = new SafeAuraForceTickResult
+            {
+                BlockReason = GetForceTickBlockReason(),
+            };
+
+            if (result.BlockReason != null)
+                return result;
+
+            var evalBefore = EvaluateProximity();
+            result.LoadBefore = _stressLoadService.GetCurrentStressLoad();
+            result.OffsetBefore = _stressLoadService.GetStressRecoveryOffset();
+            result.AuraActiveBefore = evalBefore.SafeAuraActive;
+            result.ShelterSecondsBefore = _thunderFlashbackService.State.ForestShelterSeconds;
+
+            ProcessSafeAuraTick();
+
+            var evalAfter = EvaluateProximity();
+            result.LoadAfter = _stressLoadService.GetCurrentStressLoad();
+            result.OffsetAfter = _stressLoadService.GetStressRecoveryOffset();
+            result.AuraActiveAfter = evalAfter.SafeAuraActive;
+            result.AppliedRecovery = State.LastDecayAmount;
+            result.ShelterSecondsAfter = _thunderFlashbackService.State.ForestShelterSeconds;
+            result.AppliedShelterBonusSeconds = Math.Max(
+                0,
+                result.ShelterSecondsAfter - result.ShelterSecondsBefore);
+            result.Applied = true;
+            return result;
+        }
+
+        public string? GetForceTickBlockReason()
+        {
+            if (!_config.EnableHarveySafePersonAura)
+                return "disabled";
+
+            if (GameStateHelper.IsEventActive())
+                return "event_active";
+
+            if (Game1.dialogueUp)
+                return "dialogue_active";
+
+            if (Game1.activeClickableMenu != null)
+                return "menu_active";
+
+            return null;
+        }
+
         public string BuildDebugSnapshot()
         {
             var eval = EvaluateProximity();
-            var sb = new System.Text.StringBuilder();
+            var sb = new StringBuilder();
             sb.AppendLine("=== HarveySafePersonAura ===");
             sb.AppendLine($"Enabled: {_config.EnableHarveySafePersonAura}");
             sb.AppendLine($"Harvey nearby: {eval.HarveyNearby}");
@@ -288,5 +372,57 @@ namespace HarveyStressMeter.Services
 
             return Math.Abs(newTime - oldTime) >= interval || newTime % interval == 0;
         }
+
+        private static string ResolveInactiveReason(HarveyProximityEvaluation eval)
+        {
+            if (!eval.AuraEnabled)
+                return "disabled";
+
+            if (!eval.HarveyInSameLocation)
+                return "harvey_not_in_location";
+
+            if (!eval.HarveyNearby)
+                return eval.BlockReason ?? "distance";
+
+            return eval.BlockReason ?? "(none)";
+        }
+
+        private static string FormatDistance(float distanceTiles)
+            => distanceTiles >= 0 ? distanceTiles.ToString("0.###") : "(n/a)";
+
+        private static string GetRelationshipStatus()
+        {
+            if (HarveyFriendshipHelper.IsMarriedToHarvey())
+                return "Married";
+
+            if (HarveyFriendshipHelper.IsDatingHarvey())
+                return "Dating";
+
+            return "none";
+        }
+
+        private string FormatLastAppliedAt()
+        {
+            if (State.LastProcessTime <= 0)
+                return "(never)";
+
+            return State.LastProcessTime.ToString();
+        }
+    }
+
+    public sealed class SafeAuraForceTickResult
+    {
+        public bool Applied { get; set; }
+        public string? BlockReason { get; set; }
+        public int LoadBefore { get; set; }
+        public int LoadAfter { get; set; }
+        public int OffsetBefore { get; set; }
+        public int OffsetAfter { get; set; }
+        public bool AuraActiveBefore { get; set; }
+        public bool AuraActiveAfter { get; set; }
+        public int AppliedRecovery { get; set; }
+        public int ShelterSecondsBefore { get; set; }
+        public int ShelterSecondsAfter { get; set; }
+        public int AppliedShelterBonusSeconds { get; set; }
     }
 }

@@ -1,0 +1,106 @@
+{
+  "name": "events",
+  "description": "CP event MCP tooling: snapshot, start, advance, end — без полного прогона сценария rescue.",
+  "notes": "Опасные event flows запускай с force:true и всегда завершай mcp_end_event. Не параллельно с dialogue tools.",
+  "tests": [
+    {
+      "id": "TC-EVT-001",
+      "title": "Event snapshot baseline",
+      "preconditions": ["Save loaded", "No event"],
+      "snapshots_before": ["mcp_event_snapshot"],
+      "snapshots_after": ["mcp_event_snapshot", "stress_game_context"],
+      "snapshots": ["mcp_event_snapshot", "stress_game_context"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_event_snapshot", "arguments": {}, "expect": ["eventActive: false"] },
+        { "tool": "stress_game_context", "arguments": {}, "expect": ["EventActive=false"] }
+      ],
+      "assertions": [
+        "playerCanMove true when no event",
+        "eventId null or empty"
+      ]
+    },
+    {
+      "id": "TC-EVT-002",
+      "title": "Start and force-end rescue event",
+      "preconditions": ["Forest location", "No other event"],
+      "snapshots_before": ["mcp_event_snapshot"],
+      "snapshots_after": ["mcp_event_snapshot"],
+      "snapshots": ["mcp_event_snapshot", "stress_game_context"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": [] },
+        { "tool": "mcp_start_event", "arguments": { "event_id": "HarveyStress_GotoroForestRescue_HighTrust", "force": true }, "expect": ["started:"] },
+        { "tool": "mcp_event_snapshot", "arguments": {}, "expect": ["eventActive: true"] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": ["Error:"] },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": ["ended: true"] },
+        { "tool": "mcp_event_snapshot", "arguments": {}, "expect": ["eventActive: false"] }
+      ],
+      "assertions": [
+        "Dialogue tools blocked during event",
+        "Event ends cleanly with force",
+        "stress_game_context EventActive=false after end"
+      ]
+    },
+    {
+      "id": "TC-EVT-003",
+      "title": "Event advance steps",
+      "preconditions": ["Rescue event started"],
+      "snapshots_before": ["mcp_event_snapshot"],
+      "snapshots_after": ["mcp_event_snapshot"],
+      "snapshots": ["mcp_event_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "MidTrust", "force": true }, "expect": [] },
+        { "tool": "mcp_start_event", "arguments": { "event_id": "HarveyStress_GotoroForestRescue_MidTrust", "force": true }, "expect": [] },
+        { "tool": "mcp_event_advance", "arguments": { "steps": 10, "force": true }, "expect": [] },
+        { "tool": "mcp_event_snapshot", "arguments": {}, "expect": [] },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": [] }
+      ],
+      "assertions": [
+        "Advance does not crash",
+        "eventCurrentCommand or similar progresses in snapshot"
+      ]
+    },
+    {
+      "id": "TC-EVT-004",
+      "title": "Start event with location warp arg",
+      "preconditions": ["Player not in Forest"],
+      "snapshots_before": ["mcp_event_snapshot"],
+      "snapshots_after": ["mcp_event_snapshot"],
+      "snapshots": ["mcp_event_snapshot", "stress_game_context"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town" }, "expect": [] },
+        { "tool": "stress_rescue_force", "arguments": { "tier": "HighTrust", "force": true }, "expect": [] },
+        {
+          "tool": "mcp_start_event",
+          "arguments": { "event_id": "HarveyStress_GotoroForestRescue_HighTrust", "location": "Forest", "force": true },
+          "expect": ["started:"]
+        },
+        { "tool": "mcp_end_event", "arguments": { "force": true }, "expect": [] }
+      ],
+      "assertions": [
+        "Warp section in start response when location arg provided",
+        "Event starts from Forest even if player was in Town"
+      ]
+    },
+    {
+      "id": "TC-EVT-005",
+      "title": "Unknown event id",
+      "preconditions": ["No event active"],
+      "snapshots_before": ["mcp_event_snapshot"],
+      "snapshots_after": ["mcp_event_snapshot"],
+      "snapshots": ["mcp_event_snapshot"],
+      "steps": [
+        { "tool": "mcp_start_event", "arguments": { "event_id": "HarveyStress_NotARealEvent", "force": true }, "expect": ["started: false"] }
+      ],
+      "assertions": [
+        "started false or Error for unknown event",
+        "eventActive remains false"
+      ]
+    }
+  ]
+}

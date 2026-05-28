@@ -1,0 +1,149 @@
+{
+  "name": "quests",
+  "description": "Treatment quest lifecycle: start, progress, complete via MCP tools.",
+  "notes": "Tools mcp_eat_item, mcp_sleep, stress_force_start реализованы в MCP.",
+  "tests": [
+    {
+      "id": "TC-QST-001",
+      "title": "Built-in plan quests",
+      "preconditions": ["Save loaded"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "quests", "stop_on_fail": true },
+          "expect": ["ok: true", "plan: quests", "failed: 0"]
+        }
+      ],
+      "assertions": [
+        "qst-01: Tired treatment started with quest in journal",
+        "qst-02: Hunger AwaitingHarveyReview after eat",
+        "qst-03: NoSleep AwaitingHarveyReview after early sleep"
+      ]
+    },
+    {
+      "id": "TC-QST-002",
+      "title": "Force start treatment quest",
+      "preconditions": ["stress_reset", "Tired debuff active"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        {
+          "tool": "stress_force_start",
+          "arguments": { "buff_id": "buffStressTired" },
+          "expect": ["ok: true", "TreatmentStarted: True"]
+        }
+      ],
+      "assertions": [
+        "TreatmentStarted=true and quest in journal",
+        "QuestInJournal: True in tool output"
+      ]
+    },
+    {
+      "id": "TC-QST-003",
+      "title": "Simulate eat for Hunger quest objective",
+      "preconditions": ["Hunger treatment started"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_force_start", "arguments": { "buff_id": "buffStressHunger" }, "expect": ["ok: true"] },
+        {
+          "tool": "mcp_eat_item",
+          "arguments": { "item_category": "food" },
+          "expect": ["ok: true", "AwaitingHarveyReview: True"]
+        }
+      ],
+      "assertions": [
+        "AteAnyFood true after mcp_eat_item",
+        "Hunger quest marked ready for Harvey review"
+      ]
+    },
+    {
+      "id": "TC-QST-004",
+      "title": "Simulate sleep for NoSleep quest",
+      "preconditions": ["NoSleep treatment started"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressNoSleep" }, "expect": [] },
+        { "tool": "stress_force_start", "arguments": { "buff_id": "buffStressNoSleep" }, "expect": ["ok: true"] },
+        {
+          "tool": "mcp_sleep",
+          "arguments": { "time": 2200 },
+          "expect": ["ok: true", "AwaitingHarveyReview: True"]
+        }
+      ],
+      "assertions": [
+        "earlySleepWindow true at time 2200",
+        "No duplicate quest ids in journal"
+      ]
+    },
+    {
+      "id": "TC-QST-005",
+      "title": "Treatment snapshot after debuff (pre-quest)",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot", "stress_debug_dump"],
+      "snapshots": ["stress_treatment_snapshot", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        { "tool": "stress_treatment_snapshot", "arguments": {}, "expect": ["buffStressTired", "TreatmentStarted: False"] },
+        { "tool": "stress_debug_dump", "arguments": {}, "expect": ["ActiveTreatments:"] }
+      ],
+      "assertions": [
+        "Debuff present but TreatmentStarted false until dialogue consent",
+        "No quest in journal until treatment starts"
+      ]
+    },
+    {
+      "id": "TC-QST-006",
+      "title": "Remove debuff clears treatment state",
+      "preconditions": ["Active debuff"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": [] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressHunger" }, "expect": ["Removed stress state"] },
+        { "tool": "stress_treatment_snapshot", "arguments": {}, "expect": [] }
+      ],
+      "assertions": [
+        "ActiveTreatments count 0 after remove",
+        "Related stress topics cleared per buff report"
+      ]
+    },
+    {
+      "id": "TC-QST-007",
+      "title": "Multi-debuff treatment isolation",
+      "preconditions": ["stress_reset done"],
+      "snapshots_before": ["stress_treatment_snapshot"],
+      "snapshots_after": ["stress_treatment_snapshot"],
+      "snapshots": ["stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressLonely" }, "expect": [] },
+        { "tool": "stress_treatment_snapshot", "arguments": {}, "expect": ["ActiveDebuffs:"] },
+        { "tool": "stress_remove_debuff", "arguments": { "buff_id": "buffStressTired" }, "expect": [] },
+        { "tool": "stress_treatment_snapshot", "arguments": {}, "expect": ["buffStressLonely"] }
+      ],
+      "assertions": [
+        "Removing one debuff leaves others intact",
+        "No cross-contamination of treatment keys"
+      ]
+    }
+  ]
+}

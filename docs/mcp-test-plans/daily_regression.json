@@ -1,0 +1,87 @@
+{
+  "name": "daily_regression",
+  "description": "Ежедневный композитный регресс HarveyStressMeter: smoke, load, recovery, trust, gotoro evaluate, safe aura.",
+  "notes": "Перед каждым тестом (кроме первого sanity) выполняй stress_reset. Snapshots before/after — обязательные вызовы tools из snapshots_before и snapshots_after.",
+  "tests": [
+    {
+      "id": "TC-DR-001",
+      "title": "Sanity: world ready and clean context",
+      "notes": "Базовая проверка перед регрессией.",
+      "preconditions": ["Save loaded", "EnableStressMcp=true"],
+      "snapshots_before": ["stress_game_context", "stress_debug_dump"],
+      "snapshots_after": ["stress_game_context", "stress_debug_dump"],
+      "snapshots": ["stress_game_context", "stress_debug_dump", "stress_load_debug", "stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_game_context", "arguments": {}, "expect": ["EventActive=false"] },
+        { "tool": "stress_reset", "arguments": {}, "expect": ["Applied", "ActiveTreatments count: 0"] }
+      ],
+      "assertions": [
+        "stress_debug_dump contains WorldReady: true",
+        "SummaryFlags does not contain EVENT_ACTIVE after reset"
+      ]
+    },
+    {
+      "id": "TC-DR-002",
+      "title": "Built-in plan daily_regression",
+      "notes": "Обёртка над stress_run_test_plan; dialogues/all_debuffs/persistence внутри plan SKIPPED.",
+      "preconditions": ["TC-DR-001 passed", "No active event or menu"],
+      "snapshots_before": ["stress_debug_dump", "stress_load_debug", "stress_treatment_snapshot"],
+      "snapshots_after": ["stress_debug_dump", "stress_load_debug", "stress_treatment_snapshot"],
+      "snapshots": ["stress_debug_dump", "stress_load_debug", "stress_treatment_snapshot"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        {
+          "tool": "stress_run_test_plan",
+          "arguments": { "plan": "daily_regression", "stop_on_fail": true },
+          "expect": ["ok: true", "plan: daily_regression", "failed: 0"]
+        }
+      ],
+      "assertions": [
+        "summary.failed equals 0 or only known SKIPPED steps",
+        "smoke steps PASS",
+        "stressload and recovery steps PASS",
+        "trust and gotoro_rescue evaluate steps PASS",
+        "safe_aura step PASS or SKIPPED with clear reason"
+      ]
+    },
+    {
+      "id": "TC-DR-003",
+      "title": "Post-regression SummaryFlags clean",
+      "notes": "После daily_regression не должно остаться stuck pending/event flags.",
+      "preconditions": ["TC-DR-002 completed"],
+      "snapshots_before": ["stress_debug_dump"],
+      "snapshots_after": ["stress_debug_dump", "stress_dialogue_state"],
+      "snapshots": ["stress_debug_dump", "stress_dialogue_state"],
+      "steps": [
+        { "tool": "stress_game_context", "arguments": {}, "expect": ["EventActive=false"] },
+        { "tool": "mcp_event_snapshot", "arguments": {}, "expect": ["eventActive: false"] }
+      ],
+      "assertions": [
+        "SummaryFlags does not contain EVENT_ACTIVE",
+        "SummaryFlags does not contain HAS_PENDING_DIALOGUE unless dialogue test was run separately"
+      ]
+    },
+    {
+      "id": "TC-DR-004",
+      "title": "Extended manual spot-check: HUD + severity",
+      "notes": "Опционально после daily_regression для полного покрытия.",
+      "preconditions": ["TC-DR-002 completed"],
+      "snapshots_before": ["stress_hud_snapshot", "stress_load_debug"],
+      "snapshots_after": ["stress_debug_dump"],
+      "snapshots": ["stress_hud_snapshot", "stress_load_debug", "stress_debug_dump"],
+      "steps": [
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_add_debuff", "arguments": { "buff_id": "buffStressOverwork" }, "expect": [] },
+        { "tool": "stress_set_load", "arguments": { "value": 55 }, "expect": [] },
+        { "tool": "stress_hud_snapshot", "arguments": {}, "expect": ["severity: High"] },
+        { "tool": "stress_load_debug", "arguments": {}, "expect": ["Severity: High"] },
+        { "tool": "stress_reset", "arguments": {}, "expect": [] },
+        { "tool": "stress_debug_dump", "arguments": {}, "expect": ["SummaryFlags:"] }
+      ],
+      "assertions": [
+        "HUD and load_debug severity consistent",
+        "Final reset leaves clean SummaryFlags"
+      ]
+    }
+  ]
+}

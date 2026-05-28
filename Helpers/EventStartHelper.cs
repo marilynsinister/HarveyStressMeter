@@ -41,6 +41,59 @@ namespace HarveyStressMeter.Helpers
             }
         }
 
+        /// <summary>Запускает CP event script из Data/Events для текущей локации.</summary>
+        public static bool TryStartCpEvent(
+            GameLocation location,
+            string eventId,
+            IMonitor monitor,
+            out string? failureReason,
+            out bool usedCpScript)
+        {
+            failureReason = null;
+            usedCpScript = false;
+
+            if (GameStateHelper.IsEventActive())
+            {
+                failureReason = "event_already_active";
+                return false;
+            }
+
+            var events = TryLoadLocationEvents(location);
+            if (events == null)
+            {
+                failureReason = $"no_event_data_for_location:{location.NameOrUniqueName ?? location.Name}";
+                return false;
+            }
+
+            var key = FindEventKey(events, eventId);
+            if (key == null)
+            {
+                failureReason = $"event_not_found:{eventId}";
+                return false;
+            }
+
+            if (!events.TryGetValue(key, out var cpScript) || string.IsNullOrWhiteSpace(cpScript))
+            {
+                failureReason = "empty_event_script";
+                return false;
+            }
+
+            try
+            {
+                var evt = new Event(cpScript);
+                evt.id = eventId;
+                location.startEvent(evt);
+                usedCpScript = true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                failureReason = ex.Message;
+                monitor.Log($"[EventDebug] CP event '{eventId}' failed: {ex.Message}", LogLevel.Warn);
+                return false;
+            }
+        }
+
         /// <summary>
         /// Запускает rescue: CP script из Data/Events (farmer -1 -1), иначе dynamic fallback.
         /// </summary>
