@@ -1,4 +1,7 @@
+using System.Collections.Generic;
+using HarveyStressMeter.Helpers;
 using StardewModdingAPI.Utilities;
+using StardewValley;
 
 namespace HarveyStressMeter.Models
 {
@@ -9,6 +12,18 @@ namespace HarveyStressMeter.Models
     {
         public string QuestId { get; set; } = "";
         public SDate StartedOn { get; set; } = SDate.Now();
+
+        /// <summary>
+        /// До этого тика Game1.ticks нельзя завершать квест (защита от мгновенного complete при старте лечения).
+        /// -1 = ограничение отключено (старые сейвы).
+        /// </summary>
+        public int QuestObjectivesEnabledAfterTick { get; set; } = -1;
+
+        public void BeginQuestObjectivesGracePeriod(int delayTicks = 180)
+            => QuestObjectivesEnabledAfterTick = Game1.ticks + delayTicks;
+
+        public bool CanEvaluateQuestObjectives()
+            => QuestObjectivesEnabledAfterTick < 0 || Game1.ticks >= QuestObjectivesEnabledAfterTick;
 
         // ===== Гроза (Thunder) =====
         /// <summary>
@@ -51,6 +66,22 @@ namespace HarveyStressMeter.Models
         /// - Результат: SocialTalksAfterQuest = 5 - 2 = 3 (3 разговора ПОСЛЕ квеста)
         /// </summary>
         public int SocialTalksAfterQuest { get; set; } = 0;
+
+        // ===== SocialShutdown (эпизод «Не оставаться одной») =====
+        /// <summary>Разговор с доверенным NPC (≥4 сердечка) или с Харви после выдачи квеста.</summary>
+        public bool SocialShutdownTrustedTalk { get; set; }
+
+        /// <summary>Уникальные малознакомые NPC, с которыми говорили сегодня (лимит в день).</summary>
+        public HashSet<string> SocialShutdownUnfamiliarNpcs { get; set; } = new();
+
+        /// <summary>Выполненные подзадачи episode PhysicalExhaustion (StressCause id).</summary>
+        public HashSet<string> EpisodeCausesCompleted { get; set; } = new();
+
+        /// <summary>Burnout: true, пока игрок не заходил в шахты сегодня.</summary>
+        public bool BurnoutAvoidedMinesToday { get; set; } = true;
+
+        /// <summary>AnxietySpike: секунды в безопасной локации.</summary>
+        public int AnxietySafeSeconds { get; set; }
 
 
         // ===== Голод (Hunger) =====
@@ -143,6 +174,46 @@ namespace HarveyStressMeter.Models
             }
 
             return "none"; // Не завершен
+        }
+
+        public int SocialShutdownUnfamiliarCount => SocialShutdownUnfamiliarNpcs.Count;
+
+        public bool IsSocialShutdownHarveyPathComplete() =>
+            SecondsNearHarvey >= SocialShutdownQuestHelper.HarveySecondsRequired;
+
+        public bool IsSocialShutdownTrustedPathComplete() =>
+            SocialShutdownTrustedTalk
+            && SocialShutdownUnfamiliarCount <= SocialShutdownQuestHelper.MaxUnfamiliarTalksPerDay;
+
+        public bool IsSocialShutdownQuestCompleted() =>
+            IsSocialShutdownHarveyPathComplete() || IsSocialShutdownTrustedPathComplete();
+
+        public bool IsSocialShutdownOverloaded() =>
+            SocialShutdownUnfamiliarCount > SocialShutdownQuestHelper.MaxUnfamiliarTalksPerDay;
+
+        public string GetSocialShutdownProgressText()
+        {
+            if (IsSocialShutdownQuestCompleted())
+            {
+                if (IsSocialShutdownHarveyPathComplete())
+                    return "✅ Задача выполнена! (60 сек рядом с Харви)";
+
+                return "✅ Задача выполнена! (разговор с доверенным человеком)";
+            }
+
+            var harveyLine = $"Рядом с Харви: {System.Math.Min(SecondsNearHarvey, SocialShutdownQuestHelper.HarveySecondsRequired)}/{SocialShutdownQuestHelper.HarveySecondsRequired} сек";
+            var trustedLine = SocialShutdownTrustedTalk
+                ? "Доверенный контакт: ✅"
+                : "Доверенный контакт: поговорите с другом от 4 сердечек";
+            var unfamiliarLine =
+                $"Малознакомые сегодня: {SocialShutdownUnfamiliarCount}/{SocialShutdownQuestHelper.MaxUnfamiliarTalksPerDay}";
+
+            if (IsSocialShutdownOverloaded())
+            {
+                return $"{harveyLine}\n{trustedLine}\n⚠️ Слишком много разговоров с малознакомыми — сегодня путь через доверие закрыт. Побудьте рядом с Харви.";
+            }
+
+            return $"{harveyLine}\n{trustedLine}\n{unfamiliarLine}";
         }
     }
 }

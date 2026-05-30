@@ -91,7 +91,9 @@ namespace HarveyStressMeter.Handlers
 
             // Восстанавливаем все активные баффы после загрузки сохранения
             _stateService.RestoreAllActiveBuffs();
+            _darknessService.MigrateLegacyDarknessPath();
             _stressLoadService.SyncFromGameState();
+            _gameLogicHandler.RepairStuckSocialTreatments();
         }
 
         private void OnReturnedToTitle(object? s, ReturnedToTitleEventArgs e)

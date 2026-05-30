@@ -28,7 +28,10 @@ namespace HarveyStressMeter.Helpers
                 if (!stressLoadService.GetActiveCauses().ContainsKey(causeId))
                     continue;
 
-                if (ShouldFullyResolveCause(data, buffService, causeId, progress))
+                var fullyResolve = episode.ObjectivesCompleted
+                    || ShouldFullyResolveCause(data, buffService, causeId, progress);
+
+                if (fullyResolve)
                 {
                     totalReduction += StressCauses.GetBaseWeight(causeId);
                     stressLoadService.RemoveCause(causeId);
@@ -82,6 +85,8 @@ namespace HarveyStressMeter.Helpers
 
                 StressCauses.Overwork =>
                     data.OverworkBreaksToday >= 1,
+
+                StressCauses.Social or StressCauses.Lonely => true,
 
                 _ => false,
             };

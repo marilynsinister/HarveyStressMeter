@@ -51,12 +51,20 @@ namespace HarveyStressMeter.Helpers
         }
 
         /// <summary>Все untreated debuff'ы в порядке приоритета.</summary>
-        public static List<string> GetUntreatedDebuffs(StateService stateService)
+        public static List<string> GetUntreatedDebuffs(StateService stateService, SaveData? data = null)
         {
             var result = new List<string>();
 
             foreach (var buffId in PriorityOrder)
             {
+                if (data != null && DarknessLegacyHelper.ShouldSkipLegacyDebuffSelector(data, stateService, buffId))
+                {
+                    if (buffId == BuffIds.Darkness)
+                        TryAddUntreatedDarknessLevel(data, stateService, result);
+
+                    continue;
+                }
+
                 if (IsUntreatedDebuff(stateService, buffId))
                     result.Add(buffId);
             }
@@ -65,15 +73,49 @@ namespace HarveyStressMeter.Helpers
         }
 
         /// <summary>Один debuff с наивысшим приоритетом или null.</summary>
-        public static string? GetPrimaryUntreatedDebuff(StateService stateService)
+        public static string? GetPrimaryUntreatedDebuff(StateService stateService, SaveData? data = null)
         {
             foreach (var buffId in PriorityOrder)
             {
+                if (data != null && DarknessLegacyHelper.ShouldSkipLegacyDebuffSelector(data, stateService, buffId))
+                {
+                    if (buffId == BuffIds.Darkness)
+                    {
+                        var levelBuff = TryGetUntreatedDarknessLevelBuff(data, stateService);
+                        if (levelBuff != null)
+                            return levelBuff;
+                    }
+
+                    continue;
+                }
+
                 if (IsUntreatedDebuff(stateService, buffId))
                     return buffId;
             }
 
             return null;
+        }
+
+        private static void TryAddUntreatedDarknessLevel(
+            SaveData data,
+            StateService stateService,
+            List<string> result)
+        {
+            var levelBuff = TryGetUntreatedDarknessLevelBuff(data, stateService);
+            if (levelBuff != null)
+                result.Add(levelBuff);
+        }
+
+        private static string? TryGetUntreatedDarknessLevelBuff(SaveData data, StateService stateService)
+        {
+            if (!DarknessLegacyHelper.NeedsHarveyDarknessTherapy(data, stateService))
+                return null;
+
+            var levelBuff = DarknessLegacyHelper.GetActiveLevelBuffId(stateService);
+            if (levelBuff == null || !IsUntreatedDebuff(stateService, levelBuff))
+                return null;
+
+            return levelBuff;
         }
 
         /// <summary>Активное лечение с выполненными условиями, ожидающее финального разговора (наивысший приоритет).</summary>

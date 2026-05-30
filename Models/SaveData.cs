@@ -19,6 +19,9 @@ namespace HarveyStressMeter.Models
 
         public bool TalkedToHarveyToday { get; set; } = false;
 
+        /// <summary>Накопленный социальный дискомфорт (0 → порог → buffStressSocial).</summary>
+        public int SocialStressExposure { get; set; }
+
         // ⭐ НОВОЕ: Счетчики для накопительных дебаффов
         /// <summary>Количество дней подряд без разговоров с NPC (не считая Харви)</summary>
         public int DaysWithoutTalking { get; set; } = 0;

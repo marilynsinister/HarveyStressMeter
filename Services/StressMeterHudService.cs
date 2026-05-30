@@ -307,6 +307,12 @@ namespace HarveyStressMeter.Services
             if (load >= _config.MildThreshold)
                 return true;
 
+            if (_data.Darkness.FearLevel > 0 && !_data.Darkness.IsCured)
+                return true;
+
+            if (_data.SocialStressExposure > 0 && !_stateService.HasActiveTreatmentState(BuffIds.Social))
+                return true;
+
             if (!_config.ShowOnlyWhenStressed && load > 0)
                 return true;
 
@@ -480,6 +486,11 @@ namespace HarveyStressMeter.Services
             sb.AppendLine($"Active: {_data.ThunderFlashback.IsActive}, gotoro: {_data.ThunderFlashback.IsGotoroFlashback}");
             sb.AppendLine(
                 $"Shelter: {_data.ThunderFlashback.ForestShelterSeconds}/{_data.ThunderFlashback.RequiredForestShelterSeconds}");
+            sb.AppendLine($"Deferred Gotoro shelter: {_data.ThunderFlashback.DeferredGotoroShelterSeconds}s");
+            sb.AppendLine("--- Darkness ---");
+            sb.AppendLine($"Fear level: {_data.Darkness.FearLevel}, therapy: {_data.Darkness.IsTherapyActive} (stage {_data.Darkness.TherapyStage})");
+            sb.AppendLine("--- Social ---");
+            sb.AppendLine($"Exposure: {_data.SocialStressExposure}/{SocialStressHelper.DebuffThreshold}");
 
             var text = sb.ToString().TrimEnd();
             var size = Game1.smallFont.MeasureString(text);

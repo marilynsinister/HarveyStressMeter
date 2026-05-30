@@ -38,6 +38,20 @@ namespace HarveyStressMeter.Constants
         public static TreatmentEpisodeDefinition? GetOrDefault(string episodeId) =>
             ById.GetValueOrDefault(episodeId);
 
+        public static string? ResolveEpisodeIdForQuest(string? questId)
+        {
+            if (string.IsNullOrEmpty(questId))
+                return null;
+
+            foreach (var def in All)
+            {
+                if (string.Equals(def.QuestId, questId, StringComparison.Ordinal))
+                    return def.EpisodeId;
+            }
+
+            return null;
+        }
+
         public static IReadOnlyList<TreatmentEpisodeDefinition> GetMatchingEpisodes(EpisodeEvaluationContext ctx)
         {
             return All.Where(def => MatchesTrigger(def, ctx)).ToList();
@@ -296,9 +310,9 @@ namespace HarveyStressMeter.Constants
                 CompletionDialogueKey = "episode_SocialShutdown_complete",
                 Objectives = new List<string>
                 {
-                    "Побыть рядом с Харви или поговорить с одним доверенным человеком",
-                    "Не перегружать себя разговорами",
-                    "Поговорить с Харви",
+                    "Путь А: 60 секунд рядом с Харви",
+                    "Путь Б: разговор с доверенным человеком (≥4 сердечка), не более 3 малознакомых за день",
+                    "Поговорить с Харви для завершения назначения",
                 },
             },
         };

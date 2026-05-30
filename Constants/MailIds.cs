@@ -16,6 +16,9 @@ namespace HarveyStressMeter.Constants
         public const string NoSleepStart = "mailHarveyStressTreatmentNoSleep";
         
         public const string GenericDone = "HarveyStress_Letter_Generic_Done";
+
+        /// <summary>Письмо при переходе страха темноты на уровень 3 (фобия).</summary>
+        public const string DarknessWorry = "mailHarveyDarknessWorry";
     }
 }
 

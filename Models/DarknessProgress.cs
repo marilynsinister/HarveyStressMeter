@@ -234,6 +234,9 @@ namespace HarveyStressMeter.Models
         /// </summary>
         public bool CanDecreaseFearNaturally(SDate currentDate)
         {
+            // Во время терапии уровень не снимается «сам собой».
+            if (IsTherapyActive) return false;
+
             // Только для уровня 1
             if (FearLevel != 1) return false;
             

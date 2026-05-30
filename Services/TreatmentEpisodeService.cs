@@ -145,10 +145,13 @@ namespace HarveyStressMeter.Services
             var episode = GetActiveTreatmentEpisode();
             if (episode == null || !string.Equals(episode.EpisodeId, episodeId, StringComparison.Ordinal))
             {
+                if (TryMarkEpisodeReadyForReviewWithoutEpisodeState(episodeId, optionalMessage))
+                    return;
+
                 _monitor.Log(
                     $"[MarkTreatmentEpisodeReadyForReview] Active episode mismatch: expected {episodeId}, " +
                     $"got {episode?.EpisodeId ?? "(none)"}",
-                    LogLevel.Debug);
+                    LogLevel.Warn);
                 return;
             }
 
@@ -162,6 +165,7 @@ namespace HarveyStressMeter.Services
             _questService.UpdateQuest(episode.QuestId, objective: StressQuestCopy.ReadyForReviewObjective);
 
             SyncLegacyTreatmentReviewFlags(episode);
+            AddReadyForReviewTopic(episode);
 
             _stressLoadService.Recalculate();
 
@@ -174,15 +178,52 @@ namespace HarveyStressMeter.Services
                 LogLevel.Info);
         }
 
-        public void CompleteTreatmentEpisode(string episodeId, string message = "Лечение завершено.")
+        /// <summary>Fallback для старых сейвов: episode state потерян, но квест в журнале активен.</summary>
+        private bool TryMarkEpisodeReadyForReviewWithoutEpisodeState(string episodeId, string? optionalMessage)
+        {
+            if (!TreatmentEpisodeDefinitions.TryGet(episodeId, out var definition))
+                return false;
+
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(definition.QuestId);
+            if (treatment == null || !treatment.TreatmentStarted || treatment.IsCured || treatment.IsCompleted)
+                return false;
+
+            if (treatment.AwaitingHarveyReview)
+                return true;
+
+            treatment.ObjectivesCompleted = true;
+            treatment.AwaitingHarveyReview = true;
+            treatment.ReadyForReviewDate = SDate.Now();
+
+            RepairEpisodeStateForReview(episodeId, definition, treatment);
+
+            _questService.UpdateQuest(definition.QuestId, objective: StressQuestCopy.ReadyForReviewObjective);
+            ShowHudMessage(optionalMessage ?? StressQuestCopy.ReadyForReviewHud);
+
+            if (TreatmentTopics.GetReadyForReviewTopic(treatment.BuffId) is { } reviewTopic)
+                ConversationHelper.AddTopic(reviewTopic, 2);
+
+            _stressLoadService.Recalculate();
+
+            _monitor.Log(
+                $"[MarkTreatmentEpisodeReadyForReview] Fallback review для {episodeId}, quest={definition.QuestId}",
+                LogLevel.Warn);
+
+            return true;
+        }
+
+        public bool CompleteTreatmentEpisode(string episodeId, string message = "Лечение завершено.")
         {
             var episode = _data.ActiveTreatmentEpisode;
             if (episode == null || !string.Equals(episode.EpisodeId, episodeId, StringComparison.Ordinal))
             {
+                if (TryCompleteEpisodeViaQuestTreatment(episodeId, message))
+                    return true;
+
                 _monitor.Log(
                     $"[CompleteTreatmentEpisode] Episode {episodeId} не активен (current={episode?.EpisodeId ?? "(none)"})",
                     LogLevel.Warn);
-                return;
+                return false;
             }
 
             if (!episode.AwaitingHarveyReview)
@@ -190,9 +231,67 @@ namespace HarveyStressMeter.Services
                 _monitor.Log(
                     $"[CompleteTreatmentEpisode] Episode {episodeId} не ждёт review — пропуск",
                     LogLevel.Warn);
-                return;
+                return false;
             }
 
+            return FinalizeCompletedEpisode(episode, episodeId, message);
+        }
+
+        private bool TryCompleteEpisodeViaQuestTreatment(string episodeId, string message)
+        {
+            if (!TreatmentEpisodeDefinitions.TryGet(episodeId, out var definition))
+                return false;
+
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(definition.QuestId);
+            if (treatment == null || !treatment.AwaitingHarveyReview || treatment.IsCompleted)
+                return false;
+
+            var buffId = treatment.BuffId;
+            var activeCauseIds = _stressLoadService.GetActiveCauses()
+                .Where(kvp => kvp.Value.IsActive)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            var episodeStub = new TreatmentEpisodeState
+            {
+                EpisodeId = episodeId,
+                QuestId = definition.QuestId,
+                RelatedCauseIds = definition.RelatedCauses.ToList(),
+                ObjectivesCompleted = true,
+                PrimaryCauseId = TreatmentEpisodeDefinitions.ResolvePrimaryCauseId(episodeId, activeCauseIds),
+            };
+
+            var reduction = EpisodeCauseResolver.ApplyResolvedCauses(
+                _data,
+                _stressLoadService,
+                _buffService,
+                _stateService,
+                episodeStub);
+
+            _stressLoadService.ReduceStressByTreatment(Math.Max(reduction, 10), episodeId);
+
+            _stateService.CompleteTreatment(definition.QuestId);
+            if (_data.StressState.HasActiveQuest(definition.QuestId))
+                return false;
+
+            SetEpisodeImmunity(episodeId, DefaultEpisodeImmunityDays);
+            _treatmentService?.ApplyCompletionRewards(buffId, message, removeReviewTopic: true);
+
+            _data.ActiveTreatmentEpisode = null;
+            _stressLoadService.Recalculate();
+
+            _trustService?.OnTimelyReviewCompleted();
+            _trustService?.OnTreatmentEpisodeCompleted(episodeId);
+
+            _monitor.Log(
+                $"[CompleteTreatmentEpisode] Fallback завершение episode={episodeId} через quest={definition.QuestId}",
+                LogLevel.Info);
+
+            return true;
+        }
+
+        private bool FinalizeCompletedEpisode(TreatmentEpisodeState episode, string episodeId, string message)
+        {
             var primaryBuffId = ResolvePrimaryBuffId(episode);
 
             CompleteLegacyTreatmentRecord(episode, primaryBuffId);
@@ -228,6 +327,57 @@ namespace HarveyStressMeter.Services
             _monitor.Log(
                 $"[CompleteTreatmentEpisode] Episode {episodeId} завершён, load -{reduction}, unrelated causes сохранены",
                 LogLevel.Info);
+
+            return true;
+        }
+
+        private void RepairEpisodeStateForReview(
+            string episodeId,
+            TreatmentEpisodeDefinition definition,
+            TreatmentState treatment)
+        {
+            var activeCauseIds = _stressLoadService.GetActiveCauses()
+                .Where(kvp => kvp.Value.IsActive)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            if (_data.ActiveTreatmentEpisode == null
+                || _data.ActiveTreatmentEpisode.IsCompleted
+                || _data.ActiveTreatmentEpisode.IsCured)
+            {
+                _data.ActiveTreatmentEpisode = new TreatmentEpisodeState
+                {
+                    EpisodeId = episodeId,
+                    QuestId = definition.QuestId,
+                    TreatmentStarted = true,
+                    ObjectivesCompleted = true,
+                    AwaitingHarveyReview = true,
+                    ReadyForReviewTime = Game1.timeOfDay,
+                    RelatedCauseIds = definition.RelatedCauses
+                        .Where(activeCauseIds.Contains)
+                        .ToList(),
+                    PrimaryCauseId = TreatmentEpisodeDefinitions.ResolvePrimaryCauseId(episodeId, activeCauseIds)
+                        ?? TreatmentEpisodeDefinitions.ResolvePrimaryCauseId(episodeId, definition.RelatedCauses),
+                };
+                return;
+            }
+
+            if (!string.Equals(_data.ActiveTreatmentEpisode.EpisodeId, episodeId, StringComparison.Ordinal))
+                return;
+
+            _data.ActiveTreatmentEpisode.ObjectivesCompleted = true;
+            _data.ActiveTreatmentEpisode.AwaitingHarveyReview = true;
+            _data.ActiveTreatmentEpisode.ReadyForReviewTime = Game1.timeOfDay;
+        }
+
+        private void AddReadyForReviewTopic(TreatmentEpisodeState episode)
+        {
+            var primaryBuffId = ResolvePrimaryBuffId(episode);
+            if (string.IsNullOrEmpty(primaryBuffId))
+                return;
+
+            if (TreatmentTopics.GetReadyForReviewTopic(primaryBuffId) is { } reviewTopic)
+                ConversationHelper.AddTopic(reviewTopic, 2);
         }
 
         public EpisodeEvaluationContext BuildContext()
@@ -408,12 +558,19 @@ namespace HarveyStressMeter.Services
             return sb.ToString();
         }
 
-        private static bool ShouldUseAmbientOnly(EpisodeEvaluationContext ctx)
+        private bool ShouldUseAmbientOnly(EpisodeEvaluationContext ctx)
         {
             if (ctx.ActiveCauseIds.Count == 0)
                 return true;
 
             if (ctx.StressLoad >= 25)
+                return false;
+
+            // Активный дебафф без лечения требует полного диалога/квеста, а не ambient-подсказки.
+            if (StressDebuffSelector.GetUntreatedDebuffs(_stateService, _data).Count > 0)
+                return false;
+
+            if (DarknessLegacyHelper.NeedsHarveyDarknessTherapy(_data, _stateService))
                 return false;
 
             return ctx.ActiveCauseIds.All(StressCauses.CanSelfResolve);
@@ -425,6 +582,12 @@ namespace HarveyStressMeter.Services
             {
                 if (!ctx.HasCause(causeId))
                     continue;
+
+                if (causeId == StressCauses.Darkness
+                    && DarknessLegacyHelper.NeedsHarveyDarknessTherapy(_data, _stateService))
+                {
+                    return true;
+                }
 
                 if (!StressCauses.CauseToBuff.TryGetValue(causeId, out var buffId))
                     continue;
@@ -468,12 +631,20 @@ namespace HarveyStressMeter.Services
 
         private void SyncLegacyTreatmentReviewFlags(TreatmentEpisodeState episode)
         {
+            var byQuest = _data.StressState.GetActiveTreatmentByQuest(episode.QuestId);
+            if (byQuest != null)
+            {
+                byQuest.ObjectivesCompleted = true;
+                byQuest.AwaitingHarveyReview = true;
+                byQuest.ReadyForReviewDate = SDate.Now();
+            }
+
             var primaryBuffId = ResolvePrimaryBuffId(episode);
             if (string.IsNullOrEmpty(primaryBuffId))
                 return;
 
             var treatment = _data.StressState.GetActiveTreatment(primaryBuffId);
-            if (treatment == null)
+            if (treatment == null || treatment == byQuest)
                 return;
 
             treatment.ObjectivesCompleted = true;

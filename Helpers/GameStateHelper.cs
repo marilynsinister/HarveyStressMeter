@@ -210,6 +210,20 @@ namespace HarveyStressMeter.Helpers
         public static bool IsOptionalForestShelterLocation()
             => IsForestShelterLocation() || IsLocationOneOf(Game1.currentLocation, "FarmCave");
 
+        /// <summary>Тихие/безопасные локации для квеста AnxietySpike.</summary>
+        public static bool IsAnxietySafeLocation()
+            => IsInRestZone()
+               || IsForestShelterLocation()
+               || IsMarriedFarmHouseContext();
+
+        public static bool IsStressfulWorkLocation(string? locationName)
+        {
+            if (string.IsNullOrEmpty(locationName))
+                return false;
+
+            return locationName is "Mine" or "SkullCave" or "VolcanoDungeon" or "Caldera";
+        }
+
         public static bool IsBlockingFlashbackContext()
         {
             if (IsEventActive())

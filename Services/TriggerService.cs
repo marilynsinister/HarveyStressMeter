@@ -17,6 +17,7 @@ namespace HarveyStressMeter.Services
         private const int TiredRestSecondsRequired = 60;
         private const int ThunderSecondsRequired = 120;
         private const int OverworkBreakSecondsRequired = 30;
+        private const int SocialShutdownHarveySecondsRequired = SocialShutdownQuestHelper.HarveySecondsRequired;
 
         private readonly SaveData _data;
         private readonly BuffService _buffService;
@@ -24,6 +25,7 @@ namespace HarveyStressMeter.Services
         private readonly TreatmentService _treatmentService;
         private readonly StateService _stateService;
         private readonly IMonitor _monitor;
+        private EpisodeQuestProgressService? _episodeQuestProgressService;
 
         public TriggerService(SaveData data, BuffService buffService, QuestService questService, StateService stateService, TreatmentService treatmentService, IMonitor monitor)
         {
@@ -35,6 +37,42 @@ namespace HarveyStressMeter.Services
             _monitor = monitor;
         }
 
+        public void SetEpisodeQuestProgressService(EpisodeQuestProgressService episodeQuestProgressService)
+            => _episodeQuestProgressService = episodeQuestProgressService;
+
+        /// <summary>После загрузки: перевести в review, если цели уже выполнены (старые сейвы).</summary>
+        public void RepairStuckSocialTreatments()
+        {
+            RepairSocialTreatment(QuestIds.Social, BuffIds.Social, episodeId: null);
+            RepairSocialTreatment(QuestIds.SocialShutdown, buffId: null, episodeId: StressEpisodes.SocialShutdown);
+        }
+
+        private void RepairSocialTreatment(string questId, string? buffId, string? episodeId)
+        {
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(questId);
+            if (treatment?.Progress == null)
+                return;
+
+            if (IsAwaitingHarveyReview(questId))
+                return;
+
+            var objectivesMet = episodeId != null
+                ? treatment.Progress.IsSocialShutdownQuestCompleted()
+                : treatment.Progress.IsSocialQuestCompleted();
+
+            if (!objectivesMet)
+                return;
+
+            _monitor.Log(
+                $"[TriggerService] Repair stuck social treatment: quest={questId}, episode={episodeId ?? "(legacy)"}",
+                LogLevel.Info);
+
+            if (episodeId != null)
+                _treatmentService.MarkTreatmentReadyForReviewByEpisode(episodeId);
+            else if (buffId != null)
+                _treatmentService.MarkTreatmentReadyForReview(buffId);
+        }
+
         /// <summary>
         /// Проверяет Manual триггеры (должны вызываться периодически)
         /// </summary>
@@ -43,7 +81,8 @@ namespace HarveyStressMeter.Services
             CheckTiredRestTrigger();
             CheckThunderCalmingTrigger();
             CheckOverworkBreakCompleteTrigger();
-            CheckSocialQuestCompleteTrigger();  // ⭐ ДОБАВЛЕНО: проверка завершения Social квеста
+            CheckSocialQuestCompleteTrigger();
+            CheckSocialShutdownQuestCompleteTrigger();
         }
 
         private void CheckTiredRestTrigger()
@@ -66,21 +105,70 @@ namespace HarveyStressMeter.Services
 
         private void CheckSocialQuestCompleteTrigger()
         {
-            if (!_stateService.HasActiveQuestState(QuestIds.Social)) return;
+            if (!_stateService.HasActiveQuestState(QuestIds.Social))
+                return;
+
+            if (IsAwaitingHarveyReview(QuestIds.Social))
+                return;
 
             var socialTreatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.Social);
-            if (socialTreatment?.Progress == null) return;
+            if (socialTreatment?.Progress == null)
+                return;
 
-            if (socialTreatment.Progress.IsSocialQuestCompleted())
+            if (!socialTreatment.Progress.CanEvaluateQuestObjectives())
+                return;
+
+            if (!socialTreatment.Progress.IsSocialQuestCompleted())
+                return;
+
+            var completionPath = socialTreatment.Progress.GetSocialCompletionPath();
+            _monitor.Log(
+                $"[Social Quest] Условия выполнены ({completionPath}) — ожидание разговора с Харви",
+                LogLevel.Info);
+
+            _treatmentService.MarkTreatmentReadyForReview(BuffIds.Social);
+        }
+
+        private void CheckSocialShutdownQuestCompleteTrigger()
+        {
+            if (!_stateService.HasActiveQuestState(QuestIds.SocialShutdown))
+                return;
+
+            if (IsAwaitingHarveyReview(QuestIds.SocialShutdown))
+                return;
+
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.SocialShutdown);
+            if (treatment?.Progress == null)
+                return;
+
+            if (!treatment.Progress.CanEvaluateQuestObjectives())
+                return;
+
+            if (treatment.Progress.IsSocialShutdownQuestCompleted())
+                CompleteSocialShutdownTreatment(treatment.Progress);
+        }
+
+        private void CompleteSocialShutdownTreatment(TreatmentProgress progress)
+        {
+            if (IsAwaitingHarveyReview(QuestIds.SocialShutdown))
+                return;
+
+            if (!progress.CanEvaluateQuestObjectives())
+                return;
+
+            var path = progress.IsSocialShutdownHarveyPathComplete() ? "harvey" : "trusted";
+            _monitor.Log(
+                $"[SocialShutdown Quest] Завершение по пути {path}: Harvey={progress.SecondsNearHarvey} сек, " +
+                $"trustedTalk={progress.SocialShutdownTrustedTalk}, unfamiliar={progress.SocialShutdownUnfamiliarCount}",
+                LogLevel.Info);
+
+            _treatmentService.MarkTreatmentReadyForReviewByEpisode(StressEpisodes.SocialShutdown);
+
+            if (!IsAwaitingHarveyReview(QuestIds.SocialShutdown))
             {
-                var completionPath = socialTreatment.Progress.GetSocialCompletionPath();
-
-                _monitor.Log($"[Social Quest] Завершение квеста по пути: {completionPath}", LogLevel.Info);
-                _monitor.Log($"[Social Quest] Разговоры после квеста: {socialTreatment.Progress.SocialTalksAfterQuest}", LogLevel.Info);
-                _monitor.Log($"[Social Quest] Время с Харви: {socialTreatment.Progress.SecondsNearHarvey} сек", LogLevel.Info);
-
-                Game1.playSound("questcomplete");
-                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Social);
+                _monitor.Log(
+                    "[SocialShutdown Quest] Review не установлен — episode/квест рассинхронизированы",
+                    LogLevel.Warn);
             }
         }
 
@@ -105,6 +193,13 @@ namespace HarveyStressMeter.Services
 
         private void UpdateSpecificTreatment(string questId, string buffId, TreatmentProgress progress, bool harveyNearby)
         {
+            if (string.Equals(questId, QuestIds.SocialShutdown, StringComparison.Ordinal))
+            {
+                UpdateSocialShutdownProgress(progress, harveyNearby);
+                SyncTreatmentProgress(questId, progress);
+                return;
+            }
+
             switch (buffId)
             {
                 case BuffIds.Thunder:
@@ -146,6 +241,11 @@ namespace HarveyStressMeter.Services
             }
 
             // Обновляем прогресс через StateService
+            SyncTreatmentProgress(questId, progress);
+        }
+
+        private void SyncTreatmentProgress(string questId, TreatmentProgress progress)
+        {
             _stateService.UpdateProgress(questId, p =>
             {
                 p.SecondsNearHarvey = progress.SecondsNearHarvey;
@@ -156,7 +256,128 @@ namespace HarveyStressMeter.Services
                 p.WarmSeconds = progress.WarmSeconds;
                 p.EarlySleepStreak = progress.EarlySleepStreak;
                 p.TiredRestSeconds = progress.TiredRestSeconds;
+                p.SocialShutdownTrustedTalk = progress.SocialShutdownTrustedTalk;
+                p.SocialShutdownUnfamiliarNpcs = new HashSet<string>(progress.SocialShutdownUnfamiliarNpcs);
+                p.EpisodeCausesCompleted = new HashSet<string>(progress.EpisodeCausesCompleted);
+                p.BurnoutAvoidedMinesToday = progress.BurnoutAvoidedMinesToday;
+                p.AnxietySafeSeconds = progress.AnxietySafeSeconds;
+                p.QuestObjectivesEnabledAfterTick = progress.QuestObjectivesEnabledAfterTick;
             });
+        }
+
+        /// <summary>Регистрирует разговор с NPC для квеста SocialShutdown.</summary>
+        public void RegisterSocialShutdownNpcTalk(string npcName)
+        {
+            if (!_stateService.HasActiveQuestState(QuestIds.SocialShutdown))
+                return;
+
+            if (IsAwaitingHarveyReview(QuestIds.SocialShutdown))
+                return;
+
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.SocialShutdown);
+            if (treatment?.Progress == null)
+                return;
+
+            var progress = treatment.Progress;
+            if (!progress.CanEvaluateQuestObjectives())
+                return;
+
+            var changed = false;
+
+            if (SocialShutdownQuestHelper.IsTrustedNpc(npcName))
+            {
+                if (!progress.SocialShutdownTrustedTalk)
+                {
+                    progress.SocialShutdownTrustedTalk = true;
+                    changed = true;
+                    Game1.addHUDMessage(new HUDMessage("✅ Доверенный контакт засчитан", HUDMessage.newQuest_type));
+                }
+            }
+            else if (SocialShutdownQuestHelper.IsUnfamiliarNpc(npcName)
+                     && progress.SocialShutdownUnfamiliarNpcs.Add(npcName))
+            {
+                changed = true;
+                var count = progress.SocialShutdownUnfamiliarCount;
+                var max = SocialShutdownQuestHelper.MaxUnfamiliarTalksPerDay;
+                Game1.addHUDMessage(new HUDMessage(
+                    count > max
+                        ? $"⚠️ Малознакомые: {count}/{max} — не перегружайте себя"
+                        : $"Малознакомые: {count}/{max}",
+                    count > max ? HUDMessage.error_type : HUDMessage.newQuest_type));
+            }
+
+            if (changed)
+            {
+                SyncTreatmentProgress(QuestIds.SocialShutdown, progress);
+                UpdateSocialShutdownQuestDescription(progress);
+                if (progress.IsSocialShutdownQuestCompleted())
+                    CompleteSocialShutdownTreatment(progress);
+            }
+        }
+
+        private void UpdateSocialShutdownProgress(TreatmentProgress progress, bool harveyNearby)
+        {
+            if (!_stateService.HasActiveQuestState(QuestIds.SocialShutdown))
+                return;
+
+            if (Game1.CurrentEvent != null)
+                return;
+
+            if (IsAwaitingHarveyReview(QuestIds.SocialShutdown))
+                return;
+
+            if (!progress.CanEvaluateQuestObjectives())
+                return;
+
+            if (harveyNearby)
+            {
+                progress.SecondsNearHarvey++;
+
+                switch (progress.SecondsNearHarvey)
+                {
+                    case 15:
+                        Game1.addHUDMessage(new HUDMessage("Рядом с Харви: 15/60 сек", HUDMessage.newQuest_type));
+                        break;
+                    case 30:
+                        Game1.addHUDMessage(new HUDMessage("Рядом с Харви: 30/60 сек", HUDMessage.newQuest_type));
+                        break;
+                    case 45:
+                        Game1.addHUDMessage(new HUDMessage("Рядом с Харви: 45/60 сек", HUDMessage.newQuest_type));
+                        break;
+                    case 60:
+                        Game1.addHUDMessage(new HUDMessage("✅ Рядом с Харви: 60/60 сек!", HUDMessage.achievement_type));
+                        break;
+                }
+
+                UpdateSocialShutdownQuestDescription(progress);
+
+                if (progress.SecondsNearHarvey >= SocialShutdownHarveySecondsRequired)
+                    CompleteSocialShutdownTreatment(progress);
+            }
+        }
+
+        public void UpdateSocialShutdownQuestDescription(TreatmentProgress progress)
+        {
+            if (IsAwaitingHarveyReview(QuestIds.SocialShutdown))
+                return;
+
+            ApplySocialShutdownQuestJournal(_questService, progress);
+        }
+
+        public static void ApplySocialShutdownQuestJournal(QuestService questService, TreatmentProgress progress)
+        {
+            var progressText = progress.GetSocialShutdownProgressText();
+            questService.UpdateQuest(
+                QuestIds.SocialShutdown,
+                description:
+                    "Харви видит, что ты закрылась от людей. Сегодня нужен мягкий контакт, а не изоляция.\n\n" +
+                    progressText,
+                objective: BuildSocialShutdownObjective(progress));
+        }
+
+        public static string BuildSocialShutdownObjective(TreatmentProgress progress)
+        {
+            return "Мягкий контакт сегодня — без перегрузки.\n\n" + progress.GetSocialShutdownProgressText();
         }
 
         private void UpdateThunderProgress(TreatmentProgress progress, bool harveyNearby)
@@ -204,14 +425,25 @@ namespace HarveyStressMeter.Services
 
         private void CompleteThunderTreatment()
         {
-            Game1.playSound("questcomplete");
+            if (IsAwaitingHarveyReview(QuestIds.Thunder))
+                return;
+
             _treatmentService.MarkTreatmentReadyForReview(BuffIds.Thunder);
+
+            if (IsAwaitingHarveyReview(QuestIds.Thunder))
+                Game1.playSound("questcomplete");
         }
 
         private bool IsAwaitingHarveyReview(string questId)
         {
             var treatment = _data.StressState.GetActiveTreatmentByQuest(questId);
-            return treatment?.AwaitingHarveyReview == true;
+            if (treatment?.AwaitingHarveyReview == true)
+                return true;
+
+            var episode = _data.ActiveTreatmentEpisode;
+            return episode != null
+                   && string.Equals(episode.QuestId, questId, StringComparison.Ordinal)
+                   && episode.AwaitingHarveyReview;
         }
 
         private void UpdateThunderQuestDescription(TreatmentProgress progress)
@@ -389,11 +621,14 @@ namespace HarveyStressMeter.Services
                 return;
 
             string progressText = GetProgressText(progress);
-
-            // Логирование убрано для оптимизации
+            const string intro =
+                "Харви предложил мягкую экспозицию: поговори с людьми и проведи время рядом с ним.";
+            const string objectiveIntro =
+                "Путь А: 3 разговора после начала назначения + 60 сек рядом с Харви. Путь Б: 5 разговоров.";
 
             _questService.UpdateQuest(QuestIds.Social,
-                description: $"Харви предложил мягкую экспозицию: поговори с людьми и проведи время рядом с ним.\n\n{progressText}");
+                description: $"{intro}\n\n{progressText}",
+                objective: $"{objectiveIntro}\n\n{progressText}");
         }
 
 
@@ -437,32 +672,26 @@ namespace HarveyStressMeter.Services
         /// </summary>
         public void CheckQuestCompletion(TreatmentProgress progress)
         {
-            // ⭐ ИСПРАВЛЕНО: Проверяем, что квест еще активен перед завершением
-            // Это предотвращает повторные вызовы после завершения
             if (!_stateService.HasActiveQuestState(QuestIds.Social))
-            {
-                return; // Квест уже завершен, ничего не делаем
-            }
+                return;
+
+            if (IsAwaitingHarveyReview(QuestIds.Social))
+                return;
+
+            if (!progress.CanEvaluateQuestObjectives())
+                return;
 
             if (progress.SocialTalksAfterQuest >= 3 && progress.SecondsNearHarvey >= 60)
             {
-                _monitor.Log($"[Social Quest] ✅ Квест завершен: 3 разговора + 60 сек с Харви", LogLevel.Info);
-                Game1.addHUDMessage(new HUDMessage("✅ Социальная тренировка завершена! (3 разговора + время с Харви)", HUDMessage.achievement_type));
-
+                _monitor.Log("[Social Quest] Условия выполнены: 3 разговора + 60 сек с Харви", LogLevel.Info);
                 _treatmentService.MarkTreatmentReadyForReview(BuffIds.Social);
-
-                _monitor.Log($"[Social Quest] Условия выполнены — ожидание разговора с Харви", LogLevel.Info);
                 return;
             }
 
             if (progress.SocialTalksAfterQuest >= 5)
             {
-                _monitor.Log($"[Social Quest] ✅ Квест завершен: 5 разговоров", LogLevel.Info);
-                Game1.addHUDMessage(new HUDMessage("✅ Социальная тренировка завершена! (5 разговоров)", HUDMessage.achievement_type));
-
+                _monitor.Log("[Social Quest] Условия выполнены: 5 разговоров", LogLevel.Info);
                 _treatmentService.MarkTreatmentReadyForReview(BuffIds.Social);
-
-                _monitor.Log($"[Social Quest] Условия выполнены — ожидание разговора с Харви", LogLevel.Info);
                 return;
             }
 

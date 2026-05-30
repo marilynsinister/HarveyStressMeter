@@ -51,7 +51,7 @@ namespace HarveyStressMeter.Services
         public void SetDialogueService(StressDialogueService dialogueService)
             => _dialogueService = dialogueService;
 
-        /// <summary>Programmatic review-реплика для active TreatmentEpisode.</summary>
+        /// <summary>Programmatic review-реплика для episode или legacy treatment, ожидающего review.</summary>
         public bool TryPrepareEpisodeReviewDialogue(out string? buffId, out string? dialogueText)
         {
             buffId = null;
@@ -61,16 +61,40 @@ namespace HarveyStressMeter.Services
                 return false;
 
             var episode = _episodeService.GetTreatmentAwaitingReview();
-            if (episode == null)
+            if (episode != null)
+            {
+                buffId = ResolvePrimaryBuffId(episode);
+                dialogueText = _dialogueService?.GetReviewDialogueForEpisode(episode.EpisodeId)
+                    ?? StressQuestCopy.ReviewDialogue;
+                _pendingEpisodeIdForCompletion = episode.EpisodeId;
+
+                _monitor.Log(
+                    $"[StressTreatmentReview] Prepared episode review dialogue (episode={episode.EpisodeId})",
+                    LogLevel.Info);
+
+                return true;
+            }
+
+            var treatment = GetTreatmentAwaitingReview();
+            if (treatment == null)
                 return false;
 
-            buffId = ResolvePrimaryBuffId(episode);
-            dialogueText = _dialogueService?.GetReviewDialogueForEpisode(episode.EpisodeId)
-                ?? StressQuestCopy.ReviewDialogue;
-            _pendingEpisodeIdForCompletion = episode.EpisodeId;
+            buffId = treatment.BuffId;
+            var episodeId = TreatmentEpisodeDefinitions.ResolveEpisodeIdForQuest(treatment.QuestId);
+            if (!string.IsNullOrEmpty(episodeId))
+            {
+                dialogueText = _dialogueService?.GetReviewDialogueForEpisode(episodeId)
+                    ?? StressQuestCopy.ReviewDialogue;
+                _pendingEpisodeIdForCompletion = episodeId;
+            }
+            else
+            {
+                dialogueText = StressQuestCopy.ReviewDialogue;
+                _pendingBuffIdForCompletion = buffId;
+            }
 
             _monitor.Log(
-                $"[StressTreatmentReview] Prepared episode review dialogue (episode={episode.EpisodeId})",
+                $"[StressTreatmentReview] Prepared legacy review dialogue (buff={buffId}, episode={episodeId ?? "(none)"})",
                 LogLevel.Info);
 
             return true;
@@ -123,12 +147,23 @@ namespace HarveyStressMeter.Services
                     return;
 
                 var episodeId = _pendingEpisodeIdForCompletion;
+                var fallbackBuffId = _pendingBuffIdForCompletion;
                 _pendingEpisodeIdForCompletion = null;
+                _pendingBuffIdForCompletion = null;
 
                 _monitor.Log(
                     $"[StressTreatmentReview] Финальное завершение TreatmentEpisode после реплики Харви: {episodeId}",
                     LogLevel.Info);
-                _episodeService.CompleteTreatmentEpisode(episodeId);
+
+                if (!_episodeService.CompleteTreatmentEpisode(episodeId)
+                    && !string.IsNullOrEmpty(fallbackBuffId))
+                {
+                    _monitor.Log(
+                        $"[StressTreatmentReview] Episode complete failed — fallback legacy buff={fallbackBuffId}",
+                        LogLevel.Warn);
+                    _treatmentService.CompleteTreatment(fallbackBuffId, "Лечение завершено.");
+                }
+
                 return;
             }
 

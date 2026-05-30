@@ -23,6 +23,7 @@ namespace HarveyStressMeter.Services
         private readonly LightningFrightMessageService _messageService;
         private readonly ModConfig _config;
         private readonly IMonitor _monitor;
+        private EpisodeQuestProgressService? _episodeQuestProgressService;
         private HarveyCareTrustService? _trustService;
         private HarveySafePersonAuraService? _safeAuraService;
         private StressSystemsCoordinator? _coordinator;
@@ -59,6 +60,9 @@ namespace HarveyStressMeter.Services
 
         public void SetCoordinator(StressSystemsCoordinator coordinator)
             => _coordinator = coordinator;
+
+        public void SetEpisodeQuestProgressService(EpisodeQuestProgressService episodeQuestProgressService)
+            => _episodeQuestProgressService = episodeQuestProgressService;
 
         public void ResetDailyState()
         {
@@ -311,6 +315,13 @@ namespace HarveyStressMeter.Services
                 _stressLoadService.DecayStress(State.IsGotoroFlashback ? 20 : 12);
             }
 
+            if (outcome?.DeferredEpisodeStart == true && State.IsGotoroFlashback)
+            {
+                State.DeferredGotoroShelterSeconds = Math.Max(
+                    State.DeferredGotoroShelterSeconds,
+                    State.ForestShelterSeconds);
+            }
+
             _messageService.ShowMessage(State, stabilizedText, force: true);
 
             if (GameStateHelper.IsForestShelterLocation())
@@ -435,6 +446,14 @@ namespace HarveyStressMeter.Services
 
         private void UpdateActiveTreatmentProgress()
         {
+            if (State.IsGotoroFlashback
+                && _stressLoadService.GetActiveTreatmentEpisodeId() != StressEpisodes.GotoroFlashback)
+            {
+                State.DeferredGotoroShelterSeconds = Math.Max(
+                    State.DeferredGotoroShelterSeconds,
+                    State.ForestShelterSeconds);
+            }
+
             var episodeId = _stressLoadService.GetActiveTreatmentEpisodeId();
             if (episodeId is not (StressEpisodes.GotoroFlashback or StressEpisodes.AnxietySpike))
                 return;
@@ -442,18 +461,9 @@ namespace HarveyStressMeter.Services
             if (!_stressLoadService.HasActiveTreatment())
                 return;
 
-            var buffId = TreatmentEpisodeDefinitions.ResolvePrimaryBuffId(
-                episodeId,
-                _stressLoadService.GetActiveCauses().Keys);
-
-            var treatment = _stateService.GetActiveTreatment(buffId);
-            if (treatment == null || !treatment.TreatmentStarted || treatment.AwaitingHarveyReview)
-                return;
-
-            treatment.Progress ??= new TreatmentProgress();
-            treatment.Progress.SecondsNearHarvey = Math.Max(
-                treatment.Progress.SecondsNearHarvey,
-                State.ForestShelterSeconds);
+            _episodeQuestProgressService?.OnFlashbackShelterUpdated(
+                State.ForestShelterSeconds,
+                episodeId);
         }
     }
 }

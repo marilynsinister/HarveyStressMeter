@@ -142,6 +142,14 @@ namespace HarveyStressMeter.Services
                 outcome.MarkedReadyForReview = true;
                 outcome.ReadyForReviewEpisodeId = StressEpisodes.GotoroFlashback;
             }
+            else if (string.Equals(
+                ActiveTreatmentEpisodeId,
+                StressEpisodes.AnxietySpike,
+                StringComparison.Ordinal))
+            {
+                outcome.MarkedReadyForReview = true;
+                outcome.ReadyForReviewEpisodeId = StressEpisodes.AnxietySpike;
+            }
             else if (isGotoroFlashback)
             {
                 outcome.DeferredEpisodeStart = true;

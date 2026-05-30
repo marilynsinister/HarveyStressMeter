@@ -129,6 +129,7 @@ namespace HarveyStressMeter.Helpers
             target.OverworkBreakSeconds = source.OverworkBreakSeconds;
             target.OverworkBreakActive = source.OverworkBreakActive;
             target.TalkedToHarveyToday = source.TalkedToHarveyToday;
+            target.SocialStressExposure = source.SocialStressExposure;
             target.DaysWithoutTalking = source.DaysWithoutTalking;
             target.DaysWithoutEating = source.DaysWithoutEating;
             target.DaysWithLateSleep = source.DaysWithLateSleep;
@@ -329,6 +330,7 @@ namespace HarveyStressMeter.Helpers
             target.HudMessageCooldownMinutes = source.HudMessageCooldownMinutes;
             target.LightningFrightIntensity = source.LightningFrightIntensity;
             target.IsGotoroFlashback = source.IsGotoroFlashback;
+            target.DeferredGotoroShelterSeconds = source.DeferredGotoroShelterSeconds;
         }
 
         private static void CopyHarveyCareTrustInto(HarveyCareTrustState target, HarveyCareTrustState source)
@@ -454,7 +456,17 @@ namespace HarveyStressMeter.Helpers
                 EarlySleepStreak = source.EarlySleepStreak,
                 TiredRestSeconds = source.TiredRestSeconds,
                 TiredRestMinutes = source.TiredRestMinutes,
-                TiredLastTimeOfDay = source.TiredLastTimeOfDay
+                TiredLastTimeOfDay = source.TiredLastTimeOfDay,
+                SocialShutdownTrustedTalk = source.SocialShutdownTrustedTalk,
+                SocialShutdownUnfamiliarNpcs = source.SocialShutdownUnfamiliarNpcs != null
+                    ? new HashSet<string>(source.SocialShutdownUnfamiliarNpcs)
+                    : new HashSet<string>(),
+                EpisodeCausesCompleted = source.EpisodeCausesCompleted != null
+                    ? new HashSet<string>(source.EpisodeCausesCompleted)
+                    : new HashSet<string>(),
+                BurnoutAvoidedMinesToday = source.BurnoutAvoidedMinesToday,
+                AnxietySafeSeconds = source.AnxietySafeSeconds,
+                QuestObjectivesEnabledAfterTick = source.QuestObjectivesEnabledAfterTick,
             };
         }
 

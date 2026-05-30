@@ -33,10 +33,13 @@ namespace HarveyStressMeter.Handlers
         private readonly HarveyCareTrustService _harveyCareTrustService;
         private readonly HarveySafePersonAuraService _harveySafePersonAuraService;
         private readonly StressGameplayEffectService _stressGameplayEffectService;
+        private readonly EpisodeQuestProgressService? _episodeQuestProgressService;
 
         private string? _lastDialogueNpc;
         /// <summary>Один stress debuff за MenuChanged/DialogueBox cycle с Харви.</summary>
         private bool _harveyStressDialogueCycleHandled;
+        /// <summary>topicDarknessTherapyStart уже был до текущего разговора (не CP #$t в этом диалоге).</summary>
+        private bool _hadDarknessTherapyTopicAtTalkStart;
 
         // ⭐ ОПТИМИЗАЦИЯ: Кэширование и интервальные проверки
         private bool _lastHarveyNearby = false;
@@ -92,7 +95,8 @@ namespace HarveyStressMeter.Handlers
             HarveyFlashbackRescueService harveyFlashbackRescueService,
             HarveyCareTrustService harveyCareTrustService,
             HarveySafePersonAuraService harveySafePersonAuraService,
-            StressGameplayEffectService stressGameplayEffectService)
+            StressGameplayEffectService stressGameplayEffectService,
+            EpisodeQuestProgressService? episodeQuestProgressService = null)
         {
             _data = data;
             _monitor = monitor;
@@ -109,6 +113,7 @@ namespace HarveyStressMeter.Handlers
             _harveyCareTrustService = harveyCareTrustService;
             _harveySafePersonAuraService = harveySafePersonAuraService;
             _stressGameplayEffectService = stressGameplayEffectService;
+            _episodeQuestProgressService = episodeQuestProgressService;
         }
 
         /// <summary>Сбрасывает RAM-состояние programmatic stress-диалога (pending auto-start).</summary>
@@ -117,6 +122,9 @@ namespace HarveyStressMeter.Handlers
             _stressDialogueService.ClearPendingTreatment();
             _stressTreatmentReviewService.ClearPendingReview();
         }
+
+        public void RepairStuckSocialTreatments()
+            => _triggerService.RepairStuckSocialTreatments();
 
         public void ResetDailyData()
         {
@@ -129,6 +137,10 @@ namespace HarveyStressMeter.Handlers
             _data.OverworkBreakSeconds = 0;
             _data.OverworkBreakActive = false;
             _data.TalkedToHarveyToday = false;
+
+            _data.SocialStressExposure = Math.Max(
+                0,
+                _data.SocialStressExposure - SocialStressHelper.DailyExposureDecay);
 
             ResetDailyQuestCounters();
 
@@ -205,7 +217,8 @@ namespace HarveyStressMeter.Handlers
             if (_harveyCheckCounter >= HARVEY_CHECK_INTERVAL)
             {
                 _harveyCheckCounter = 0;
-                UpdateHarveyCareAura(harveyNearby);
+                if (_buffService.HasBuff(BuffIds.CareAura))
+                    _buffService.RemoveBuff(BuffIds.CareAura);
                 _lastHarveyNearby = harveyNearby;
             }
             else
@@ -228,6 +241,8 @@ namespace HarveyStressMeter.Handlers
                     _triggerService.UpdateTreatmentProgress(harveyNearby);
                     _treatmentService.EnsureLockedBuffsPersist();
                 }
+
+                _episodeQuestProgressService?.UpdateActiveEpisode(harveyNearby);
 
                 // Manual triggers (Tired/Thunder/Overwork/Social complete paths) — раз в секунду, как в backup
                 if (ShouldRunManualTriggers())
@@ -283,25 +298,6 @@ namespace HarveyStressMeter.Handlers
         }
 
         /// <summary>
-        /// ⭐ ОПТИМИЗАЦИЯ: Отдельный метод для обновления Harvey care aura
-        /// </summary>
-        private void UpdateHarveyCareAura(bool harveyNearby)
-        {
-            if (harveyNearby)
-            {
-                if (!_buffService.HasBuff(BuffIds.CareAura))
-                {
-                    _buffService.ApplyBuff(BuffIds.CareAura, "Рядом с Харви",
-                        new StardewValley.Buffs.BuffEffects { Defense = { +1 }, MaxStamina = { +10 } }, 2000);
-                }
-            }
-            else if (_buffService.HasBuff(BuffIds.CareAura))
-            {
-                _buffService.RemoveBuff(BuffIds.CareAura);
-            }
-        }
-
-        /// <summary>
         /// ⭐ ОПТИМИЗАЦИЯ: Кэшированная проверка наличия стрессовых баффов
         /// Обновляется каждые 5 секунд вместо каждого вызова
         /// </summary>
@@ -353,6 +349,8 @@ namespace HarveyStressMeter.Handlers
         {
             if (e.NewLocation == null) return;
 
+            TryBlockPhobiaHouseExit(e);
+
             // Используем новую систему уровней страха темноты
             _darknessService.CheckAndApplyDarknessBuff(e.NewLocation);
             
@@ -369,6 +367,30 @@ namespace HarveyStressMeter.Handlers
             _harveyFlashbackRescueService.OnLocationChanged(
                 e.OldLocation?.NameOrUniqueName,
                 e.NewLocation.NameOrUniqueName);
+
+            _episodeQuestProgressService?.OnPlayerWarped(e.NewLocation.NameOrUniqueName);
+            _stressLoadService.SyncFromGameState();
+        }
+
+        /// <summary>Фobия (уровень 3): блок выхода из дома ночью, кроме терапии шагов 2–3.</summary>
+        private void TryBlockPhobiaHouseExit(WarpedEventArgs e)
+        {
+            if (e.OldLocation is not StardewValley.Locations.FarmHouse)
+                return;
+
+            if (e.NewLocation is StardewValley.Locations.FarmHouse)
+                return;
+
+            if (Game1.eventUp || Game1.CurrentEvent != null)
+                return;
+
+            if (_darknessService.CanLeaveHouseAtNight())
+                return;
+
+            // Возврат к двери фермерского дома (ванильная точка выхода)
+            Game1.warpFarmer("FarmHouse", 3, 24, 0);
+            _darknessService.ShowCannotLeaveMessage();
+            _monitor.Log("[DarknessTherapy] Выход из дома заблокирован (фobия, уровень 3)", LogLevel.Debug);
         }
 
         public void HandleTimeChanged(TimeChangedEventArgs e)
@@ -402,6 +424,8 @@ namespace HarveyStressMeter.Handlers
 
         public void CheckDayEndingQuestCompletion()
         {
+            _episodeQuestProgressService?.OnDayEnding(Game1.timeOfDay);
+
             // NoSleep - completion at early bedtime
             if (_stateService.HasActiveQuestState(QuestIds.NoSleep)
                 && Game1.timeOfDay >= 600 && Game1.timeOfDay <= 2200)
@@ -410,16 +434,8 @@ namespace HarveyStressMeter.Handlers
                 Game1.playSound("questcomplete");
             }
 
-            // Darkness - completion when spending evening in light
-            if (_stateService.HasActiveQuestState(QuestIds.Darkness)
-                && GameStateHelper.IsEveningNight(2000, 2600)
-                && _buffService.HasBuff(BuffIds.LightAndSafe)
-                && Game1.player.currentLocation is StardewValley.Locations.FarmHouse)
-            {
-                _buffService.RemoveBuff(BuffIds.LightAndSafe);
-                Game1.playSound("questcomplete");
-                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Darkness);
-            }
+            // Darkness — legacy HarveyMod_DarknessRecovery отключён при уровневой системе
+
         }
 
         /// <summary>
@@ -493,6 +509,8 @@ namespace HarveyStressMeter.Handlers
 
         private void HandleHarveyDialogue(NPC harveyNpc, MenuChangedEventArgs e)
         {
+            _hadDarknessTherapyTopicAtTalkStart = ConversationHelper.HasTopic("topicDarknessTherapyStart");
+
             if (!CanRunStressDialoguePipeline(harveyNpc))
                 return;
 
@@ -500,16 +518,6 @@ namespace HarveyStressMeter.Handlers
                 || _stressDialogueService.HasDeferredStressDialogue)
             {
                 _monitor.Log("[Диалог] Programmatic/deferred stress dialogue — fallback topics skipped", LogLevel.Debug);
-                return;
-            }
-
-            if (_stressTreatmentReviewService.TryArmReviewCompletionOnHarveyTalk(out var reviewBuffId))
-            {
-                _monitor.Log(
-                    $"[Диалог] Treatment review via CP topic (buff={reviewBuffId}) — vanilla dialogue, completion after close",
-                    LogLevel.Info);
-                _lastDialogueNpc = "Harvey";
-                _harveyStressDialogueCycleHandled = true;
                 return;
             }
 
@@ -533,11 +541,20 @@ namespace HarveyStressMeter.Handlers
                 return;
             }
 
+            if (_stressTreatmentReviewService.TryArmReviewCompletionOnHarveyTalk(out var reviewBuffId))
+            {
+                _monitor.Log(
+                    $"[Диалог] Treatment review via CP topic (buff={reviewBuffId}) — vanilla dialogue, completion after close",
+                    LogLevel.Info);
+                _lastDialogueNpc = "Harvey";
+                _harveyStressDialogueCycleHandled = true;
+                return;
+            }
+
             _monitor.Log("[Диалог] No programmatic stress dialogue; fallback topics allowed", LogLevel.Debug);
 
             CheckAllStressDebuffsAndAddTopics();
             CheckDarknessDebuffsAndAddTopics();
-            CheckDarknessTherapyStart();
             _harveyStressDialogueCycleHandled = true;
         }
 
@@ -555,7 +572,7 @@ namespace HarveyStressMeter.Handlers
                 return;
             }
 
-            var untreated = StressDebuffSelector.GetUntreatedDebuffs(_stateService);
+            var untreated = StressDebuffSelector.GetUntreatedDebuffs(_stateService, _data);
             if (untreated.Count == 0)
             {
                 _monitor.Log("[HandleHarveyDialogue] Fallback topics skipped: no untreated stress debuffs", LogLevel.Debug);
@@ -597,13 +614,19 @@ namespace HarveyStressMeter.Handlers
             // Auto-start treatment/quest after programmatic stress start dialogue closes.
             _stressDialogueService.CheckAndStartTreatmentAfterDialogue();
 
+            // CP level 2/3: #$t topicDarknessTherapyStart добавляет топик в конце диалога — старт только тогда.
+            TryStartDarknessTherapyFromCpDialogue();
+
+            _hadDarknessTherapyTopicAtTalkStart = false;
+
             // Финальное завершение лечения после programmatic review-диалога.
             _stressTreatmentReviewService.OnReviewDialogueClosed();
 
             _harveyCareTrustService.TryAwardSupportiveTalk();
 
-            // Обновляем прогресс Social квеста
             UpdateSocialQuestProgress(showUiMessage: false);
+            if (_lastDialogueNpc == "Harvey")
+                _triggerService.RegisterSocialShutdownNpcTalk("Harvey");
 
             if (!ConversationHelper.HasTopic(TopicIds.SpokeToday))
             {
@@ -627,6 +650,7 @@ namespace HarveyStressMeter.Handlers
                 {
                     _data.TalkedNpcsToday.Add(_lastDialogueNpc);
                     _monitor.Log($"[Диалог] Завершен разговор с {_lastDialogueNpc}. Всего разговоров сегодня: {_data.TalkedNpcsToday.Count}", LogLevel.Info);
+                    _triggerService.RegisterSocialShutdownNpcTalk(_lastDialogueNpc);
                 }
 
                 UpdateLonelyQuestProgress();
@@ -648,20 +672,37 @@ namespace HarveyStressMeter.Handlers
 
         private void CheckSocialStressTrigger(NPC npc)
         {
-            // ⭐ ИСПРАВЛЕНО: Не применяем дебафф во время событий
             if (Game1.CurrentEvent != null) return;
             
             if (Game1.stats.DaysPlayed < 5) return;
             if (_stateService.HasActiveTreatmentState(BuffIds.Social)) return;
             if (_stateService.HasImmunity(BuffIds.Social)) return;
+            if (!SocialStressHelper.IsQualifyingNpc(npc)) return;
 
-            if (Game1.player.friendshipData.TryGetValue(npc.Name, out var friendship))
+            var gain = SocialStressHelper.ApplyTrustMultiplier(
+                SocialStressHelper.ExposurePerTalk,
+                _harveyCareTrustService.GetEffectiveStressGainMultiplier());
+
+            _data.SocialStressExposure += gain;
+
+            _monitor.Log(
+                $"[Social Stress] +{gain} exposure ({_data.SocialStressExposure}/{SocialStressHelper.DebuffThreshold}) " +
+                $"при разговоре с {npc.Name}",
+                LogLevel.Debug);
+
+            if (_data.SocialStressExposure >= SocialStressHelper.DebuffThreshold)
             {
-                if (friendship.Points < 750 && Game1.random.NextDouble() < 0.3)
-                {
-                    _treatmentService.ApplyStressBuff(BuffIds.Social, "Социальный дискомфорт");
-                    _monitor.Log($"[Social Stress] Триггер активирован при разговоре с {npc.Name} (дружба: {friendship.Points}/750)", LogLevel.Info);
-                }
+                _data.SocialStressExposure = 0;
+                _treatmentService.ApplyStressBuff(BuffIds.Social, "Социальный дискомфорт");
+                _monitor.Log($"[Social Stress] Порог накопления — выдан debuff при разговоре с {npc.Name}", LogLevel.Info);
+                return;
+            }
+
+            if (_data.SocialStressExposure % SocialStressHelper.ExposurePerTalk == 0)
+            {
+                Game1.addHUDMessage(new HUDMessage(
+                    $"Социальное напряжение: {_data.SocialStressExposure}/{SocialStressHelper.DebuffThreshold}",
+                    HUDMessage.newQuest_type));
             }
         }
 
@@ -797,6 +838,11 @@ namespace HarveyStressMeter.Handlers
                     Game1.addHUDMessage(new HUDMessage("Нужно что-то горячее: чай или кофе", HUDMessage.newQuest_type));
                 }
             }
+
+            _episodeQuestProgressService?.OnFoodConsumed();
+
+            if (HotDrinkHelper.IsHotDrinkOrWarmingFood(consumed))
+                _episodeQuestProgressService?.OnHotDrinkConsumed();
         }
 
         private void NaturalBuffRemoval(bool harveyNearby)
@@ -928,8 +974,9 @@ namespace HarveyStressMeter.Handlers
 
             ManageOverworkBreaks(newLocation);
 
-            // Darkness quest - light and safety buff
-            if (_stateService.HasActiveQuestState(QuestIds.Darkness)
+            // Legacy Darkness (HarveyMod_DarknessRecovery) — только без уровневой системы
+            if (!DarknessLegacyHelper.UsesLevelSystem(_data, _stateService)
+                && _stateService.HasActiveQuestState(QuestIds.Darkness)
                 && GameStateHelper.IsEveningNight(2000, 2600)
                 && !_buffService.HasBuff(BuffIds.LightAndSafe)
                 && newLocation is StardewValley.Locations.FarmHouse)
@@ -1084,16 +1131,48 @@ namespace HarveyStressMeter.Handlers
                 lonelyTreatment.Progress.TalkedUniqueToday = 0;
             }
 
-            // ⭐ НОВОЕ: Для Social квеста НЕ сбрасываем TalkedUniqueToday!
-            // Это базовое значение разговоров на момент получения квеста
-            // Сбрасываем только счетчик разговоров ПОСЛЕ квеста и время с Харви
             var socialTreatment = GetTreatmentByQuest(QuestIds.Social);
             if (socialTreatment?.Progress != null)
             {
-                socialTreatment.Progress.SocialTalksAfterQuest = 0;  // Сбрасываем счетчик после квеста
-                socialTreatment.Progress.SecondsNearHarvey = 0;       // Сбрасываем время с Харви
-                // TalkedUniqueToday НЕ трогаем - это база!
+                socialTreatment.Progress.SocialTalksAfterQuest = 0;
+                socialTreatment.Progress.SecondsNearHarvey = 0;
             }
+
+            var socialShutdownTreatment = GetTreatmentByQuest(QuestIds.SocialShutdown);
+            if (socialShutdownTreatment?.Progress != null)
+            {
+                socialShutdownTreatment.Progress.SecondsNearHarvey = 0;
+                socialShutdownTreatment.Progress.SocialShutdownUnfamiliarNpcs.Clear();
+            }
+
+            ResetActiveEpisodeDailyCounters();
+        }
+
+        private void ResetActiveEpisodeDailyCounters()
+        {
+            var episode = _data.ActiveTreatmentEpisode;
+            if (episode == null || !episode.IsActiveEpisode())
+                return;
+
+            var treatment = GetTreatmentByQuest(episode.QuestId);
+            if (treatment?.Progress == null)
+                return;
+
+            switch (episode.EpisodeId)
+            {
+                case StressEpisodes.Burnout:
+                    treatment.Progress.BurnoutAvoidedMinesToday = true;
+                    break;
+                case StressEpisodes.PhysicalExhaustion:
+                    treatment.Progress.WarmSeconds = 0;
+                    treatment.Progress.TiredRestSeconds = 0;
+                    break;
+                case StressEpisodes.AnxietySpike:
+                    treatment.Progress.AnxietySafeSeconds = 0;
+                    break;
+            }
+
+            _episodeQuestProgressService?.UpdateQuestJournal(episode.EpisodeId, treatment.Progress);
         }
 
         private TreatmentState? GetTreatmentByQuest(string questId)
@@ -1132,7 +1211,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // Проверяем уровень 2 (сильный страх)
-            if (_stateService.HasActiveTreatmentState("buffDarknessLevel2"))
+            if (_stateService.HasBuffInGame(BuffIds.DarknessLevel2))
             {
                 if (!ConversationHelper.HasTopic("topicStressDarknessLevel2"))
                 {
@@ -1154,40 +1233,25 @@ namespace HarveyStressMeter.Handlers
         }
 
         /// <summary>
-        /// Проверить топик начала терапии и запустить терапию
+        /// CP: терапия стартует только если topicDarknessTherapyStart добавлен #$t в этом разговоре.
+        /// Programmatic level 1 идёт через CheckAndStartTreatmentAfterDialogue.
         /// </summary>
-        private void CheckDarknessTherapyStart()
+        private void TryStartDarknessTherapyFromCpDialogue()
         {
-            if (!CanRunStressDialoguePipeline())
+            if (GameStateHelper.IsEventActive())
                 return;
 
-            if (_stressDialogueService.IsShowingStressDialogue)
-            {
-                _monitor.Log("[HandleHarveyDialogue] Darkness therapy start skipped: programmatic stress dialogue is active", LogLevel.Debug);
+            if (_data.Darkness.IsTherapyActive)
                 return;
-            }
 
-            // Если топик начала терапии активен и терапия еще не начата
-            if (ConversationHelper.HasTopic("topicDarknessTherapyStart") && !_data.Darkness.IsTherapyActive)
-            {
-                // Запускаем терапию
-                _darknessService.StartTherapy();
-                
-                // Добавляем квест первого шага
-                var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == "HarveyMod_DarknessStep1");
-                if (quest == null)
-                {
-                    Game1.player.addQuest("HarveyMod_DarknessStep1");
-                    _monitor.Log("[DarknessTherapy] Добавлен квест Шага 1", LogLevel.Info);
-                }
-                
-                // Удаляем топики уровней страха
-                ConversationHelper.RemoveTopic(TopicIds.StressDarkness);
-                ConversationHelper.RemoveTopic("topicStressDarknessLevel2");
-                ConversationHelper.RemoveTopic("topicStressDarknessLevel3");
-                
-                _monitor.Log("[DarknessTherapy] ✅ Терапия начата через диалог!", LogLevel.Info);
-            }
+            if (_hadDarknessTherapyTopicAtTalkStart)
+                return;
+
+            if (!ConversationHelper.HasTopic("topicDarknessTherapyStart"))
+                return;
+
+            _darknessService.StartTherapy();
+            _monitor.Log("[DarknessTherapy] ✅ Терапия начата после CP-диалога (#$t topicDarknessTherapyStart)", LogLevel.Info);
         }
 
         private bool CanRunStressDialoguePipeline(

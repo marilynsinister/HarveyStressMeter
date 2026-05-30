@@ -23,6 +23,8 @@ namespace HarveyStressMeter.Services
         private GameDataService? _gameDataService;
         private StressLoadService? _stressLoadService;
         private TreatmentEpisodeService? _episodeService;
+        private EpisodeQuestProgressService? _episodeQuestProgressService;
+        private DarknessService? _darknessService;
 
         // Карты связей buff -> quest/topic/mail
         private static readonly Dictionary<string, string> BuffToQuest = new()
@@ -94,6 +96,18 @@ namespace HarveyStressMeter.Services
             _monitor.Log("[TreatmentService] TreatmentEpisodeService установлен", LogLevel.Debug);
         }
 
+        public void SetEpisodeQuestProgressService(EpisodeQuestProgressService episodeQuestProgressService)
+        {
+            _episodeQuestProgressService = episodeQuestProgressService;
+            _monitor.Log("[TreatmentService] EpisodeQuestProgressService установлен", LogLevel.Debug);
+        }
+
+        public void SetDarknessService(DarknessService darknessService)
+        {
+            _darknessService = darknessService;
+            _monitor.Log("[TreatmentService] DarknessService установлен", LogLevel.Debug);
+        }
+
         /// <summary>
         /// Применяет простой (незалоченный) бафф стресса при срабатывании триггера
         /// НЕ выдает квест - только бафф и топик для диалога с Харви
@@ -151,6 +165,26 @@ namespace HarveyStressMeter.Services
             if (GameStateHelper.IsEventActive())
             {
                 _monitor.Log($"[StartTreatment] Пропуск: активно событие ({buffId})", LogLevel.Debug);
+                return;
+            }
+
+            if (buffId == BuffIds.Darkness && DarknessLegacyHelper.UsesLevelSystem(_data, _stateService))
+            {
+                _monitor.Log("[StartTreatment] Старт уровневой терапии страха темноты", LogLevel.Info);
+                if (!_data.Darkness.IsTherapyActive && !_data.Darkness.IsCured)
+                {
+                    if (_darknessService == null)
+                    {
+                        _monitor.Log("[StartTreatment] DarknessService не установлен — fallback topicDarknessTherapyStart", LogLevel.Error);
+                        if (!ConversationHelper.HasTopic("topicDarknessTherapyStart"))
+                            ConversationHelper.AddTopic("topicDarknessTherapyStart", 7);
+                    }
+                    else
+                    {
+                        _darknessService.StartTherapy();
+                    }
+                }
+
                 return;
             }
 
@@ -321,23 +355,40 @@ namespace HarveyStressMeter.Services
             }
 
             // ⭐ УЛУЧШЕНО: Инициализируем прогресс для нового лечения
-            if (buffId == BuffIds.Social)
+            treatment.Progress.BeginQuestObjectivesGracePeriod();
+
+            if (string.Equals(questId, QuestIds.SocialShutdown, StringComparison.Ordinal))
             {
-                // ⭐ КРИТИЧНО: TalkedUniqueToday = базовое значение (сколько было разговоров ДО квеста)
-                // Это значение НЕ ДОЛЖНО сбрасываться каждый день в ResetDailyQuestCounters!
-                treatment.Progress.TalkedUniqueToday = _data.TalkedNpcsToday.Count;
-
-                // ⭐ КРИТИЧНО: SocialTalksAfterQuest = обнуляем счетчик разговоров ПОСЛЕ квеста
-                treatment.Progress.SocialTalksAfterQuest = 0;
-
-                // ⭐ НОВОЕ: Обнуляем время с Харви
                 treatment.Progress.SecondsNearHarvey = 0;
+                treatment.Progress.SocialShutdownTrustedTalk = false;
+                treatment.Progress.SocialShutdownUnfamiliarNpcs.Clear();
+
+                _questService.UpdateQuest(
+                    QuestIds.SocialShutdown,
+                    description:
+                        "Харви видит, что ты закрылась от людей. Сегодня нужен мягкий контакт, а не изоляция.\n\n" +
+                        treatment.Progress.GetSocialShutdownProgressText(),
+                    objective: TriggerService.BuildSocialShutdownObjective(treatment.Progress));
+
+                _monitor.Log("[StartTreatment] Инициализация прогресса SocialShutdown", LogLevel.Info);
+            }
+            else if (buffId == BuffIds.Social)
+            {
+                treatment.Progress.TalkedUniqueToday = _data.TalkedNpcsToday.Count;
+                treatment.Progress.SocialTalksAfterQuest = 0;
+                treatment.Progress.SecondsNearHarvey = 0;
+                treatment.Progress.SocialShutdownTrustedTalk = false;
+                treatment.Progress.SocialShutdownUnfamiliarNpcs.Clear();
 
                 _monitor.Log($"[StartTreatment] ═══ ИНИЦИАЛИЗАЦИЯ ПРОГРЕССА SOCIAL ═══", LogLevel.Info);
                 _monitor.Log($"[StartTreatment] TreatmentKey: {treatmentKey}", LogLevel.Info);
                 _monitor.Log($"[StartTreatment] TalkedUniqueToday (база): {treatment.Progress.TalkedUniqueToday}", LogLevel.Info);
                 _monitor.Log($"[StartTreatment] SocialTalksAfterQuest (счетчик): {treatment.Progress.SocialTalksAfterQuest}", LogLevel.Info);
                 _monitor.Log($"[StartTreatment] SecondsNearHarvey: {treatment.Progress.SecondsNearHarvey}", LogLevel.Info);
+            }
+            else if (!string.IsNullOrEmpty(episodeId))
+            {
+                _episodeQuestProgressService?.InitializeEpisodeQuest(episodeId, treatment.Progress);
             }
 
             // Добавить общий топик начала лечения
@@ -364,7 +415,7 @@ namespace HarveyStressMeter.Services
             _monitor.Log($"[StartTreatment] ActiveTreatmentsByBuff({buffId}).Count: {_data.StressState.GetActiveTreatmentCountByBuff(buffId)}", LogLevel.Info);
 
             _monitor.Log($"[StartTreatment] ✅ УСПЕШНО: Лечение начато для {displayName} (Квест: {questId}, Ключ: {treatmentKey})", LogLevel.Info);
-            Game1.playSound("questcomplete");
+            Game1.playSound("newRecipe");
         }
 
         /// <summary>

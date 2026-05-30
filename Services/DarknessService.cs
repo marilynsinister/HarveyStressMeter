@@ -16,15 +16,28 @@ namespace HarveyStressMeter.Services
         private readonly SaveData _data;
         private readonly BuffService _buffService;
         private readonly StateService _stateService;
+        private readonly QuestService _questService;
+        private StressLoadService? _stressLoadService;
         private readonly IMonitor _monitor;
 
-        public DarknessService(SaveData data, BuffService buffService, StateService stateService, IMonitor monitor)
+        private bool _worryLetterSent;
+
+        public DarknessService(
+            SaveData data,
+            BuffService buffService,
+            StateService stateService,
+            QuestService questService,
+            IMonitor monitor)
         {
             _data = data;
             _buffService = buffService;
             _stateService = stateService;
+            _questService = questService;
             _monitor = monitor;
         }
+
+        public void SetStressLoadService(StressLoadService stressLoadService)
+            => _stressLoadService = stressLoadService;
 
         /// <summary>
         /// Проверить и применить дебафф темноты при входе в локацию
@@ -103,6 +116,62 @@ namespace HarveyStressMeter.Services
             
             // Показываем сообщение игроку
             ShowFearLevelMessage();
+            SyncStressLoadFromDarkness();
+        }
+
+        /// <summary>Legacy buffStressDarkness → уровневая система; снятие устаревшего квеста.</summary>
+        public void MigrateLegacyDarknessPath()
+        {
+            if (!DarknessLegacyHelper.UsesLevelSystem(_data, _stateService))
+            {
+                if (_stateService.HasBuffInGame(BuffIds.Darkness) && _data.Darkness.FearLevel == 0)
+                {
+                    _data.Darkness.IncreaseFearLevel(SDate.Now());
+                    _buffService.RemoveBuff(BuffIds.Darkness);
+                    ApplyFearLevelBuff();
+                    ConversationHelper.RemoveTopic(TopicIds.StressDarkness);
+                    _monitor.Log("[DarknessService] Миграция legacy buffStressDarkness → уровень 1", LogLevel.Info);
+                }
+
+                return;
+            }
+
+            if (_stateService.HasBuffInGame(BuffIds.Darkness))
+                _buffService.RemoveBuff(BuffIds.Darkness);
+
+            if (_stateService.HasActiveQuestState(QuestIds.Darkness))
+            {
+                _questService.CompleteQuest(QuestIds.Darkness);
+                Game1.player.removeQuest(QuestIds.Darkness);
+                _buffService.RemoveBuff(BuffIds.LightAndSafe);
+                _monitor.Log("[DarknessService] Снят legacy-квест HarveyMod_DarknessRecovery (активна терапия уровней)", LogLevel.Info);
+            }
+        }
+
+        private void SyncStressLoadFromDarkness()
+            => _stressLoadService?.SyncFromGameState();
+
+        /// <summary>Сброс зависших топиков/флагов после прерванного старта терапии.</summary>
+        public void CleanupStaleDarknessState()
+        {
+            if (!_data.Darkness.IsTherapyActive && ConversationHelper.HasTopic("topicDarknessTherapyStart"))
+            {
+                ConversationHelper.RemoveTopic("topicDarknessTherapyStart");
+                _monitor.Log("[DarknessService] Удалён устаревший topicDarknessTherapyStart (терапия не активна)", LogLevel.Info);
+            }
+
+            const string step1QuestId = "HarveyMod_DarknessStep1";
+            if (_data.Darkness.IsTherapyActive
+                && !_questService.HasQuest(step1QuestId)
+                && _data.Darkness.TherapyStage <= 1
+                && _data.Darkness.SafeDarknessMinutes == 0)
+            {
+                _data.Darkness.IsTherapyActive = false;
+                _data.Darkness.TherapyStage = 0;
+                _data.Darkness.TherapyStartDate = null;
+                ConversationHelper.RemoveTopic("topicDarknessTherapyStart");
+                _monitor.Log("[DarknessService] Сброшен некonsistentный флаг терапии без квеста в журнале", LogLevel.Warn);
+            }
         }
 
         /// <summary>
@@ -111,12 +180,15 @@ namespace HarveyStressMeter.Services
         public void UpdateDailyFearState()
         {
             var currentDate = SDate.Now();
+
+            CleanupStaleDarknessState();
             
             // Обновляем счетчик игнорирования
             _data.Darkness.UpdateIgnoredDays(currentDate);
             
             _monitor.Log($"[DarknessService] Ежедневное обновление: Уровень={_data.Darkness.FearLevel}, Игнорируется={_data.Darkness.DaysIgnored} дней", LogLevel.Info);
 
+            MigrateLegacyDarknessPath();
             // Проверяем, нужно ли повысить уровень страха
             if (_data.Darkness.ShouldIncreaseFearLevel(currentDate))
             {
@@ -205,17 +277,25 @@ namespace HarveyStressMeter.Services
             
             _monitor.Log($"[DarknessService] ✅ Терапия начата! Текущий уровень страха: {_data.Darkness.FearLevel}", LogLevel.Info);
             
-            // Удаляем топики игнорирования
+            // Удаляем топики игнорирования и согласия на терапию
             ConversationHelper.RemoveTopic(TopicIds.StressDarkness);
             ConversationHelper.RemoveTopic("topicStressDarknessSerious");
             ConversationHelper.RemoveTopic("topicStressDarknessPhobia");
+            ConversationHelper.RemoveTopic("topicDarknessTherapyStart");
+            ConversationHelper.RemoveTopic("topicStressDarknessLevel2");
+            ConversationHelper.RemoveTopic("topicStressDarknessLevel3");
             
             // Сбрасываем счетчик игнорирования
             _data.Darkness.IgnoredSinceDate = null;
             _data.Darkness.DaysIgnored = 0;
+
+            const string step1QuestId = "HarveyMod_DarknessStep1";
+            if (!_questService.HasQuest(step1QuestId))
+                _questService.AddQuest(step1QuestId);
             
             Game1.playSound("newRecipe");
             Game1.addHUDMessage(new HUDMessage("Терапия страха темноты началась", HUDMessage.newQuest_type));
+            RefreshTherapyQuestJournal(1);
         }
 
         /// <summary>
@@ -324,8 +404,9 @@ namespace HarveyStressMeter.Services
                 {
                     _data.Darkness.SafeDarknessMinutes++;
                     
-                    if (_data.Darkness.SafeDarknessMinutes % 5 == 0) // Каждые 5 минут
+                    if (_data.Darkness.SafeDarknessMinutes % 5 == 0)
                     {
+                        RefreshTherapyQuestJournal(1);
                         Game1.addHUDMessage(new HUDMessage($"Прогресс: {_data.Darkness.SafeDarknessMinutes}/15 минут", HUDMessage.newQuest_type));
                         _monitor.Log($"[DarknessService] Шаг 1: Прогресс {_data.Darkness.SafeDarknessMinutes}/15 минут", LogLevel.Info);
                     }
@@ -382,6 +463,7 @@ namespace HarveyStressMeter.Services
             
             // Добавляем квест Шага 2 с задержкой (чтобы игрок сначала увидел сообщение)
             Game1.player.addQuest("HarveyMod_DarknessStep2");
+            RefreshTherapyQuestJournal(2);
             _monitor.Log("[DarknessService] Добавлен квест Шага 2", LogLevel.Info);
         }
 
@@ -434,6 +516,7 @@ namespace HarveyStressMeter.Services
                 Game1.playSound("coin");
                 
                 _monitor.Log($"[DarknessService] Шаг 2: Посещена зона {locationName} ({_data.Darkness.SafeZonesVisited.Count}/2)", LogLevel.Info);
+                RefreshTherapyQuestJournal(2);
 
                 // Проверяем завершение
                 if (_data.Darkness.SafeZonesVisited.Count >= 2)
@@ -477,6 +560,7 @@ namespace HarveyStressMeter.Services
             
             // Добавляем квест Шага 3
             Game1.player.addQuest("HarveyMod_DarknessStep3");
+            RefreshTherapyQuestJournal(3);
             _monitor.Log("[DarknessService] Добавлен квест Шага 3 (финал)", LogLevel.Info);
         }
 
@@ -518,8 +602,9 @@ namespace HarveyStressMeter.Services
                         Game1.addHUDMessage(new HUDMessage(messages[Game1.random.Next(messages.Length)], HUDMessage.newQuest_type));
                     }
 
-                    if (_data.Darkness.MountainNightSeconds % 20 == 0) // Каждые 20 секунд
+                    if (_data.Darkness.MountainNightSeconds % 20 == 0)
                     {
+                        RefreshTherapyQuestJournal(3);
                         Game1.addHUDMessage(new HUDMessage($"Прогресс: {_data.Darkness.MountainNightSeconds}/120 сек", HUDMessage.newQuest_type));
                         _monitor.Log($"[DarknessService] Шаг 3: Прогресс {_data.Darkness.MountainNightSeconds}/120 сек", LogLevel.Info);
                     }
@@ -672,10 +757,53 @@ namespace HarveyStressMeter.Services
 
         private void SendHarveyWorryLetter()
         {
-            // TODO: Добавить письмо в mailbox на следующий день
-            // Game1.player.mailForTomorrow.Add("HarveyWorryDarkness");
-            _monitor.Log("[DarknessService] TODO: Отправить письмо от Харви о беспокойстве", LogLevel.Debug);
+            if (_worryLetterSent || ConversationHelper.HasTopic("topicHarveyDarknessWorryLetterSent"))
+                return;
+
+            _questService.AddMailForTomorrow(MailIds.DarknessWorry);
+            ConversationHelper.AddTopic("topicHarveyDarknessWorryLetterSent", 14);
+            _worryLetterSent = true;
+            _monitor.Log("[DarknessService] Письмо от Харви о беспокойстве (фobия) запланировано на завтра", LogLevel.Info);
         }
+
+        public void RefreshTherapyQuestJournal(int stage)
+        {
+            var objective = stage switch
+            {
+                1 => BuildStep1ObjectiveForInstance(),
+                2 => BuildStep2ObjectiveForInstance(),
+                3 => BuildStep3ObjectiveForInstance(),
+                _ => null,
+            };
+
+            if (objective == null)
+                return;
+
+            var questId = stage switch
+            {
+                1 => "HarveyMod_DarknessStep1",
+                2 => "HarveyMod_DarknessStep2",
+                3 => "HarveyMod_DarknessStep3",
+                _ => "",
+            };
+
+            if (!string.IsNullOrEmpty(questId))
+                _questService.UpdateQuest(questId, objective: objective);
+        }
+
+        private string BuildStep1ObjectiveForInstance()
+            => $"Дома при приглушенном свете: {_data.Darkness.SafeDarknessMinutes}/15 мин (вечер 20:00–00:00)";
+
+        private string BuildStep2ObjectiveForInstance()
+        {
+            var visited = _data.Darkness.SafeZonesVisited;
+            var bus = visited.Contains("BusStop") ? "✅" : "⬜";
+            var town = visited.Contains("Town") ? "✅" : "⬜";
+            return $"Безопасные зоны (20:00–22:00): {bus} Автобусная остановка, {town} Город ({visited.Count}/2)";
+        }
+
+        private string BuildStep3ObjectiveForInstance()
+            => $"Ночь в горах с фонарём Харви: {_data.Darkness.MountainNightSeconds}/120 сек (22:00–02:00)";
 
         private void ApplyOvercomeBonus()
         {

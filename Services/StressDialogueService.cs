@@ -38,6 +38,8 @@ namespace HarveyStressMeter.Services
 
         private readonly StateService _stateService;
 
+        private readonly SaveData _data;
+
         private readonly TreatmentService _treatmentService;
 
         private readonly TreatmentEpisodeService _episodeService;
@@ -85,6 +87,8 @@ namespace HarveyStressMeter.Services
 
             IModHelper helper,
 
+            SaveData data,
+
             StateService stateService,
 
             TreatmentService treatmentService,
@@ -98,6 +102,8 @@ namespace HarveyStressMeter.Services
             _monitor = monitor;
 
             _helper = helper;
+
+            _data = data;
 
             _stateService = stateService;
 
@@ -276,25 +282,7 @@ namespace HarveyStressMeter.Services
 
 
 
-            string? selected = null;
-
-
-
-            foreach (var buffId in StressDebuffSelector.PriorityOrder)
-
-            {
-
-                if (!StressDebuffSelector.IsUntreatedDebuff(_stateService, buffId))
-
-                    continue;
-
-
-
-                selected = buffId;
-
-                break;
-
-            }
+            string? selected = StressDebuffSelector.GetPrimaryUntreatedDebuff(_stateService, _data);
 
 
 
@@ -304,7 +292,7 @@ namespace HarveyStressMeter.Services
 
 
 
-            var otherUntreated = StressDebuffSelector.GetUntreatedDebuffs(_stateService)
+            var otherUntreated = StressDebuffSelector.GetUntreatedDebuffs(_stateService, _data)
 
                 .Where(id => id != selected)
 
@@ -350,7 +338,11 @@ namespace HarveyStressMeter.Services
 
         {
 
-            return GetDialogueByKey(buffId);
+            var dialogueKey = DarknessLegacyHelper.IsDarknessLevelBuff(buffId)
+                ? BuffIds.Darkness
+                : buffId;
+
+            return GetDialogueByKey(dialogueKey);
 
         }
 
@@ -946,19 +938,29 @@ namespace HarveyStressMeter.Services
 
 
 
-            var dialogueData = _dialoguesData?.Dialogues.FirstOrDefault(d => d.BuffId == buffId);
+            if (string.IsNullOrEmpty(buffId))
 
-            var displayName = dialogueData?.DisplayName ?? buffId;
+                return;
+
+
+
+            var treatmentBuffId = DarknessLegacyHelper.ResolveTreatmentBuffId(buffId);
+
+            var dialogueData = _dialoguesData?.Dialogues.FirstOrDefault(d =>
+                d.BuffId == treatmentBuffId || d.BuffId == buffId);
+
+            var displayName = dialogueData?.DisplayName
+                ?? (DarknessLegacyHelper.IsDarknessLevelBuff(buffId) ? "Страх темноты" : buffId);
 
 
 
             _monitor.Log(
 
-                $"[StressDialogueService] Старт лечения/квеста для {buffId} после реплики Харви",
+                $"[StressDialogueService] Старт лечения/квеста для {treatmentBuffId} (dialogue buff {buffId}) после реплики Харви",
 
                 LogLevel.Info);
 
-            _treatmentService.StartTreatment(buffId, displayName);
+            _treatmentService.StartTreatment(treatmentBuffId, displayName);
 
         }
 
@@ -1117,6 +1119,34 @@ namespace HarveyStressMeter.Services
 
             {
 
+                var untreatedBuffId = CheckForActiveDebuffWithoutTreatment();
+
+                if (untreatedBuffId != null)
+
+                {
+
+                    dialogueText = GetDialogueForBuff(untreatedBuffId);
+
+                    if (dialogueText != null)
+
+                    {
+
+                        buffId = untreatedBuffId;
+
+                        _monitor.Log(
+
+                            $"[StressDialogueService] Untreated debuff {untreatedBuffId} overrides ambient-only",
+
+                            LogLevel.Debug);
+
+                        return true;
+
+                    }
+
+                }
+
+
+
                 var ctx = _episodeService.BuildContext();
 
                 var causeId = ResolveAmbientCauseId(ctx.ActiveCauseIds);
@@ -1142,6 +1172,22 @@ namespace HarveyStressMeter.Services
                 if (dialogueText == null)
 
                     return false;
+
+
+
+                if (_stateService.WasTreatmentOfferShownToday(buffId))
+
+                {
+
+                    _monitor.Log(
+
+                        $"[StressDialogueService] Ambient notice already shown today for {buffId}",
+
+                        LogLevel.Debug);
+
+                    return false;
+
+                }
 
 
 

@@ -17,5 +17,8 @@ namespace HarveyStressMeter.Models
         public int HudMessageCooldownMinutes { get; set; } = 45;
         public int LightningFrightIntensity { get; set; }
         public bool IsGotoroFlashback { get; set; }
+
+        /// <summary>Укрытие в лесу до старта Gotoro episode-квеста (переносится в progress).</summary>
+        public int DeferredGotoroShelterSeconds { get; set; }
     }
 }

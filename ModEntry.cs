@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using StardewModdingAPI;
+using StardewModdingAPI.Events;
 using StardewModdingAPI.Utilities;
 using HarmonyLib;
 using HarveyStressMeter.Models;
@@ -29,6 +30,7 @@ namespace HarveyStressMeter
         private StateService _stateService = null!;
         private TreatmentService _treatmentService = null!;
         private TriggerService _triggerService = null!;
+        private EpisodeQuestProgressService _episodeQuestProgressService = null!;
         private DarknessService _darknessService = null!;
         private StressDialogueService _stressDialogueService = null!;
         private StressTreatmentReviewService _stressTreatmentReviewService = null!;
@@ -74,6 +76,8 @@ namespace HarveyStressMeter
 
             // Subscribe to events through EventHandler
             _eventHandler.SubscribeToEvents();
+
+            _helper.Events.Content.AssetRequested += OnAssetRequested;
 
             // Register console commands through ConsoleCommandHandler
             _consoleCommandHandler.RegisterCommands();
@@ -213,8 +217,17 @@ namespace HarveyStressMeter
             _treatmentService.SetTreatmentEpisodeService(_treatmentEpisodeService);
             _treatmentEpisodeService.SetTreatmentService(_treatmentService);
             _treatmentEpisodeService.SetTrustService(_harveyCareTrustService);
+            _episodeQuestProgressService = new EpisodeQuestProgressService(
+                _data,
+                _questService,
+                _treatmentService,
+                Monitor);
+            _treatmentService.SetEpisodeQuestProgressService(_episodeQuestProgressService);
             _triggerService = new TriggerService(_data, _buffService, _questService, _stateService, _treatmentService, Monitor);
-            _darknessService = new DarknessService(_data, _buffService, _stateService, Monitor);
+            _triggerService.SetEpisodeQuestProgressService(_episodeQuestProgressService);
+            _darknessService = new DarknessService(_data, _buffService, _stateService, _questService, Monitor);
+            _darknessService.SetStressLoadService(_stressLoadService);
+            _treatmentService.SetDarknessService(_darknessService);
             _thunderFlashbackService = new ThunderFlashbackService(
                 _data,
                 _stressLoadService,
@@ -233,6 +246,7 @@ namespace HarveyStressMeter
                 _thunderFlashbackService,
                 Monitor);
             _thunderFlashbackService.SetSafeAuraService(_harveySafePersonAuraService);
+            _thunderFlashbackService.SetEpisodeQuestProgressService(_episodeQuestProgressService);
             Monitor.Log("Safe aura wired", LogLevel.Info);
             _harveyFlashbackRescueService = new HarveyFlashbackRescueService(
                 _data,
@@ -265,6 +279,7 @@ namespace HarveyStressMeter
             _stressDialogueService = new StressDialogueService(
                 Monitor,
                 _helper,
+                _data,
                 _stateService,
                 _treatmentService,
                 _treatmentEpisodeService,
@@ -302,7 +317,7 @@ namespace HarveyStressMeter
         {
             // Create handlers (high-level modules that depend on services)
             _uiHandler = new UIHandler(Monitor, _data, _helper);
-            _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _stressGameplayEffectService);
+            _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _stressGameplayEffectService, _episodeQuestProgressService);
             _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _gameLogicHandler, _uiHandler, _darknessService, _stressLoadService);
             _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler, _modResetService, _stressDialogueService);
 
@@ -341,6 +356,24 @@ namespace HarveyStressMeter
             }
             else
                 Monitor.Log("❌ Harmony не инициализирован — отслеживание еды отключено", LogLevel.Error);
+        }
+
+        private void OnAssetRequested(object? sender, AssetRequestedEventArgs e)
+        {
+            if (!e.NameWithoutLocale.IsEquivalentTo("Data/Mail"))
+                return;
+
+            e.Edit(asset =>
+            {
+                var data = asset.AsDictionary<string, string>().Data;
+                foreach (var mail in _gameDataService.GetAllMails())
+                {
+                    if (string.IsNullOrEmpty(mail.Id) || data.ContainsKey(mail.Id))
+                        continue;
+
+                    data[mail.Id] = $"{mail.Subject}^^{mail.Text}";
+                }
+            });
         }
     }
 }
