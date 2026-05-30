@@ -32,6 +32,9 @@ namespace HarveyStressMeter.Models
         /// <summary>Количество дней подряд позднего отхода ко сну (после 00:00)</summary>
         public int DaysWithLateSleep { get; set; } = 0;
 
+        /// <summary>NoSleep: показать objective о неудачной попытке один раз утром после позднего сна.</summary>
+        public bool NoSleepLateObjectivePending { get; set; }
+
         /// <summary>
         /// Полное состояние системы стресса игрока
         /// ЕДИНЫЙ ИСТОЧНИК ПРАВДЫ для всей логики баффов и квестов

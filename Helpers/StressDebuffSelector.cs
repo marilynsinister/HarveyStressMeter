@@ -37,8 +37,17 @@ namespace HarveyStressMeter.Helpers
         };
 
         /// <summary>Дебафф активен, но лечение ещё не начато (consent/квест не выдан).</summary>
-        public static bool IsUntreatedDebuff(StateService stateService, string buffId)
+        public static bool IsUntreatedDebuff(StateService stateService, string buffId, SaveData? data = null)
         {
+            if (DarknessLegacyHelper.IsDarknessLevelBuff(buffId))
+            {
+                return data != null
+                       && DarknessLegacyHelper.IsUntreatedLevelDarkness(data, stateService, buffId);
+            }
+
+            if (data != null && DarknessLegacyHelper.ShouldSkipLegacyDebuffSelector(data, stateService, buffId))
+                return false;
+
             var treatment = stateService.GetActiveTreatment(buffId);
 
             if (treatment == null && stateService.HasBuffInGame(buffId))
@@ -65,7 +74,7 @@ namespace HarveyStressMeter.Helpers
                     continue;
                 }
 
-                if (IsUntreatedDebuff(stateService, buffId))
+                if (IsUntreatedDebuff(stateService, buffId, data))
                     result.Add(buffId);
             }
 
@@ -89,7 +98,7 @@ namespace HarveyStressMeter.Helpers
                     continue;
                 }
 
-                if (IsUntreatedDebuff(stateService, buffId))
+                if (IsUntreatedDebuff(stateService, buffId, data))
                     return buffId;
             }
 
@@ -108,14 +117,13 @@ namespace HarveyStressMeter.Helpers
 
         private static string? TryGetUntreatedDarknessLevelBuff(SaveData data, StateService stateService)
         {
-            if (!DarknessLegacyHelper.NeedsHarveyDarknessTherapy(data, stateService))
-                return null;
-
             var levelBuff = DarknessLegacyHelper.GetActiveLevelBuffId(stateService);
-            if (levelBuff == null || !IsUntreatedDebuff(stateService, levelBuff))
+            if (levelBuff == null)
                 return null;
 
-            return levelBuff;
+            return DarknessLegacyHelper.IsUntreatedLevelDarkness(data, stateService, levelBuff)
+                ? levelBuff
+                : null;
         }
 
         /// <summary>Активное лечение с выполненными условиями, ожидающее финального разговора (наивысший приоритет).</summary>

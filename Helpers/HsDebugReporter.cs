@@ -32,12 +32,6 @@ namespace HarveyStressMeter.Helpers
             (BuffIds.Darkness, QuestIds.Darkness),
         };
 
-        private static readonly string[] DarknessLevelBuffIds =
-        {
-            BuffIds.DarknessLevel1,
-            BuffIds.DarknessLevel2,
-            BuffIds.DarknessLevel3,
-        };
 
         private static readonly string[] ServiceBuffIds =
         {
@@ -193,7 +187,7 @@ namespace HarveyStressMeter.Helpers
                 _monitor.Log($"  {buffId} ({questId}): hasBuff={inGame}, modState={inState}", LogLevel.Info);
             }
 
-            foreach (var buffId in DarknessLevelBuffIds)
+            foreach (var buffId in DarknessLegacyHelper.LevelBuffIds)
             {
                 bool inGame = _stateService.HasBuffInGame(buffId);
                 _monitor.Log($"  {buffId}: hasBuff={inGame}", LogLevel.Info);
@@ -265,11 +259,27 @@ namespace HarveyStressMeter.Helpers
         private void WriteDarkness()
         {
             var d = _data.Darkness;
+            var activeBuff = DarknessLegacyHelper.GetActiveLevelBuffId(_stateService)
+                ?? (_stateService.HasBuffInGame(BuffIds.Darkness) ? BuffIds.Darkness : "(none)");
+
             _monitor.Log("\n--- DARKNESS ---", LogLevel.Info);
             _monitor.Log($"FearLevel: {d.FearLevel} ({d.GetFearLevelDescription()})", LogLevel.Info);
+            _monitor.Log($"CurrentGameBuff: {activeBuff}", LogLevel.Info);
+            _monitor.Log($"UsesLevelSystem: {DarknessLegacyHelper.UsesLevelSystem(_data, _stateService)}", LogLevel.Info);
             _monitor.Log($"IsTherapyActive: {d.IsTherapyActive}", LogLevel.Info);
             _monitor.Log($"CurrentStep (TherapyStage): {d.TherapyStage}", LogLevel.Info);
-            _monitor.Log($"SafeDarknessMinutes: {d.SafeDarknessMinutes}/15", LogLevel.Info);
+            if (d.IsTherapyActive && d.TherapyStage >= 1)
+            {
+                var stepQuest = DarknessLegacyHelper.GetStepQuestIdForStage(d.TherapyStage);
+                _monitor.Log(
+                    $"StepQuest: {stepQuest ?? "?"} inJournal={DarknessLegacyHelper.HasStepQuestInJournal(d.TherapyStage)}",
+                    LogLevel.Info);
+            }
+
+            _monitor.Log(
+                $"Step1: evenings {d.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired}, " +
+                $"today {d.SafeDarknessProgressToday}/{DarknessLegacyHelper.Step1MinutesPerEvening}, legacyMinutes={d.SafeDarknessMinutes}",
+                LogLevel.Info);
             _monitor.Log($"SafeZonesVisited: [{string.Join(", ", d.SafeZonesVisited)}]", LogLevel.Info);
             _monitor.Log($"MountainNightSeconds: {d.MountainNightSeconds}/120", LogLevel.Info);
             _monitor.Log($"CompletedStep1/2/3: {d.CompletedStep1}/{d.CompletedStep2}/{d.CompletedStep3}", LogLevel.Info);
@@ -333,7 +343,7 @@ namespace HarveyStressMeter.Helpers
                     problems.Add($"Real buff present ({buffId}) but no active mod treatment state");
             }
 
-            foreach (var buffId in DarknessLevelBuffIds)
+            foreach (var buffId in DarknessLegacyHelper.LevelBuffIds)
             {
                 if (_stateService.HasBuffInGame(buffId) && !_stateService.HasActiveTreatmentState(BuffIds.Darkness))
                 {

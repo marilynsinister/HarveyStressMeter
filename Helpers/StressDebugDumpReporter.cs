@@ -55,7 +55,7 @@ namespace HarveyStressMeter.Helpers
         public static string BuildReport(StressDebugDumpContext ctx)
         {
             var sb = new StringBuilder();
-            var untreated = SafeGet(() => StressDebuffSelector.GetUntreatedDebuffs(ctx.StateService), new List<string>());
+            var untreated = SafeGet(() => StressDebuffSelector.GetUntreatedDebuffs(ctx.StateService, ctx.Data), new List<string>());
 
             sb.AppendLine($"ActiveTreatments count: {ctx.Data.StressState.ActiveTreatments.Count}");
             sb.AppendLine($"Active untreated: {string.Join(", ", untreated.DefaultIfEmpty("(none)"))}");
@@ -236,7 +236,7 @@ namespace HarveyStressMeter.Helpers
 
         private static void AppendDebuffsSection(StringBuilder sb, StressDebugDumpContext ctx)
         {
-            var untreated = StressDebuffSelector.GetUntreatedDebuffs(ctx.StateService);
+            var untreated = StressDebuffSelector.GetUntreatedDebuffs(ctx.StateService, ctx.Data);
 
             foreach (var buffId in TreatmentTopics.ImplementedBuffIds)
             {
@@ -258,6 +258,28 @@ namespace HarveyStressMeter.Helpers
                 sb.AppendLine($"  stressTopic: {stressTopicId ?? "(n/a)"} active={stressTopicId != null && ConversationHelper.HasTopic(stressTopicId)}");
                 sb.AppendLine($"  topicStarted: {topicStarted}");
                 sb.AppendLine($"  topicReadyForReview: {reviewTopic != null && ConversationHelper.HasTopic(reviewTopic)}");
+            }
+
+            sb.AppendLine("- darkness (level system, separate from ActiveTreatment):");
+            var d = ctx.Data.Darkness;
+            var levelBuff = DarknessLegacyHelper.GetActiveLevelBuffId(ctx.StateService)
+                ?? (ctx.StateService.HasBuffInGame(BuffIds.Darkness) ? BuffIds.Darkness : "(none)");
+            sb.AppendLine($"  fearLevel: {d.FearLevel}, gameBuff: {levelBuff}");
+            sb.AppendLine($"  therapy: {d.IsTherapyActive}, stage: {d.TherapyStage}, usesLevelSystem: {DarknessLegacyHelper.UsesLevelSystem(ctx.Data, ctx.StateService)}");
+            if (d.IsTherapyActive && d.TherapyStage >= 1)
+            {
+                sb.AppendLine(
+                    $"  stepQuest: {DarknessLegacyHelper.GetStepQuestIdForStage(d.TherapyStage)} inJournal={DarknessLegacyHelper.HasStepQuestInJournal(d.TherapyStage)}");
+                sb.AppendLine(
+                    $"  step1: evenings {d.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired} today {d.SafeDarknessProgressToday}/{DarknessLegacyHelper.Step1MinutesPerEvening}");
+            }
+
+            foreach (var levelId in DarknessLegacyHelper.LevelBuffIds)
+            {
+                if (!untreated.Contains(levelId))
+                    continue;
+
+                sb.AppendLine($"  untreatedLevelBuff: {levelId}");
             }
         }
 
@@ -471,7 +493,7 @@ namespace HarveyStressMeter.Helpers
             if (StressDebuffSelector.BuffToStressTopic.TryGetValue(buffId, out var stressPair))
                 return stressPair.topic;
 
-            if (buffId == BuffIds.Darkness)
+            if (buffId == BuffIds.Darkness || DarknessLegacyHelper.IsDarknessLevelBuff(buffId))
                 return TopicIds.StressDarkness;
 
             return null;

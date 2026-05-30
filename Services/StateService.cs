@@ -103,6 +103,14 @@ namespace HarveyStressMeter.Services
         /// </summary>
         public void ApplyStressBuff(string buffId, string description)
         {
+            if (DarknessLegacyHelper.BlocksLegacyTreatmentPipeline(buffId))
+            {
+                _monitor.Log(
+                    $"[StateService] ApplyStressBuff пропущен для '{buffId}' — страх темноты ведёт DarknessService, не ActiveTreatment",
+                    LogLevel.Warn);
+                return;
+            }
+
             // Проверяем, нет ли уже активного баффа
             if (_data.StressState.HasActiveBuff(buffId))
             {
@@ -146,6 +154,14 @@ namespace HarveyStressMeter.Services
         /// </summary>
         public void CreateTreatment(string buffId)
         {
+            if (DarknessLegacyHelper.BlocksLegacyTreatmentPipeline(buffId))
+            {
+                _monitor.Log(
+                    $"[StateService] CreateTreatment пропущен для '{buffId}' — уровневая темнота без ActiveTreatment",
+                    LogLevel.Warn);
+                return;
+            }
+
             if (_data.StressState.HasActiveBuff(buffId))
             {
                 _monitor.Log($"[StateService] ⚠️ Дебафф '{buffId}' уже активен", LogLevel.Warn);
@@ -396,9 +412,18 @@ namespace HarveyStressMeter.Services
                 {
                     _data.StressState.RemoveTreatment(treatmentKey);
                     cleanedCount++;
-                    _monitor.Log($"[StateService] Очищено завершенное лечение: {treatmentKey}", LogLevel.Debug);
+                    _monitor.Log(
+                        $"[StressSync] Removed TreatmentState {treatmentKey}: reason=IsCuredOrIsCompleted, " +
+                        $"buffId={buffId}, questId={questId ?? "(empty)"}, IsCured={treatment.IsCured}, IsCompleted={treatment.IsCompleted}",
+                        LogLevel.Info);
                     continue;
                 }
+
+                if (DarknessLegacyHelper.BlocksLegacyTreatmentPipeline(buffId))
+                    continue;
+
+                if (buffId == BuffIds.Darkness && DarknessLegacyHelper.UsesLevelSystem(_data, this))
+                    continue;
 
                 // Квест завершён в журнале игры — не снимаем дебафф до разговора с Харви
                 if (!string.IsNullOrEmpty(questId) && _questService.HasQuest(questId))
@@ -462,6 +487,8 @@ namespace HarveyStressMeter.Services
             // Получаем все уникальные активные баффы из активных лечений
             var activeBuffIds = _data.StressState.ActiveTreatments.Values
                 .Where(t => !t.IsCured && !t.IsCompleted)
+                .Where(t => !DarknessLegacyHelper.BlocksLegacyTreatmentPipeline(t.BuffId))
+                .Where(t => t.BuffId != BuffIds.Darkness || !DarknessLegacyHelper.UsesLevelSystem(_data, this))
                 .Select(t => t.BuffId)
                 .Distinct()
                 .ToList();

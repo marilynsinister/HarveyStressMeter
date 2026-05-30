@@ -143,14 +143,15 @@ namespace HarveyStressMeter.Handlers
                 _data.SocialStressExposure - SocialStressHelper.DailyExposureDecay);
 
             ResetDailyQuestCounters();
+            ApplyPendingNoSleepLateObjective();
 
             _thunderFlashbackService.ResetDailyState();
             _harveyFlashbackRescueService.ResetDailyState();
             _harveyCareTrustService.OnDayStarted();
-            
-            // Обновляем состояние страха темноты каждый день
-            _darknessService.UpdateDailyFearState();
         }
+
+        public void UpdateDailyDarknessState()
+            => _darknessService.UpdateDailyFearState();
 
         public void CheckDayStartedStressTriggers()
         {
@@ -336,8 +337,8 @@ namespace HarveyStressMeter.Handlers
                 || _stateService.HasBuffInGame(BuffIds.Thunder)
                 || _stateService.HasBuffInGame(BuffIds.Hunger)
                 || _stateService.HasBuffInGame(BuffIds.TooCold)
-                || _stateService.HasBuffInGame(BuffIds.Darkness)
-                || _stateService.HasBuffInGame(BuffIds.Social);
+                || _stateService.HasBuffInGame(BuffIds.Social)
+                || DarknessLegacyHelper.HasAnyDarknessStressBuffInGame(_stateService);
         }
 
         public void HandleMenuChanged(MenuChangedEventArgs e)
@@ -426,16 +427,26 @@ namespace HarveyStressMeter.Handlers
         {
             _episodeQuestProgressService?.OnDayEnding(Game1.timeOfDay);
 
-            // NoSleep - completion at early bedtime
-            if (_stateService.HasActiveQuestState(QuestIds.NoSleep)
-                && Game1.timeOfDay >= 600 && Game1.timeOfDay <= 2200)
+            if (!_stateService.HasActiveQuestState(QuestIds.NoSleep))
+                return;
+
+            var noSleepTreatment = GetTreatmentByQuest(QuestIds.NoSleep);
+            if (noSleepTreatment?.AwaitingHarveyReview == true)
+                return;
+
+            int bedtime = Game1.timeOfDay;
+            if (bedtime >= 600 && bedtime <= 2200)
             {
+                _treatmentService.UpdateTreatmentObjective(BuffIds.NoSleep, LegacyTreatmentObjectives.NoSleepDone);
                 _treatmentService.MarkTreatmentReadyForReview(BuffIds.NoSleep);
                 Game1.playSound("questcomplete");
             }
+            else if (bedtime > 2200)
+            {
+                _data.NoSleepLateObjectivePending = true;
+            }
 
             // Darkness — legacy HarveyMod_DarknessRecovery отключён при уровневой системе
-
         }
 
         /// <summary>
@@ -709,17 +720,23 @@ namespace HarveyStressMeter.Handlers
         private void UpdateLonelyQuestProgress()
         {
             var lonelyTreatment = GetTreatmentByQuest(QuestIds.Lonely);
-            if (_stateService.HasActiveQuestState(QuestIds.Lonely) && lonelyTreatment?.Progress != null)
+            if (!_stateService.HasActiveQuestState(QuestIds.Lonely) || lonelyTreatment?.Progress == null)
+                return;
+
+            if (lonelyTreatment.AwaitingHarveyReview)
+                return;
+
+            lonelyTreatment.Progress.TalkedUniqueToday = _data.TalkedNpcsToday.Count;
+            int talked = lonelyTreatment.Progress.TalkedUniqueToday;
+
+            _treatmentService.UpdateTreatmentObjective(BuffIds.Lonely, LegacyTreatmentObjectives.Lonely(talked));
+
+            Game1.addHUDMessage(new HUDMessage($"+1 общение ({talked}/3)", 2));
+
+            if (talked >= 3)
             {
-                lonelyTreatment.Progress.TalkedUniqueToday = _data.TalkedNpcsToday.Count;
-
-                Game1.addHUDMessage(new HUDMessage($"+1 общение ({lonelyTreatment.Progress.TalkedUniqueToday}/3)", 2));
-
-                if (lonelyTreatment.Progress.TalkedUniqueToday >= 3)
-                {
-                    Game1.playSound("questcomplete");
-                    _treatmentService.MarkTreatmentReadyForReview(BuffIds.Lonely);
-                }
+                Game1.playSound("questcomplete");
+                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Lonely);
             }
         }
 
@@ -783,12 +800,13 @@ namespace HarveyStressMeter.Handlers
             var activeHunger = GetTreatmentByQuest(QuestIds.Hunger)
                 ?? _data.StressState.GetActiveTreatment(BuffIds.Hunger);
 
-            // Завершаем Hunger квест если активен (лечение уже начато)
+            // Hunger — квест активен (лечение начато)
             if (_stateService.HasActiveQuestState(QuestIds.Hunger))
             {
                 if (activeHunger?.Progress != null)
                     activeHunger.Progress.AteAnyFood = true;
 
+                _treatmentService.UpdateTreatmentObjective(BuffIds.Hunger, LegacyTreatmentObjectives.HungerDone);
                 Game1.playSound("questcomplete");
                 _treatmentService.MarkTreatmentReadyForReview(BuffIds.Hunger);
             }
@@ -822,11 +840,12 @@ namespace HarveyStressMeter.Handlers
                 Game1.addHUDMessage(new HUDMessage("Голод утолён", HUDMessage.newQuest_type));
             }
 
-            // Завершаем TooCold квест если активен — только горячий напиток (C-08)
+            // TooCold — только горячий напиток (C-08)
             if (_stateService.HasActiveQuestState(QuestIds.TooCold))
             {
                 if (HotDrinkHelper.IsHotDrinkOrWarmingFood(consumed))
                 {
+                    _treatmentService.UpdateTreatmentObjective(BuffIds.TooCold, LegacyTreatmentObjectives.TooColdHotDrink);
                     Game1.playSound("questcomplete");
                     _treatmentService.MarkTreatmentReadyForReview(BuffIds.TooCold);
                 }
@@ -1111,9 +1130,12 @@ namespace HarveyStressMeter.Handlers
             if (_stateService.HasActiveQuestState(QuestIds.Overwork))
             {
                 _data.OverworkBreaksToday = 0;
+                _data.OverworkBreakSeconds = 0;
+                _data.OverworkBreakActive = false;
                 _buffService.RemoveBuff(BuffIds.OverworkBreak);
                 ConversationHelper.RemoveTopic(TopicIds.OverworkBreakActive);
                 ConversationHelper.RemoveTopic(TopicIds.OverworkBreakInterrupted);
+                _treatmentService.UpdateTreatmentObjective(BuffIds.Overwork, LegacyTreatmentObjectives.OverworkDailyStart);
             }
 
             if (_stateService.HasActiveQuestState(QuestIds.Thunder))
@@ -1175,6 +1197,21 @@ namespace HarveyStressMeter.Handlers
             _episodeQuestProgressService?.UpdateQuestJournal(episode.EpisodeId, treatment.Progress);
         }
 
+        private void ApplyPendingNoSleepLateObjective()
+        {
+            if (!_data.NoSleepLateObjectivePending)
+                return;
+
+            if (!_stateService.HasActiveQuestState(QuestIds.NoSleep))
+            {
+                _data.NoSleepLateObjectivePending = false;
+                return;
+            }
+
+            _treatmentService.UpdateTreatmentObjective(BuffIds.NoSleep, LegacyTreatmentObjectives.NoSleepLateFailed);
+            _data.NoSleepLateObjectivePending = false;
+        }
+
         private TreatmentState? GetTreatmentByQuest(string questId)
         {
             return _data.StressState.GetActiveTreatmentByQuest(questId);
@@ -1200,7 +1237,7 @@ namespace HarveyStressMeter.Handlers
             if (_data.Darkness.IsTherapyActive) return;
 
             // Проверяем уровень 3 (фобия) - приоритет
-            if (_stateService.HasBuffInGame("buffDarknessLevel3"))
+            if (_stateService.HasBuffInGame(BuffIds.DarknessLevel3))
             {
                 if (!ConversationHelper.HasTopic("topicStressDarknessLevel3"))
                 {
@@ -1222,7 +1259,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             // Проверяем уровень 1 (легкий страх) - старый топик уже должен быть
-            if (_stateService.HasBuffInGame("buffDarknessLevel1") || _stateService.HasBuffInGame(BuffIds.Darkness))
+            if (_stateService.HasBuffInGame(BuffIds.DarknessLevel1) || _stateService.HasBuffInGame(BuffIds.Darkness))
             {
                 if (!ConversationHelper.HasTopic(TopicIds.StressDarkness))
                 {

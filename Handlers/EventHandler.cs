@@ -22,6 +22,7 @@ namespace HarveyStressMeter.Handlers
         private readonly IModHelper _helper;
         private readonly SaveData _data;
         private readonly StateService _stateService;
+        private readonly TreatmentService _treatmentService;
         private readonly GameLogicHandler _gameLogicHandler;
         private readonly UIHandler _uiHandler;
         private readonly DarknessService _darknessService;
@@ -32,6 +33,7 @@ namespace HarveyStressMeter.Handlers
             IModHelper helper,
             SaveData data,
             StateService stateService,
+            TreatmentService treatmentService,
             GameLogicHandler gameLogicHandler,
             UIHandler uiHandler,
             DarknessService darknessService,
@@ -41,6 +43,7 @@ namespace HarveyStressMeter.Handlers
             _helper = helper;
             _data = data;
             _stateService = stateService;
+            _treatmentService = treatmentService;
             _gameLogicHandler = gameLogicHandler;
             _uiHandler = uiHandler;
             _darknessService = darknessService;
@@ -86,12 +89,13 @@ namespace HarveyStressMeter.Handlers
 
             _stateService.MigrateOldData();
             _stateService.SyncWithGame();
+            _treatmentService.SyncQuestsAndBuffs();
 
             _gameLogicHandler.ClearStressDialoguePending();
 
             // Восстанавливаем все активные баффы после загрузки сохранения
             _stateService.RestoreAllActiveBuffs();
-            _darknessService.MigrateLegacyDarknessPath();
+            _darknessService.SyncDarknessState("SaveLoaded");
             _stressLoadService.SyncFromGameState();
             _gameLogicHandler.RepairStuckSocialTreatments();
         }
@@ -115,12 +119,14 @@ namespace HarveyStressMeter.Handlers
             _stateService.CleanupExpiredImmunities();
             
             _stateService.SyncWithGame();
+            _treatmentService.SyncQuestsAndBuffs();
             
             // ⭐ НОВОЕ: Восстанавливаем все активные баффы в начале дня
             _stateService.RestoreAllActiveBuffs();
-            
-            // ⭐ НОВОЕ: Восстанавливаем бафф страха темноты если он был активен
-            _darknessService.RestoreFearBuff();
+
+            _gameLogicHandler.UpdateDailyDarknessState();
+
+            _darknessService.SyncDarknessState("DayStarted");
             
             _gameLogicHandler.CheckDayStartedStressTriggers();
             _stressLoadService.SyncFromGameState();

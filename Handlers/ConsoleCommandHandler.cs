@@ -69,7 +69,7 @@ namespace HarveyStressMeter.Handlers
 
         private void RegisterSyncCommands()
         {
-            _helper.ConsoleCommands.Add("hs.sync", "Синхронизировать квесты и дебаффы стресса (удалить несоответствия).", (_, __) =>
+            _helper.ConsoleCommands.Add("hs.sync", "Синхронизировать квесты и дебаффы стресса (восстановить пропавшие, очистить завершённые).", (_, __) =>
             {
                 int before = _data.StressState.ActiveTreatments.Count;
                 _treatmentService.SyncQuestsAndBuffs();

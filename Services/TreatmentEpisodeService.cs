@@ -592,7 +592,7 @@ namespace HarveyStressMeter.Services
                 if (!StressCauses.CauseToBuff.TryGetValue(causeId, out var buffId))
                     continue;
 
-                if (StressDebuffSelector.IsUntreatedDebuff(_stateService, buffId))
+                if (StressDebuffSelector.IsUntreatedDebuff(_stateService, buffId, _data))
                     return true;
             }
 

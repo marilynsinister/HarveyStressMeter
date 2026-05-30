@@ -35,6 +35,7 @@ namespace HarveyStressMeter.Testing
         public static string ReloadSave(
             SaveData data,
             StateService stateService,
+            DarknessService darknessService,
             StressLoadService stressLoadService,
             GameLogicHandler gameLogicHandler,
             IMonitor monitor)
@@ -55,6 +56,7 @@ namespace HarveyStressMeter.Testing
             stateService.SyncWithGame();
             gameLogicHandler.ClearStressDialoguePending();
             stateService.RestoreAllActiveBuffs();
+            darknessService.SyncDarknessState("McpReloadSave");
             stressLoadService.SyncFromGameState();
 
             var sb = new StringBuilder();

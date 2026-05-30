@@ -488,7 +488,21 @@ namespace HarveyStressMeter.Services
                 $"Shelter: {_data.ThunderFlashback.ForestShelterSeconds}/{_data.ThunderFlashback.RequiredForestShelterSeconds}");
             sb.AppendLine($"Deferred Gotoro shelter: {_data.ThunderFlashback.DeferredGotoroShelterSeconds}s");
             sb.AppendLine("--- Darkness ---");
-            sb.AppendLine($"Fear level: {_data.Darkness.FearLevel}, therapy: {_data.Darkness.IsTherapyActive} (stage {_data.Darkness.TherapyStage})");
+            var darknessBuff = DarknessLegacyHelper.GetActiveLevelBuffId(_stateService)
+                ?? (_stateService.HasBuffInGame(BuffIds.Darkness) ? BuffIds.Darkness : "(none)");
+            sb.AppendLine(
+                $"Fear {_data.Darkness.FearLevel}, buff {darknessBuff}, therapy {_data.Darkness.IsTherapyActive} stage {_data.Darkness.TherapyStage}");
+            if (_data.Darkness.IsTherapyActive && _data.Darkness.TherapyStage >= 1)
+            {
+                var stepQuest = DarknessLegacyHelper.GetStepQuestIdForStage(_data.Darkness.TherapyStage);
+                sb.AppendLine(
+                    $"Step quest {stepQuest}: journal={DarknessLegacyHelper.HasStepQuestInJournal(_data.Darkness.TherapyStage)}");
+                sb.AppendLine(
+                    $"Step1 {_data.Darkness.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired} " +
+                    $"today {_data.Darkness.SafeDarknessProgressToday}/{DarknessLegacyHelper.Step1MinutesPerEvening}");
+                sb.AppendLine(
+                    $"Step2 zones {_data.Darkness.SafeZonesVisited.Count}/2, Step3 {_data.Darkness.MountainNightSeconds}/120 sec");
+            }
             sb.AppendLine("--- Social ---");
             sb.AppendLine($"Exposure: {_data.SocialStressExposure}/{SocialStressHelper.DebuffThreshold}");
 

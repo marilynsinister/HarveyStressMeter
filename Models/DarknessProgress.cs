@@ -52,10 +52,17 @@ namespace HarveyStressMeter.Models
         public SDate? LastLevelIncreaseDate { get; set; }
         
         // ===== Прогресс лечения =====
-        /// <summary>
-        /// Шаг 1: Минуты при приглушенном свете (0-15)
-        /// </summary>
+        /// <summary>Шаг 1 (legacy): суммарные «минуты» до миграции на 3×5.</summary>
         public int SafeDarknessMinutes { get; set; } = 0;
+
+        /// <summary>Шаг 1: завершённые вечера (0–3), по 5 минут за вечер.</summary>
+        public int SafeDarknessEveningsCompleted { get; set; } = 0;
+
+        /// <summary>Шаг 1: минуты при приглушённом свете сегодня (0–5).</summary>
+        public int SafeDarknessProgressToday { get; set; } = 0;
+
+        /// <summary>Календарный день, к которому относится SafeDarknessProgressToday.</summary>
+        public SDate? LastSafeDarknessDate { get; set; }
         
         /// <summary>
         /// Шаг 2: Посещенные безопасные зоны

@@ -1,4 +1,6 @@
 using System;
+using System.Linq;
+using System.Text;
 using StardewModdingAPI;
 using StardewModdingAPI.Utilities;
 using StardewValley;
@@ -21,6 +23,13 @@ namespace HarveyStressMeter.Services
         private readonly IMonitor _monitor;
 
         private bool _worryLetterSent;
+
+        private const int Step1EveningsRequired = 3;
+        private const int Step1MinutesPerEvening = 5;
+        private const int Step1MsPerProgressMinute = 1000;
+
+        private float _step1ElapsedMs;
+        private bool _step1WasProgressing;
 
         public DarknessService(
             SaveData data,
@@ -95,83 +104,258 @@ namespace HarveyStressMeter.Services
         /// </summary>
         private void ApplyFearLevelBuff()
         {
-            string buffId = GetCurrentBuffId();
-            string displayName = GetFearLevelDisplayName();
-            
-            // Проверяем, уже активен ли бафф этого уровня
-            if (_stateService.HasBuffInGame(buffId))
-            {
-                _monitor.Log($"[DarknessService] Бафф {buffId} уже активен", LogLevel.Debug);
-                return;
-            }
-
-            // Удаляем старые баффы других уровней
-            RemoveOtherFearLevelBuffs(buffId);
-
-            // Применяем бафф
-            var effects = GetFearLevelEffects(_data.Darkness.FearLevel);
-            _buffService.ApplyBuff(buffId, displayName, effects, Buff.ENDLESS);
-            
-            _monitor.Log($"[DarknessService] Применен бафф уровня {_data.Darkness.FearLevel}: {buffId} ({displayName})", LogLevel.Info);
-            
-            // Показываем сообщение игроку
-            ShowFearLevelMessage();
+            EnsureFearLevelBuff(showMessages: true);
             SyncStressLoadFromDarkness();
         }
 
-        /// <summary>Legacy buffStressDarkness → уровневая система; снятие устаревшего квеста.</summary>
+        /// <summary>Legacy buffStressDarkness → уровневая система (идемпотентно, через SyncDarknessState).</summary>
         public void MigrateLegacyDarknessPath()
-        {
-            if (!DarknessLegacyHelper.UsesLevelSystem(_data, _stateService))
-            {
-                if (_stateService.HasBuffInGame(BuffIds.Darkness) && _data.Darkness.FearLevel == 0)
-                {
-                    _data.Darkness.IncreaseFearLevel(SDate.Now());
-                    _buffService.RemoveBuff(BuffIds.Darkness);
-                    ApplyFearLevelBuff();
-                    ConversationHelper.RemoveTopic(TopicIds.StressDarkness);
-                    _monitor.Log("[DarknessService] Миграция legacy buffStressDarkness → уровень 1", LogLevel.Info);
-                }
-
-                return;
-            }
-
-            if (_stateService.HasBuffInGame(BuffIds.Darkness))
-                _buffService.RemoveBuff(BuffIds.Darkness);
-
-            if (_stateService.HasActiveQuestState(QuestIds.Darkness))
-            {
-                _questService.CompleteQuest(QuestIds.Darkness);
-                Game1.player.removeQuest(QuestIds.Darkness);
-                _buffService.RemoveBuff(BuffIds.LightAndSafe);
-                _monitor.Log("[DarknessService] Снят legacy-квест HarveyMod_DarknessRecovery (активна терапия уровней)", LogLevel.Info);
-            }
-        }
+            => SyncDarknessState("MigrateLegacyDarknessPath");
 
         private void SyncStressLoadFromDarkness()
             => _stressLoadService?.SyncFromGameState();
 
-        /// <summary>Сброс зависших топиков/флагов после прерванного старта терапии.</summary>
+        /// <summary>Единый путь синхронизации save ↔ игра (баффы, квесты, legacy). Не меняет TherapyStage.</summary>
+        public void SyncDarknessState(string reason)
+        {
+            if (!Context.IsWorldReady)
+            {
+                _monitor.Log($"[DarknessService] SyncDarknessState({reason}): мир не готов, пропуск", LogLevel.Debug);
+                return;
+            }
+
+            _monitor.Log($"[DarknessService] SyncDarknessState reason={reason}", LogLevel.Debug);
+
+            TryMigrateLegacyBuffToLevelSystem();
+
+            var removedTreatments = DarknessLegacyHelper.RemoveErroneousLevelDarknessTreatments(_data, _monitor);
+            if (removedTreatments > 0)
+            {
+                _monitor.Log(
+                    $"[DarknessService] Удалено {removedTreatments} ошибочных ActiveTreatment для level-buff темноты",
+                    LogLevel.Warn);
+            }
+
+            CleanupStaleDarknessTopics();
+
+            if (_data.Darkness.IsCured)
+            {
+                RemoveAllFearBuffs();
+                _buffService.RemoveBuff(BuffIds.Darkness);
+                RemoveLegacyDarknessRecoveryArtifacts("cured");
+
+                if (_data.Darkness.HasOvercomeBonus)
+                    EnsureOvercomeBonus();
+
+                LogDarknessSyncSnapshot(reason);
+                SyncStressLoadFromDarkness();
+                return;
+            }
+
+            if (DarknessLegacyHelper.UsesLevelSystem(_data, _stateService))
+                RemoveLegacyDarknessRecoveryArtifacts("level-system");
+
+            if (_data.Darkness.IsTherapyActive)
+            {
+                if (_data.Darkness.TherapyStage == 1)
+                {
+                    TryMigrateLegacyStep1Progress();
+                    EnsureStep1CalendarDay(refreshJournalOnDayChange: true);
+                }
+
+                SyncTherapyQuestsFromSavedStage();
+            }
+
+            if (_data.Darkness.FearLevel > 0)
+                EnsureFearLevelBuff(showMessages: false);
+            else if (!_data.Darkness.IsTherapyActive)
+                RemoveAllFearBuffs();
+
+            if (_data.Darkness.HasOvercomeBonus)
+                EnsureOvercomeBonus();
+
+            RestoreStressDarknessTopicIfNeeded();
+
+            LogDarknessSyncSnapshot(reason);
+            SyncStressLoadFromDarkness();
+        }
+
+        private void TryMigrateLegacyBuffToLevelSystem()
+        {
+            if (DarknessLegacyHelper.UsesLevelSystem(_data, _stateService))
+                return;
+
+            if (!_stateService.HasBuffInGame(BuffIds.Darkness) || _data.Darkness.FearLevel != 0)
+                return;
+
+            _data.Darkness.IncreaseFearLevel(SDate.Now());
+            _buffService.RemoveBuff(BuffIds.Darkness);
+            ConversationHelper.RemoveTopic(TopicIds.StressDarkness);
+            _monitor.Log("[DarknessService] Миграция legacy buffStressDarkness → уровень 1", LogLevel.Info);
+        }
+
+        private void RemoveLegacyDarknessRecoveryArtifacts(string context)
+        {
+            if (_stateService.HasBuffInGame(BuffIds.Darkness))
+                _buffService.RemoveBuff(BuffIds.Darkness);
+
+            if (!_questService.HasQuest(QuestIds.Darkness) && !_stateService.HasActiveQuestState(QuestIds.Darkness))
+                return;
+
+            _questService.CompleteQuest(QuestIds.Darkness);
+            Game1.player.removeQuest(QuestIds.Darkness);
+            _buffService.RemoveBuff(BuffIds.LightAndSafe);
+            _monitor.Log(
+                $"[DarknessService] Снят legacy HarveyMod_DarknessRecovery / buffLightAndSafe ({context})",
+                LogLevel.Info);
+        }
+
+        /// <summary>Только устаревшие топики; терапию по отсутствию квеста не сбрасываем.</summary>
         public void CleanupStaleDarknessState()
+            => CleanupStaleDarknessTopics();
+
+        private void CleanupStaleDarknessTopics()
         {
             if (!_data.Darkness.IsTherapyActive && ConversationHelper.HasTopic("topicDarknessTherapyStart"))
             {
                 ConversationHelper.RemoveTopic("topicDarknessTherapyStart");
                 _monitor.Log("[DarknessService] Удалён устаревший topicDarknessTherapyStart (терапия не активна)", LogLevel.Info);
             }
+        }
 
-            const string step1QuestId = "HarveyMod_DarknessStep1";
-            if (_data.Darkness.IsTherapyActive
-                && !_questService.HasQuest(step1QuestId)
-                && _data.Darkness.TherapyStage <= 1
-                && _data.Darkness.SafeDarknessMinutes == 0)
+        private void SyncTherapyQuestsFromSavedStage()
+        {
+            int stage = Math.Clamp(_data.Darkness.TherapyStage, 1, 3);
+            if (_data.Darkness.TherapyStage < 1)
             {
-                _data.Darkness.IsTherapyActive = false;
-                _data.Darkness.TherapyStage = 0;
-                _data.Darkness.TherapyStartDate = null;
-                ConversationHelper.RemoveTopic("topicDarknessTherapyStart");
-                _monitor.Log("[DarknessService] Сброшен некonsistentный флаг терапии без квеста в журнале", LogLevel.Warn);
+                _monitor.Log(
+                    "[DarknessService] IsTherapyActive при TherapyStage<1 — квест не восстанавливаем (ожидается StartTherapy)",
+                    LogLevel.Warn);
+                return;
             }
+
+            string expectedQuestId = GetStepQuestId(stage);
+            RemoveStaleStepQuests(stage);
+
+            if (!_questService.HasQuest(expectedQuestId))
+            {
+                _questService.AddQuest(expectedQuestId);
+                _monitor.Log(
+                    $"[DarknessService] Восстановлен квест {expectedQuestId} для TherapyStage={stage} (save IsTherapyActive=true)",
+                    LogLevel.Warn);
+            }
+
+            RefreshTherapyQuestJournal(stage);
+        }
+
+        private static string GetStepQuestId(int stage) => stage switch
+        {
+            1 => QuestIds.DarknessStep1,
+            2 => QuestIds.DarknessStep2,
+            3 => QuestIds.DarknessStep3,
+            _ => QuestIds.DarknessStep1,
+        };
+
+        private void RemoveStaleStepQuests(int activeStage)
+        {
+            foreach (var questId in new[] { QuestIds.DarknessStep1, QuestIds.DarknessStep2, QuestIds.DarknessStep3 })
+            {
+                if (GetStepQuestId(activeStage) == questId || !_questService.HasQuest(questId))
+                    continue;
+
+                Game1.player.removeQuest(questId);
+                _monitor.Log(
+                    $"[DarknessService] Удалён лишний step-квест {questId} (активный этап {activeStage})",
+                    LogLevel.Debug);
+            }
+        }
+
+        private void EnsureFearLevelBuff(bool showMessages)
+        {
+            if (_data.Darkness.FearLevel <= 0)
+                return;
+
+            string buffId = GetCurrentBuffId();
+            RemoveOtherFearLevelBuffs(buffId);
+
+            if (_stateService.HasBuffInGame(buffId))
+                return;
+
+            var effects = GetFearLevelEffects(_data.Darkness.FearLevel);
+            _buffService.ApplyBuff(buffId, GetFearLevelDisplayName(), effects, Buff.ENDLESS);
+            _monitor.Log(
+                $"[DarknessService] Синхронизирован бафф {buffId} (уровень {_data.Darkness.FearLevel})",
+                LogLevel.Info);
+
+            if (showMessages)
+                ShowFearLevelMessage();
+        }
+
+        private void EnsureOvercomeBonus()
+        {
+            if (_stateService.HasBuffInGame(BuffIds.DarknessOvercome))
+                return;
+
+            ApplyOvercomeBonus();
+        }
+
+        private void RestoreStressDarknessTopicIfNeeded()
+        {
+            if (_data.Darkness.IsTherapyActive || _data.Darkness.FearLevel <= 0 || _data.Darkness.IsCured)
+                return;
+
+            if (!ConversationHelper.HasTopic(TopicIds.StressDarkness))
+            {
+                ConversationHelper.AddTopic(TopicIds.StressDarkness, 7);
+                _monitor.Log(
+                    $"[DarknessService] Восстановлен топик {TopicIds.StressDarkness} (FearLevel={_data.Darkness.FearLevel})",
+                    LogLevel.Debug);
+            }
+        }
+
+        private void LogDarknessSyncSnapshot(string reason)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"[DarknessService] SyncDarknessState snapshot reason={reason}");
+            sb.AppendLine($"  FearLevel={_data.Darkness.FearLevel} IsTherapyActive={_data.Darkness.IsTherapyActive} TherapyStage={_data.Darkness.TherapyStage}");
+            sb.AppendLine($"  IsCured={_data.Darkness.IsCured} HasOvercomeBonus={_data.Darkness.HasOvercomeBonus}");
+            sb.AppendLine(
+                $"  Step1 evenings={_data.Darkness.SafeDarknessEveningsCompleted}/{Step1EveningsRequired} " +
+                $"today={_data.Darkness.SafeDarknessProgressToday}/{Step1MinutesPerEvening} " +
+                $"LastSafeDarknessDate={_data.Darkness.LastSafeDarknessDate?.ToString() ?? "null"} " +
+                $"legacyMinutes={_data.Darkness.SafeDarknessMinutes}");
+            sb.AppendLine($"  SafeZonesVisited=[{string.Join(", ", _data.Darkness.SafeZonesVisited)}] MountainNightSeconds={_data.Darkness.MountainNightSeconds}");
+            sb.Append("  buffs: ");
+            AppendBuffFlag(sb, BuffIds.DarknessLevel1);
+            AppendBuffFlag(sb, BuffIds.DarknessLevel2);
+            AppendBuffFlag(sb, BuffIds.DarknessLevel3);
+            AppendBuffFlag(sb, BuffIds.Darkness);
+            AppendBuffFlag(sb, BuffIds.DarknessOvercome);
+            AppendBuffFlag(sb, BuffIds.DimLight);
+            AppendBuffFlag(sb, BuffIds.HarveyLantern);
+            AppendBuffFlag(sb, BuffIds.LightAndSafe);
+            sb.AppendLine();
+            sb.Append("  quests: ");
+            AppendQuestFlag(sb, QuestIds.Darkness);
+            AppendQuestFlag(sb, QuestIds.DarknessStep1);
+            AppendQuestFlag(sb, QuestIds.DarknessStep2);
+            AppendQuestFlag(sb, QuestIds.DarknessStep3);
+            if (_data.Darkness.IsTherapyActive && _data.Darkness.TherapyStage >= 1)
+            {
+                var objective = DarknessLegacyHelper.GetStepQuestCurrentObjective(_data.Darkness.TherapyStage);
+                sb.AppendLine();
+                sb.Append($"  currentObjective: {objective ?? "(n/a)"}");
+            }
+
+            _monitor.Log(sb.ToString(), LogLevel.Info);
+        }
+
+        private void AppendBuffFlag(StringBuilder sb, string buffId)
+            => sb.Append(_stateService.HasBuffInGame(buffId) ? $"{buffId}=Y " : $"{buffId}=N ");
+
+        private void AppendQuestFlag(StringBuilder sb, string questId)
+        {
+            sb.Append(_questService.HasQuest(questId) ? $"{questId}=Y " : $"{questId}=N ");
         }
 
         /// <summary>
@@ -181,31 +365,21 @@ namespace HarveyStressMeter.Services
         {
             var currentDate = SDate.Now();
 
-            CleanupStaleDarknessState();
-            
-            // Обновляем счетчик игнорирования
-            _data.Darkness.UpdateIgnoredDays(currentDate);
-            
-            _monitor.Log($"[DarknessService] Ежедневное обновление: Уровень={_data.Darkness.FearLevel}, Игнорируется={_data.Darkness.DaysIgnored} дней", LogLevel.Info);
+            SyncDarknessState("UpdateDailyFearState:pre");
 
-            MigrateLegacyDarknessPath();
-            // Проверяем, нужно ли повысить уровень страха
+            _data.Darkness.UpdateIgnoredDays(currentDate);
+
+            _monitor.Log(
+                $"[DarknessService] Ежедневное обновление: Уровень={_data.Darkness.FearLevel}, Игнорируется={_data.Darkness.DaysIgnored} дней",
+                LogLevel.Info);
+
             if (_data.Darkness.ShouldIncreaseFearLevel(currentDate))
-            {
                 IncreaseFearLevel();
-            }
-            
-            // Проверяем естественное снижение (только для уровня 1)
+
             if (_data.Darkness.CanDecreaseFearNaturally(currentDate))
-            {
                 DecreaseFearLevel();
-            }
-            
-            // Применяем бафф если страх активен
-            if (_data.Darkness.FearLevel > 0)
-            {
-                ApplyFearLevelBuff();
-            }
+
+            SyncDarknessState("UpdateDailyFearState:post");
         }
 
         /// <summary>
@@ -289,13 +463,13 @@ namespace HarveyStressMeter.Services
             _data.Darkness.IgnoredSinceDate = null;
             _data.Darkness.DaysIgnored = 0;
 
-            const string step1QuestId = "HarveyMod_DarknessStep1";
-            if (!_questService.HasQuest(step1QuestId))
-                _questService.AddQuest(step1QuestId);
+            if (!_questService.HasQuest(QuestIds.DarknessStep1))
+                _questService.AddQuest(QuestIds.DarknessStep1);
             
             Game1.playSound("newRecipe");
             Game1.addHUDMessage(new HUDMessage("Терапия страха темноты началась", HUDMessage.newQuest_type));
             RefreshTherapyQuestJournal(1);
+            SyncDarknessState("StartTherapy");
         }
 
         /// <summary>
@@ -360,16 +534,18 @@ namespace HarveyStressMeter.Services
         // ===== МЕХАНИКИ ШАГОВ ТЕРАПИИ =====
 
         /// <summary>
-        /// Обновить прогресс терапии (вызывается каждый тик игры)
+        /// Обновить прогресс терапии (~раз в секунду из GameLogicHandler).
         /// </summary>
         public void UpdateTherapyProgress()
         {
             if (!_data.Darkness.IsTherapyActive) return;
 
+            var elapsed = Game1.currentGameTime?.ElapsedGameTime ?? TimeSpan.FromSeconds(1);
+
             switch (_data.Darkness.TherapyStage)
             {
                 case 1:
-                    UpdateStep1Progress();
+                    UpdateStep1Progress(elapsed);
                     break;
                 case 2:
                     UpdateStep2Progress();
@@ -381,50 +557,182 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// Шаг 1: Безопасная темнота (приглушенный свет дома)
+        /// Шаг 1: 3 вечера × 5 минут дома при приглушённом свете (20:00–00:00).
+        /// buffDimLight = прогресс реально тикает, не просто «условия почти подходят».
         /// </summary>
-        private void UpdateStep1Progress()
+        private void UpdateStep1Progress(TimeSpan elapsed)
         {
-            // Проверяем условия
-            bool isEvening = Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 2400;
-            bool atHome = Game1.player.currentLocation is StardewValley.Locations.FarmHouse;
-
-            if (isEvening && atHome)
+            if (!_data.Darkness.IsTherapyActive || _data.Darkness.TherapyStage != 1)
             {
-                // Применяем бафф "Приглушенный свет"
-                if (!_stateService.HasBuffInGame("buffDimLight"))
+                ClearStep1SessionState();
+                return;
+            }
+
+            TryMigrateLegacyStep1Progress();
+            EnsureStep1CalendarDay(refreshJournalOnDayChange: true);
+
+            bool evening = Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 2400;
+            bool atHome = Game1.player.currentLocation is StardewValley.Locations.FarmHouse;
+            bool noEvent = !GameStateHelper.IsEventActive();
+            bool sessionClear = !IsStep1SessionBlocked();
+            bool todayIncomplete = !IsStep1TodayComplete();
+            bool isProgressing = evening && atHome && noEvent && sessionClear && todayIncomplete;
+
+            HandleStep1HudState(isProgressing);
+
+            if (isProgressing)
+            {
+                if (!_stateService.HasBuffInGame(BuffIds.DimLight))
                 {
-                    _buffService.ApplyBuff("buffDimLight", "Приглушенный свет", 
+                    _buffService.ApplyBuff(BuffIds.DimLight, "Приглушенный свет",
                         new StardewValley.Buffs.BuffEffects(), -2);
-                    _monitor.Log("[DarknessService] Шаг 1: Бафф 'Приглушенный свет' применен", LogLevel.Debug);
+                    _monitor.Log("[DarknessStep1] buffDimLight включён (тикает прогресс)", LogLevel.Debug);
                 }
 
-                // Увеличиваем счетчик каждые 6 секунд (10 тиков) = 1 игровая минута
-                if (Game1.ticks % 60 == 0) // Каждую секунду реального времени = примерно 1 минута игрового
+                _step1ElapsedMs += (float)elapsed.TotalMilliseconds;
+                while (_step1ElapsedMs >= Step1MsPerProgressMinute)
                 {
-                    _data.Darkness.SafeDarknessMinutes++;
-                    
-                    if (_data.Darkness.SafeDarknessMinutes % 5 == 0)
-                    {
-                        RefreshTherapyQuestJournal(1);
-                        Game1.addHUDMessage(new HUDMessage($"Прогресс: {_data.Darkness.SafeDarknessMinutes}/15 минут", HUDMessage.newQuest_type));
-                        _monitor.Log($"[DarknessService] Шаг 1: Прогресс {_data.Darkness.SafeDarknessMinutes}/15 минут", LogLevel.Info);
-                    }
-
-                    // Проверяем завершение
-                    if (_data.Darkness.SafeDarknessMinutes >= 15)
-                    {
-                        CompleteStep1();
-                    }
+                    _step1ElapsedMs -= Step1MsPerProgressMinute;
+                    IncrementStep1ProgressMinute();
                 }
             }
             else
             {
-                // Убираем бафф если покинули дом или не вечер
-                if (_stateService.HasBuffInGame("buffDimLight"))
-                {
-                    _buffService.RemoveBuff("buffDimLight");
-                }
+                _step1ElapsedMs = 0;
+                if (_stateService.HasBuffInGame(BuffIds.DimLight))
+                    _buffService.RemoveBuff(BuffIds.DimLight);
+            }
+
+            LogStep1Trace(isProgressing, evening, atHome, noEvent);
+        }
+
+        private static bool IsStep1SessionBlocked()
+        {
+            if (Game1.activeClickableMenu != null)
+                return true;
+
+            return Game1.player?.isInBed?.Value == true;
+        }
+
+        private bool IsStep1TodayComplete()
+            => _data.Darkness.SafeDarknessProgressToday >= Step1MinutesPerEvening;
+
+        private void TryMigrateLegacyStep1Progress()
+        {
+            var d = _data.Darkness;
+            if (d.SafeDarknessEveningsCompleted > 0 || d.SafeDarknessProgressToday > 0 || d.SafeDarknessMinutes <= 0)
+                return;
+
+            int total = d.SafeDarknessMinutes;
+            d.SafeDarknessEveningsCompleted = Math.Min(Step1EveningsRequired, total / Step1MinutesPerEvening);
+            d.SafeDarknessProgressToday = total % Step1MinutesPerEvening;
+            if (total >= Step1EveningsRequired * Step1MinutesPerEvening)
+            {
+                d.SafeDarknessEveningsCompleted = Step1EveningsRequired;
+                d.SafeDarknessProgressToday = 0;
+            }
+
+            d.SafeDarknessMinutes = 0;
+            d.LastSafeDarknessDate ??= SDate.Now();
+            _monitor.Log(
+                $"[DarknessStep1] Миграция legacy SafeDarknessMinutes → вечера {d.SafeDarknessEveningsCompleted}/{Step1EveningsRequired}, сегодня {d.SafeDarknessProgressToday}/{Step1MinutesPerEvening}",
+                LogLevel.Info);
+        }
+
+        private void EnsureStep1CalendarDay(bool refreshJournalOnDayChange = false)
+        {
+            var today = SDate.Now();
+            var tracked = _data.Darkness.LastSafeDarknessDate;
+
+            if (tracked == null)
+            {
+                _data.Darkness.LastSafeDarknessDate = today;
+                return;
+            }
+
+            if (tracked.DaysSinceStart == today.DaysSinceStart)
+                return;
+
+            _data.Darkness.SafeDarknessProgressToday = 0;
+            _data.Darkness.LastSafeDarknessDate = today;
+            _monitor.Log("[DarknessStep1] Новый игровой день — сброс «сегодня» для шага 1", LogLevel.Debug);
+
+            if (refreshJournalOnDayChange)
+                RefreshTherapyQuestJournal(1);
+        }
+
+        private void IncrementStep1ProgressMinute()
+        {
+            int before = _data.Darkness.SafeDarknessProgressToday;
+            if (before >= Step1MinutesPerEvening)
+                return;
+
+            _data.Darkness.SafeDarknessProgressToday = before + 1;
+            int after = _data.Darkness.SafeDarknessProgressToday;
+
+            RefreshTherapyQuestJournal(1);
+
+            if (after is 1 or 3 or 5)
+            {
+                Game1.addHUDMessage(new HUDMessage(
+                    $"Терапия: сегодня {after}/{Step1MinutesPerEvening}",
+                    HUDMessage.newQuest_type));
+            }
+
+            _monitor.Log(
+                $"[DarknessStep1] +1 мин: сегодня {after}/{Step1MinutesPerEvening}, вечера {_data.Darkness.SafeDarknessEveningsCompleted}/{Step1EveningsRequired}",
+                LogLevel.Info);
+
+            if (after >= Step1MinutesPerEvening)
+                CompleteStep1EveningSegment();
+        }
+
+        private void CompleteStep1EveningSegment()
+        {
+            _data.Darkness.SafeDarknessEveningsCompleted++;
+            int evenings = _data.Darkness.SafeDarknessEveningsCompleted;
+            int remaining = Math.Max(0, Step1EveningsRequired - evenings);
+
+            RefreshTherapyQuestJournal(1);
+            Game1.addHUDMessage(new HUDMessage(
+                $"Сегодняшнее упражнение выполнено. Осталось вечеров: {remaining}.",
+                HUDMessage.achievement_type));
+            _monitor.Log($"[DarknessStep1] Вечер завершён: {evenings}/{Step1EveningsRequired}", LogLevel.Info);
+
+            if (evenings >= Step1EveningsRequired)
+                CompleteStep1();
+        }
+
+        private void HandleStep1HudState(bool isProgressing)
+        {
+            if (isProgressing && !_step1WasProgressing)
+            {
+                Game1.addHUDMessage(new HUDMessage(
+                    "Терапия: останьтесь дома при приглушённом свете.",
+                    HUDMessage.newQuest_type));
+            }
+
+            _step1WasProgressing = isProgressing;
+        }
+
+        private void LogStep1Trace(bool active, bool evening, bool atHome, bool noEvent)
+        {
+            bool dimBuff = _stateService.HasBuffInGame(BuffIds.DimLight);
+            _monitor.Log(
+                $"[DarknessStep1] active={active}, stage={_data.Darkness.TherapyStage}, atHome={atHome}, evening={evening}, dimBuff={dimBuff}, " +
+                $"today={_data.Darkness.SafeDarknessProgressToday}/{Step1MinutesPerEvening}, " +
+                $"evenings={_data.Darkness.SafeDarknessEveningsCompleted}/{Step1EveningsRequired}",
+                LogLevel.Trace);
+        }
+
+        private void ClearStep1SessionState()
+        {
+            _step1ElapsedMs = 0;
+            if (_step1WasProgressing)
+            {
+                _step1WasProgressing = false;
+                if (_stateService.HasBuffInGame(BuffIds.DimLight))
+                    _buffService.RemoveBuff(BuffIds.DimLight);
             }
         }
 
@@ -435,36 +743,33 @@ namespace HarveyStressMeter.Services
         {
             _data.Darkness.CompletedStep1 = true;
             _data.Darkness.TherapyStage = 2;
-            
-            // Снижаем уровень страха
-            if (_data.Darkness.FearLevel > 1)
-            {
-                _data.Darkness.FearLevel--;
-                ApplyFearLevelBuff();
-            }
 
-            _buffService.RemoveBuff("buffDimLight");
+            _buffService.RemoveBuff(BuffIds.DimLight);
+            ClearStep1SessionState();
             
             _monitor.Log("[DarknessService] ✅ Шаг 1 завершен! Переход к Шагу 2", LogLevel.Info);
             
             // Завершаем квест Шага 1
-            var quest1 = Game1.player.questLog.FirstOrDefault(q => q.id.Value == "HarveyMod_DarknessStep1");
+            var quest1 = Game1.player.questLog.FirstOrDefault(q => q.id.Value == QuestIds.DarknessStep1);
             if (quest1 != null)
             {
                 quest1.questComplete();
-                Game1.player.removeQuest("HarveyMod_DarknessStep1");
+                Game1.player.removeQuest(QuestIds.DarknessStep1);
             }
             
             Game1.playSound("questcomplete");
-            Game1.addHUDMessage(new HUDMessage("Шаг 1 завершен! Ты молодец!", HUDMessage.achievement_type));
+            Game1.addHUDMessage(new HUDMessage(
+                "Первый этап выполнен. Начат следующий этап — следуйте подсказкам в журнале.",
+                HUDMessage.achievement_type));
             
             // Добавляем топик и квест Шага 2
             ConversationHelper.AddTopic("topicDarknessStep1Complete", 2);
             
             // Добавляем квест Шага 2 с задержкой (чтобы игрок сначала увидел сообщение)
-            Game1.player.addQuest("HarveyMod_DarknessStep2");
+            Game1.player.addQuest(QuestIds.DarknessStep2);
             RefreshTherapyQuestJournal(2);
             _monitor.Log("[DarknessService] Добавлен квест Шага 2", LogLevel.Info);
+            SyncDarknessState("CompleteStep1");
         }
 
         /// <summary>
@@ -545,11 +850,11 @@ namespace HarveyStressMeter.Services
             _monitor.Log("[DarknessService] ✅ Шаг 2 завершен! Переход к Шагу 3 (финал)", LogLevel.Info);
             
             // Завершаем квест Шага 2
-            var quest2 = Game1.player.questLog.FirstOrDefault(q => q.id.Value == "HarveyMod_DarknessStep2");
+            var quest2 = Game1.player.questLog.FirstOrDefault(q => q.id.Value == QuestIds.DarknessStep2);
             if (quest2 != null)
             {
                 quest2.questComplete();
-                Game1.player.removeQuest("HarveyMod_DarknessStep2");
+                Game1.player.removeQuest(QuestIds.DarknessStep2);
             }
             
             Game1.playSound("questcomplete");
@@ -559,9 +864,10 @@ namespace HarveyStressMeter.Services
             ConversationHelper.AddTopic("topicDarknessLanternReceived", 0);
             
             // Добавляем квест Шага 3
-            Game1.player.addQuest("HarveyMod_DarknessStep3");
+            Game1.player.addQuest(QuestIds.DarknessStep3);
             RefreshTherapyQuestJournal(3);
             _monitor.Log("[DarknessService] Добавлен квест Шага 3 (финал)", LogLevel.Info);
+            SyncDarknessState("CompleteStep2");
         }
 
         /// <summary>
@@ -576,11 +882,11 @@ namespace HarveyStressMeter.Services
             if (isLateNight && inMountains)
             {
                 // Применяем бафф "Свет надежды" (виртуальный фонарь)
-                if (!_stateService.HasBuffInGame("buffHarveyLantern"))
+                if (!_stateService.HasBuffInGame(BuffIds.HarveyLantern))
                 {
                     var effects = new StardewValley.Buffs.BuffEffects();
                     effects.Defense.Add(2);
-                    _buffService.ApplyBuff("buffHarveyLantern", "Свет надежды", effects, -2);
+                    _buffService.ApplyBuff(BuffIds.HarveyLantern, "Свет надежды", effects, -2);
                     Game1.addHUDMessage(new HUDMessage("Фонарь Харви освещает путь...", HUDMessage.newQuest_type));
                     _monitor.Log("[DarknessService] Шаг 3: Бафф 'Свет надежды' применен", LogLevel.Debug);
                 }
@@ -619,9 +925,9 @@ namespace HarveyStressMeter.Services
             else
             {
                 // Убираем бафф если покинули горы
-                if (_stateService.HasBuffInGame("buffHarveyLantern"))
+                if (_stateService.HasBuffInGame(BuffIds.HarveyLantern))
                 {
-                    _buffService.RemoveBuff("buffHarveyLantern");
+                    _buffService.RemoveBuff(BuffIds.HarveyLantern);
                 }
             }
         }
@@ -634,15 +940,15 @@ namespace HarveyStressMeter.Services
             _data.Darkness.CompletedStep3 = true;
             
             // Завершаем квест Шага 3
-            var quest3 = Game1.player.questLog.FirstOrDefault(q => q.id.Value == "HarveyMod_DarknessStep3");
+            var quest3 = Game1.player.questLog.FirstOrDefault(q => q.id.Value == QuestIds.DarknessStep3);
             if (quest3 != null)
             {
                 quest3.questComplete();
-                Game1.player.removeQuest("HarveyMod_DarknessStep3");
+                Game1.player.removeQuest(QuestIds.DarknessStep3);
             }
             
             // Снимаем бафф фонаря
-            _buffService.RemoveBuff("buffHarveyLantern");
+            _buffService.RemoveBuff(BuffIds.HarveyLantern);
             
             // Завершаем терапию полностью
             CompleteTherapy();
@@ -657,10 +963,10 @@ namespace HarveyStressMeter.Services
         {
             return _data.Darkness.FearLevel switch
             {
-                1 => "buffDarknessLevel1",
-                2 => "buffDarknessLevel2",
-                3 => "buffDarknessLevel3",
-                _ => BuffIds.Darkness // fallback
+                1 => BuffIds.DarknessLevel1,
+                2 => BuffIds.DarknessLevel2,
+                3 => BuffIds.DarknessLevel3,
+                _ => BuffIds.Darkness,
             };
         }
 
@@ -697,7 +1003,7 @@ namespace HarveyStressMeter.Services
 
         private void RemoveOtherFearLevelBuffs(string currentBuffId)
         {
-            var allBuffIds = new[] { "buffDarknessLevel1", "buffDarknessLevel2", "buffDarknessLevel3", BuffIds.Darkness };
+            var allBuffIds = new[] { BuffIds.DarknessLevel1, BuffIds.DarknessLevel2, BuffIds.DarknessLevel3, BuffIds.Darkness };
             
             foreach (var buffId in allBuffIds)
             {
@@ -710,7 +1016,7 @@ namespace HarveyStressMeter.Services
 
         private void RemoveAllFearBuffs()
         {
-            var allBuffIds = new[] { "buffDarknessLevel1", "buffDarknessLevel2", "buffDarknessLevel3", BuffIds.Darkness };
+            var allBuffIds = new[] { BuffIds.DarknessLevel1, BuffIds.DarknessLevel2, BuffIds.DarknessLevel3, BuffIds.Darkness };
             
             foreach (var buffId in allBuffIds)
             {
@@ -779,20 +1085,20 @@ namespace HarveyStressMeter.Services
             if (objective == null)
                 return;
 
-            var questId = stage switch
-            {
-                1 => "HarveyMod_DarknessStep1",
-                2 => "HarveyMod_DarknessStep2",
-                3 => "HarveyMod_DarknessStep3",
-                _ => "",
-            };
+            var questId = GetStepQuestId(stage);
 
             if (!string.IsNullOrEmpty(questId))
                 _questService.UpdateQuest(questId, objective: objective);
         }
 
         private string BuildStep1ObjectiveForInstance()
-            => $"Дома при приглушенном свете: {_data.Darkness.SafeDarknessMinutes}/15 мин (вечер 20:00–00:00)";
+        {
+            var d = _data.Darkness;
+            return
+                "Побудьте дома при приглушённом свете после 20:00. " +
+                $"Вечера: {d.SafeDarknessEveningsCompleted}/{Step1EveningsRequired}. " +
+                $"Сегодня: {d.SafeDarknessProgressToday}/{Step1MinutesPerEvening}.";
+        }
 
         private string BuildStep2ObjectiveForInstance()
         {
@@ -810,47 +1116,117 @@ namespace HarveyStressMeter.Services
             // Применяем перманентный бафф "Преодоление": +1 Defense ночью
             var effects = new StardewValley.Buffs.BuffEffects();
             effects.Defense.Add(1);
-            _buffService.ApplyBuff("buffDarknessOvercome", "Преодоление", effects, -2);
-            
+            _buffService.ApplyBuff(BuffIds.DarknessOvercome, "Преодоление", effects, -2);
+
             _monitor.Log("[DarknessService] ✅ Применен перманентный бонус 'Преодоление' (Defense +1 ночью)", LogLevel.Info);
         }
 
-        /// <summary>
-        /// ⭐ НОВОЕ: Восстановить бафф страха темноты если он был активен
-        /// Вызывается при старте дня для восстановления потерянных баффов
-        /// </summary>
+        /// <summary>Восстановление баффа/квестов темноты (делегирует в SyncDarknessState).</summary>
         public void RestoreFearBuff()
+            => SyncDarknessState("RestoreFearBuff");
+
+        /// <summary>DEV/MCP: установить FearLevel 1–3, синхронизировать level-buff и топики Харви.</summary>
+        public bool ApplyDebugFearLevel(int level)
         {
-            // Если игрок полностью излечен, не восстанавливаем бафф
-            if (_data.Darkness.IsCured && _data.Darkness.HasOvercomeBonus)
+            if (level is < 1 or > 3)
+                return false;
+
+            if (!Context.IsWorldReady)
             {
-                _monitor.Log("[DarknessService] Игрок излечен от страха темноты, бафф не восстанавливается", LogLevel.Debug);
-                return;
+                _monitor.Log("[DarknessService] ApplyDebugFearLevel: world not ready", LogLevel.Warn);
+                return false;
             }
 
-            // Если уровень страха > 0 и нет активного баффа
-            if (_data.Darkness.FearLevel > 0)
+            _data.Darkness.FearLevel = level;
+            _data.Darkness.IsCured = false;
+            _data.Darkness.HasOvercomeBonus = false;
+            _data.Darkness.TherapyCompletedDate = null;
+
+            _buffService.RemoveBuff(BuffIds.Darkness);
+            _buffService.RemoveBuff(BuffIds.DarknessOvercome);
+            RemoveAllFearBuffs();
+            ApplyDebugHarveyTopicsForLevel(level);
+            EnsureFearLevelBuff(showMessages: false);
+            SyncStressLoadFromDarkness();
+
+            _monitor.Log($"[DarknessService] ApplyDebugFearLevel: set to {level}", LogLevel.Info);
+            return true;
+        }
+
+        /// <summary>DEV/MCP: прогресс шага 1 — завершённые вечера и прогресс сегодня.</summary>
+        public bool ApplyDebugStep1Progress(int evenings, int todayProgress)
+        {
+            if (!Context.IsWorldReady)
             {
-                string currentBuffId = GetCurrentBuffId();
-                if (!_stateService.HasBuffInGame(currentBuffId))
-                {
-                    string displayName = GetFearLevelDisplayName();
-                    var effects = GetFearLevelEffects(_data.Darkness.FearLevel);
-                    
-                    // Удаляем старые баффы других уровней
-                    RemoveOtherFearLevelBuffs(currentBuffId);
-                    
-                    // Восстанавливаем бафф
-                    _buffService.ApplyBuff(currentBuffId, displayName, effects, Buff.ENDLESS);
-                    _monitor.Log($"[DarknessService] 🔄 Восстановлен бафф {currentBuffId} (уровень {_data.Darkness.FearLevel})", LogLevel.Info);
-                    
-                    // Восстанавливаем топик если нет активной терапии
-                    if (!_data.Darkness.IsTherapyActive && !ConversationHelper.HasTopic(TopicIds.StressDarkness))
-                    {
-                        ConversationHelper.AddTopic(TopicIds.StressDarkness, 7);
-                        _monitor.Log($"[DarknessService] 🔄 Восстановлен топик {TopicIds.StressDarkness}", LogLevel.Debug);
-                    }
-                }
+                _monitor.Log("[DarknessService] ApplyDebugStep1Progress: world not ready", LogLevel.Warn);
+                return false;
+            }
+
+            if (!_data.Darkness.IsTherapyActive || _data.Darkness.TherapyStage != 1)
+            {
+                _monitor.Log(
+                    "[DarknessService] ApplyDebugStep1Progress: therapy not active at stage 1 — call stress_darkness_start_therapy first",
+                    LogLevel.Warn);
+                return false;
+            }
+
+            var d = _data.Darkness;
+            d.SafeDarknessMinutes = 0;
+            d.SafeDarknessEveningsCompleted = Math.Clamp(evenings, 0, Step1EveningsRequired);
+            d.SafeDarknessProgressToday = Math.Clamp(todayProgress, 0, Step1MinutesPerEvening);
+            d.LastSafeDarknessDate = SDate.Now();
+
+            RefreshTherapyQuestJournal(1);
+            _monitor.Log(
+                $"[DarknessService] ApplyDebugStep1Progress: evenings={d.SafeDarknessEveningsCompleted}/{Step1EveningsRequired}, " +
+                $"today={d.SafeDarknessProgressToday}/{Step1MinutesPerEvening}",
+                LogLevel.Info);
+            return true;
+        }
+
+        /// <summary>DEV/MCP: миграция legacy SafeDarknessMinutes → evenings/today.</summary>
+        public bool ApplyDebugStep1ProgressLegacy(int legacyMinutes)
+        {
+            if (!Context.IsWorldReady)
+            {
+                _monitor.Log("[DarknessService] ApplyDebugStep1ProgressLegacy: world not ready", LogLevel.Warn);
+                return false;
+            }
+
+            if (!_data.Darkness.IsTherapyActive || _data.Darkness.TherapyStage != 1)
+                return false;
+
+            var d = _data.Darkness;
+            d.SafeDarknessMinutes = Math.Max(0, legacyMinutes);
+            d.SafeDarknessEveningsCompleted = 0;
+            d.SafeDarknessProgressToday = 0;
+            TryMigrateLegacyStep1Progress();
+            RefreshTherapyQuestJournal(1);
+            return true;
+        }
+
+        public string BuildDebugSnapshot()
+            => DarknessDebugReporter.BuildMcpSnapshot(_data, _stateService, _questService);
+
+        private static void ApplyDebugHarveyTopicsForLevel(int level)
+        {
+            ConversationHelper.RemoveTopic(TopicIds.StressDarkness);
+            ConversationHelper.RemoveTopic("topicStressDarknessLevel2");
+            ConversationHelper.RemoveTopic("topicStressDarknessLevel3");
+            ConversationHelper.RemoveTopic("topicStressDarknessSerious");
+            ConversationHelper.RemoveTopic("topicStressDarknessPhobia");
+
+            switch (level)
+            {
+                case 1:
+                    ConversationHelper.AddTopic(TopicIds.StressDarkness, 7);
+                    break;
+                case 2:
+                    ConversationHelper.AddTopic("topicStressDarknessLevel2", 7);
+                    break;
+                case 3:
+                    ConversationHelper.AddTopic("topicStressDarknessLevel3", 0);
+                    break;
             }
         }
     }

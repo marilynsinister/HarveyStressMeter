@@ -133,6 +133,7 @@ namespace HarveyStressMeter.Helpers
             target.DaysWithoutTalking = source.DaysWithoutTalking;
             target.DaysWithoutEating = source.DaysWithoutEating;
             target.DaysWithLateSleep = source.DaysWithLateSleep;
+            target.NoSleepLateObjectivePending = source.NoSleepLateObjectivePending;
 
             target.StressState ??= new PlayerStressState();
             CopyStressStateInto(target.StressState, source.StressState ?? new PlayerStressState());
@@ -185,6 +186,7 @@ namespace HarveyStressMeter.Helpers
             target.DaysWithoutTalking = 0;
             target.DaysWithoutEating = 0;
             target.DaysWithLateSleep = 0;
+            target.NoSleepLateObjectivePending = false;
             target.StressState = new PlayerStressState();
             target.Darkness = new DarknessProgress();
             target.StressLoad = new StressLoadState();
@@ -264,6 +266,9 @@ namespace HarveyStressMeter.Helpers
             target.DaysIgnored = source.DaysIgnored;
             target.LastLevelIncreaseDate = source.LastLevelIncreaseDate;
             target.SafeDarknessMinutes = source.SafeDarknessMinutes;
+            target.SafeDarknessEveningsCompleted = source.SafeDarknessEveningsCompleted;
+            target.SafeDarknessProgressToday = source.SafeDarknessProgressToday;
+            target.LastSafeDarknessDate = source.LastSafeDarknessDate;
             target.SafeZonesVisited.Clear();
             if (source.SafeZonesVisited != null)
                 target.SafeZonesVisited.AddRange(source.SafeZonesVisited);

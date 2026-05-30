@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using StardewModdingAPI;
 using StardewModdingAPI.Utilities;
 using StardewValley;
@@ -116,6 +117,22 @@ namespace HarveyStressMeter.Services
         {
             _monitor.Log($"[ApplyStressBuff] Попытка применить дебафф {buffId} ({displayName})", LogLevel.Debug);
 
+            if (DarknessLegacyHelper.BlocksLegacyTreatmentPipeline(buffId))
+            {
+                _monitor.Log(
+                    $"[ApplyStressBuff] Пропуск {buffId}: уровневые баффы темноты выдаёт DarknessService",
+                    LogLevel.Debug);
+                return;
+            }
+
+            if (buffId == BuffIds.Darkness && DarknessLegacyHelper.UsesLevelSystem(_data, _stateService))
+            {
+                _monitor.Log(
+                    "[ApplyStressBuff] Пропуск legacy buffStressDarkness — активна уровневая система",
+                    LogLevel.Debug);
+                return;
+            }
+
             // ⭐ ИСПРАВЛЕНО: Разный кулдаун для разных типов стресса
             // Социальная тревожность имеет более длинный кулдаун, так как срабатывает чаще
             int cooldownDays = buffId == BuffIds.Social ? 7 : 1;
@@ -168,7 +185,8 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
-            if (buffId == BuffIds.Darkness && DarknessLegacyHelper.UsesLevelSystem(_data, _stateService))
+            if (DarknessLegacyHelper.IsDarknessLevelBuff(buffId)
+                || (buffId == BuffIds.Darkness && DarknessLegacyHelper.UsesLevelSystem(_data, _stateService)))
             {
                 _monitor.Log("[StartTreatment] Старт уровневой терапии страха темноты", LogLevel.Info);
                 if (!_data.Darkness.IsTherapyActive && !_data.Darkness.IsCured)
@@ -390,6 +408,10 @@ namespace HarveyStressMeter.Services
             {
                 _episodeQuestProgressService?.InitializeEpisodeQuest(episodeId, treatment.Progress);
             }
+            else
+            {
+                SyncLegacyQuestObjectiveOnStart(buffId, treatment.Progress);
+            }
 
             // Добавить общий топик начала лечения
             if (!ConversationHelper.HasTopic(TopicIds.TreatmentStarted))
@@ -416,6 +438,54 @@ namespace HarveyStressMeter.Services
 
             _monitor.Log($"[StartTreatment] ✅ УСПЕШНО: Лечение начато для {displayName} (Квест: {questId}, Ключ: {treatmentKey})", LogLevel.Info);
             Game1.playSound("newRecipe");
+        }
+
+        /// <summary>
+        /// Обновляет currentObjective legacy-квеста по buffId (только если квест в журнале).
+        /// </summary>
+        public void UpdateTreatmentObjective(string buffId, string objectiveText)
+        {
+            if (!BuffToQuest.TryGetValue(buffId, out var questId))
+            {
+                _monitor.Log($"[UpdateTreatmentObjective] ⚠️ Неизвестный buffId '{buffId}'", LogLevel.Warn);
+                return;
+            }
+
+            var treatment = _data.StressState.GetActiveTreatment(buffId);
+            if (treatment?.AwaitingHarveyReview == true)
+                return;
+
+            if (!_questService.HasQuest(questId))
+            {
+                _monitor.Log(
+                    $"[UpdateTreatmentObjective] ⚠️ Квест '{questId}' (buff={buffId}) отсутствует в журнале",
+                    LogLevel.Warn);
+                return;
+            }
+
+            _questService.UpdateQuest(questId, objective: objectiveText);
+        }
+
+        private void SyncLegacyQuestObjectiveOnStart(string buffId, TreatmentProgress progress)
+        {
+            switch (buffId)
+            {
+                case BuffIds.Lonely:
+                    UpdateTreatmentObjective(buffId, LegacyTreatmentObjectives.Lonely(progress.TalkedUniqueToday));
+                    break;
+                case BuffIds.Hunger:
+                    UpdateTreatmentObjective(buffId, "Съешьте любую еду.");
+                    break;
+                case BuffIds.NoSleep:
+                    UpdateTreatmentObjective(buffId, LegacyTreatmentObjectives.NoSleepDefault);
+                    break;
+                case BuffIds.Overwork:
+                    UpdateTreatmentObjective(buffId, LegacyTreatmentObjectives.OverworkDailyStart);
+                    break;
+                case BuffIds.TooCold:
+                    UpdateTreatmentObjective(buffId, LegacyTreatmentObjectives.TooColdWarm(progress.WarmSeconds));
+                    break;
+            }
         }
 
         /// <summary>
@@ -455,6 +525,14 @@ namespace HarveyStressMeter.Services
 
             if (activeTreatment.AwaitingHarveyReview)
                 return;
+
+            if (activeTreatment.Progress != null && !activeTreatment.Progress.CanEvaluateQuestObjectives())
+            {
+                _monitor.Log(
+                    $"[MarkTreatmentReadyForReview] Grace period — отложено для buffId={buffId}",
+                    LogLevel.Debug);
+                return;
+            }
 
             activeTreatment.ObjectivesCompleted = true;
             activeTreatment.AwaitingHarveyReview = true;
@@ -695,26 +773,86 @@ namespace HarveyStressMeter.Services
             }
         }
 
+        /// <summary>
+        /// Компактный снимок quest/state/buff для repair-команд и логов.
+        /// </summary>
+        public string BuildSyncSnapshot()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"ActiveTreatments={_data.StressState.ActiveTreatments.Count}");
+
+            foreach (var treatment in _data.StressState.ActiveTreatments.Values.OrderBy(t => t.TreatmentKey))
+            {
+                var questInJournal = string.IsNullOrEmpty(treatment.QuestId)
+                    ? "n/a"
+                    : _questService.HasQuest(treatment.QuestId).ToString();
+
+                sb.AppendLine(
+                    $"  {treatment.TreatmentKey}: buff={treatment.BuffId}, started={treatment.TreatmentStarted}, " +
+                    $"cured={treatment.IsCured}, completed={treatment.IsCompleted}, quest={treatment.QuestId ?? "(empty)"}, " +
+                    $"inJournal={questInJournal}, buffInGame={_stateService.HasBuffInGame(treatment.BuffId)}");
+            }
+
+            var episode = _data.ActiveTreatmentEpisode;
+            if (episode != null)
+            {
+                var episodeQuestInJournal = string.IsNullOrEmpty(episode.QuestId)
+                    ? "n/a"
+                    : _questService.HasQuest(episode.QuestId).ToString();
+
+                sb.AppendLine(
+                    $"Episode={episode.EpisodeId}, started={episode.TreatmentStarted}, cured={episode.IsCured}, " +
+                    $"completed={episode.IsCompleted}, quest={episode.QuestId ?? "(empty)"}, inJournal={episodeQuestInJournal}");
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// Полный repair: missing quests, buffs, episode quest, darkness sync.
+        /// </summary>
+        public void RepairSync(string reason)
+        {
+            var before = BuildSyncSnapshot();
+            _monitor.Log($"[StressSync] RepairSync({reason}) BEFORE:\n{before}", LogLevel.Info);
+
+            SyncQuestsAndBuffs();
+            RestoreMissingEpisodeQuest();
+            _stateService.RestoreAllActiveBuffs();
+            _darknessService?.SyncDarknessState(reason);
+
+            var after = BuildSyncSnapshot();
+            _monitor.Log($"[StressSync] RepairSync({reason}) AFTER:\n{after}", LogLevel.Info);
+        }
+
         public void SyncQuestsAndBuffs()
         {
             int removedCount = 0;
-            int restoredCount = 0;
+            int restoredQuestCount = 0;
+            int restoredBuffCount = 0;
             int fixedProgressCount = 0;
 
             foreach (var (treatmentKey, treatment) in _data.StressState.ActiveTreatments.ToList())
             {
-                var questId = treatment.QuestId;
                 var buffId = treatment.BuffId;
 
-                // Проверяем, есть ли квест в журнале
-                if (!string.IsNullOrEmpty(questId) && !_questService.HasQuest(questId))
+                if (ShouldSkipLegacyTreatmentSync(treatment))
+                    continue;
+
+                if (treatment.IsCured || treatment.IsCompleted)
                 {
-                    _buffService.RemoveBuff(buffId);
-                    _data.StressState.RemoveTreatment(treatmentKey);
-                    removedCount++;
-                    _monitor.Log($"[SyncQuestsAndBuffs] Удалено лечение {treatmentKey}: квест {questId} не найден в журнале", LogLevel.Info);
+                    if (RemoveTreatmentFromSync(treatmentKey, treatment, "IsCuredOrIsCompleted"))
+                        removedCount++;
                     continue;
                 }
+
+                if (IsActiveTreatment(treatment) && !HasQuestInJournal(treatment))
+                {
+                    if (TryRestoreMissingQuestForTreatment(treatment, treatmentKey))
+                        restoredQuestCount++;
+                }
+
+                var questId = treatment.QuestId;
 
                 // Квест завершён в журнале без mod state — переводим в ожидание разговора с Харви
                 if (!string.IsNullOrEmpty(questId) && _questService.HasQuest(questId))
@@ -732,7 +870,7 @@ namespace HarveyStressMeter.Services
                 {
                     if (_buffService.ApplyBuffFromData(buffId))
                     {
-                        restoredCount++;
+                        restoredBuffCount++;
                         _monitor.Log($"[SyncQuestsAndBuffs] Восстановлен дебафф {buffId} для лечения {treatmentKey}", LogLevel.Info);
                     }
                     else
@@ -750,10 +888,196 @@ namespace HarveyStressMeter.Services
                 }
             }
 
-            if (removedCount > 0 || restoredCount > 0 || fixedProgressCount > 0)
+            if (removedCount > 0 || restoredQuestCount > 0 || restoredBuffCount > 0 || fixedProgressCount > 0)
             {
-                _monitor.Log($"[SyncQuestsAndBuffs] Синхронизация завершена: удалено={removedCount}, восстановлено={restoredCount}, исправлено={fixedProgressCount}", LogLevel.Info);
+                _monitor.Log(
+                    $"[SyncQuestsAndBuffs] Синхронизация завершена: удалено={removedCount}, квестов восстановлено={restoredQuestCount}, " +
+                    $"баффов восстановлено={restoredBuffCount}, исправлено={fixedProgressCount}",
+                    LogLevel.Info);
             }
+
+            RestoreMissingEpisodeQuest();
+        }
+
+        /// <summary>Восстанавливает episode-квест, если назначение активно, а квест пропал из журнала.</summary>
+        public int RestoreMissingEpisodeQuest()
+        {
+            var episode = _data.ActiveTreatmentEpisode;
+            if (episode == null || !episode.IsActiveEpisode())
+                return 0;
+
+            var questId = episode.QuestId;
+            if (string.IsNullOrEmpty(questId))
+            {
+                if (!TreatmentEpisodeDefinitions.TryGet(episode.EpisodeId, out var definition))
+                {
+                    _monitor.Log(
+                        $"[StressSync] ERROR: Cannot restore episode quest — unknown episodeId={episode.EpisodeId}",
+                        LogLevel.Error);
+                    return 0;
+                }
+
+                questId = definition.QuestId;
+                episode.QuestId = questId;
+            }
+
+            if (_questService.HasQuest(questId))
+                return 0;
+
+            _questService.AddQuest(questId);
+            if (!_questService.HasQuest(questId))
+            {
+                _monitor.Log(
+                    $"[StressSync] ERROR: Failed to restore episode quest episodeId={episode.EpisodeId}, questId={questId}",
+                    LogLevel.Error);
+                return 0;
+            }
+
+            _monitor.Log(
+                $"[StressSync] Restored missing episode quest: episodeId={episode.EpisodeId}, questId={questId}",
+                LogLevel.Warn);
+
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(questId);
+            if (treatment?.Progress != null && _episodeQuestProgressService != null)
+                _episodeQuestProgressService.UpdateQuestJournal(episode.EpisodeId, treatment.Progress);
+
+            return 1;
+        }
+
+        /// <summary>Обновляет currentObjective legacy-квеста по текущему progress.</summary>
+        public void SyncTreatmentObjectiveFromProgress(TreatmentState treatment)
+        {
+            if (treatment.AwaitingHarveyReview)
+            {
+                UpdateTreatmentObjective(treatment.BuffId, StressQuestCopy.ReadyForReviewObjective);
+                return;
+            }
+
+            var progress = treatment.Progress ?? new TreatmentProgress();
+            var buffId = treatment.BuffId;
+
+            var episode = _data.ActiveTreatmentEpisode;
+            if (episode?.IsActiveEpisode() == true
+                && !string.IsNullOrEmpty(episode.QuestId)
+                && string.Equals(treatment.QuestId, episode.QuestId, StringComparison.Ordinal)
+                && _episodeQuestProgressService != null)
+            {
+                _episodeQuestProgressService.UpdateQuestJournal(episode.EpisodeId, progress);
+                return;
+            }
+
+            switch (buffId)
+            {
+                case BuffIds.Lonely:
+                    UpdateTreatmentObjective(buffId, LegacyTreatmentObjectives.Lonely(progress.TalkedUniqueToday));
+                    break;
+                case BuffIds.Hunger:
+                    UpdateTreatmentObjective(
+                        buffId,
+                        progress.AteAnyFood ? LegacyTreatmentObjectives.HungerDone : "Съешьте любую еду.");
+                    break;
+                case BuffIds.NoSleep:
+                    UpdateTreatmentObjective(buffId, LegacyTreatmentObjectives.NoSleepDefault);
+                    break;
+                case BuffIds.Overwork:
+                    UpdateTreatmentObjective(
+                        buffId,
+                        LegacyTreatmentObjectives.Overwork(
+                            _data.OverworkBreaksToday,
+                            _data.OverworkBreakSeconds,
+                            _data.OverworkBreakActive));
+                    break;
+                case BuffIds.TooCold:
+                    UpdateTreatmentObjective(buffId, LegacyTreatmentObjectives.TooColdWarm(progress.WarmSeconds));
+                    break;
+                default:
+                    SyncLegacyQuestObjectiveOnStart(buffId, progress);
+                    break;
+            }
+        }
+
+        private static bool IsActiveTreatment(TreatmentState treatment) =>
+            treatment.TreatmentStarted && !treatment.IsCompleted && !treatment.IsCured;
+
+        private bool ShouldSkipLegacyTreatmentSync(TreatmentState treatment)
+        {
+            if (DarknessLegacyHelper.BlocksLegacyTreatmentPipeline(treatment.BuffId))
+                return true;
+
+            if (treatment.BuffId == BuffIds.Darkness && DarknessLegacyHelper.UsesLevelSystem(_data, _stateService))
+                return true;
+
+            return false;
+        }
+
+        private bool HasQuestInJournal(TreatmentState treatment)
+        {
+            if (string.IsNullOrEmpty(treatment.QuestId))
+                return false;
+
+            return _questService.HasQuest(treatment.QuestId);
+        }
+
+        private bool TryRestoreMissingQuestForTreatment(TreatmentState treatment, string treatmentKey)
+        {
+            var questId = treatment.QuestId;
+            if (string.IsNullOrEmpty(questId) && !BuffToQuest.TryGetValue(treatment.BuffId, out questId))
+            {
+                _monitor.Log(
+                    $"[StressSync] ERROR: Cannot restore quest — no QuestId for active treatment {treatmentKey}, buffId={treatment.BuffId}",
+                    LogLevel.Error);
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(treatment.QuestId))
+                treatment.QuestId = questId;
+
+            if (_questService.HasQuest(questId))
+                return false;
+
+            _questService.AddQuest(questId);
+            if (!_questService.HasQuest(questId))
+            {
+                _monitor.Log(
+                    $"[StressSync] ERROR: Failed to restore quest '{questId}' for treatment {treatmentKey}, buffId={treatment.BuffId}",
+                    LogLevel.Error);
+                return false;
+            }
+
+            treatment.AddedToGameLog = true;
+            _data.StressState.TreatmentFlags.SetQuestAddedToJournal(questId, true);
+
+            _monitor.Log(
+                $"[StressSync] Restored missing quest for active treatment: buffId={treatment.BuffId}, questId={questId}",
+                LogLevel.Warn);
+
+            if (!_stateService.HasBuffInGame(treatment.BuffId))
+            {
+                if (_buffService.ApplyBuffFromData(treatment.BuffId))
+                {
+                    _monitor.Log(
+                        $"[StressSync] Restored missing buff after quest restore: buffId={treatment.BuffId}, treatmentKey={treatmentKey}",
+                        LogLevel.Warn);
+                }
+                else
+                {
+                    _monitor.Log(
+                        $"[StressSync] ERROR: Quest restored but buff apply failed: buffId={treatment.BuffId}, treatmentKey={treatmentKey}",
+                        LogLevel.Error);
+                }
+            }
+
+            SyncTreatmentObjectiveFromProgress(treatment);
+            return true;
+        }
+
+        private bool RemoveTreatmentFromSync(string treatmentKey, TreatmentState treatment, string reason)
+        {
+            _data.StressState.RemoveTreatment(treatmentKey);
+            _monitor.Log(
+                $"[StressSync] Removed TreatmentState {treatmentKey}: reason={reason}, buffId={treatment.BuffId}, questId={treatment.QuestId ?? "(empty)"}",
+                LogLevel.Info);
+            return true;
         }
 
         public void RestoreLostQuestsFromTopics()
@@ -836,6 +1160,12 @@ namespace HarveyStressMeter.Services
                     _monitor.Log($"[RestoreMissingBuffs] Пропускаем завершенное лечение: {treatmentKey}", LogLevel.Debug);
                     continue;
                 }
+
+                if (DarknessLegacyHelper.BlocksLegacyTreatmentPipeline(treatment.BuffId))
+                    continue;
+
+                if (treatment.BuffId == BuffIds.Darkness && DarknessLegacyHelper.UsesLevelSystem(_data, _stateService))
+                    continue;
 
                 var buffId = treatment.BuffId;
 

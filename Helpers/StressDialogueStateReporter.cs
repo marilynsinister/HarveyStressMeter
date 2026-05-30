@@ -59,7 +59,7 @@ namespace HarveyStressMeter.Helpers
             void L(string message) => sb.AppendLine(message);
 
             var dialogue = _stressDialogueService.GetDebugSnapshot();
-            var untreated = StressDebuffSelector.GetUntreatedDebuffs(_stateService);
+            var untreated = StressDebuffSelector.GetUntreatedDebuffs(_stateService, _data);
             var selected = GetStartDialogueEligibleBuff(untreated);
             var speaker = Game1.currentSpeaker?.Name ?? "null";
             var menuType = Game1.activeClickableMenu?.GetType().Name ?? "null";
@@ -142,10 +142,14 @@ namespace HarveyStressMeter.Helpers
         {
             foreach (var buffId in StressDebuffSelector.PriorityOrder)
             {
-                if (!untreated.Contains(buffId))
-                    continue;
+                if (untreated.Contains(buffId))
+                    return buffId;
+            }
 
-                return buffId;
+            foreach (var buffId in untreated)
+            {
+                if (DarknessLegacyHelper.IsDarknessLevelBuff(buffId))
+                    return buffId;
             }
 
             return null;

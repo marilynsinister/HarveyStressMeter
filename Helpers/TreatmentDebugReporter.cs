@@ -108,8 +108,49 @@ namespace HarveyStressMeter.Helpers
 
             sb.AppendLine("treatments:");
             foreach (var treatment in data.StressState.ActiveTreatments.Values.OrderBy(t => t.TreatmentKey))
-                sb.AppendLine(FormatTreatmentMcpBlock(treatment, stateService));
+                sb.AppendLine(FormatTreatmentMcpBlock(treatment, stateService, data));
 
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>DEV/MCP: treatment snapshot + StressLoad ActiveCauses and episode fields.</summary>
+        public static string BuildTreatmentDebugSnapshot(
+            SaveData data,
+            StateService stateService,
+            StressLoadService stressLoadService,
+            TreatmentEpisodeService episodeService,
+            StressDialogueService stressDialogueService)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(BuildMcpSnapshot(data, stateService, stressLoadService, episodeService, stressDialogueService));
+            sb.AppendLine("--- ActiveCauses ---");
+
+            if (stressLoadService == null)
+            {
+                sb.AppendLine("(stressLoadService null)");
+                return sb.ToString().TrimEnd();
+            }
+
+            var causes = stressLoadService.GetActiveCauses()
+                .Where(kvp => kvp.Value.IsActive)
+                .OrderByDescending(kvp => kvp.Value.Weight)
+                .ToList();
+
+            if (causes.Count == 0)
+                sb.AppendLine("(none)");
+            else
+            {
+                foreach (var (causeId, cause) in causes)
+                {
+                    sb.AppendLine(
+                        $"  {causeId}: weight={cause.Weight}, buff={cause.SourceBuffId ?? "(none)"}, " +
+                        $"severe={cause.IsSevere}");
+                }
+            }
+
+            var episode = data.ActiveTreatmentEpisode;
+            sb.AppendLine($"ActiveTreatmentEpisode.AwaitingHarveyReview: {episode?.AwaitingHarveyReview ?? false}");
+            sb.AppendLine($"ActiveTreatmentEpisode.EpisodeId: {episode?.EpisodeId ?? "(none)"}");
             return sb.ToString().TrimEnd();
         }
 
@@ -160,7 +201,7 @@ namespace HarveyStressMeter.Helpers
                 .ToList();
         }
 
-        private static string FormatTreatmentMcpBlock(TreatmentState treatment, StateService stateService)
+        private static string FormatTreatmentMcpBlock(TreatmentState treatment, StateService stateService, SaveData data)
         {
             var hasBuff = stateService.HasBuffInGame(treatment.BuffId);
             var reviewTopic = TreatmentTopics.GetReadyForReviewTopic(treatment.BuffId);
@@ -169,6 +210,8 @@ namespace HarveyStressMeter.Helpers
             var startDate = treatment.TreatmentStartedDate ?? treatment.IssuedDate;
             var daysActive = Math.Max(0, SDate.Now().DaysSinceStart - startDate.DaysSinceStart);
             var missedPrescription = hasBuff && !treatment.TreatmentStarted && !treatment.IsCured;
+            var questId = treatment.QuestId ?? "(empty)";
+            var questInJournal = !string.IsNullOrEmpty(treatment.QuestId) && Game1.player.hasQuest(treatment.QuestId);
 
             return string.Join('\n',
             [
@@ -178,16 +221,53 @@ namespace HarveyStressMeter.Helpers
                 $"    started={treatment.TreatmentStarted}",
                 $"    completed={treatment.IsCompleted}",
                 $"    cured={treatment.IsCured}",
-                $"    readyForReview={treatment.AwaitingHarveyReview}",
+                $"    AwaitingHarveyReview={treatment.AwaitingHarveyReview}",
                 $"    objectivesCompleted={treatment.ObjectivesCompleted}",
-                $"    questId={treatment.QuestId ?? "(empty)"}",
-                $"    questInJournal={(!string.IsNullOrEmpty(treatment.QuestId) && Game1.player.hasQuest(treatment.QuestId))}",
+                $"    questId={questId}",
+                $"    questInJournal={questInJournal}",
+                FormatLegacyProgressLine(treatment, data),
+                $"    currentObjective={FormatQuestCurrentObjective(treatment.QuestId)}",
                 $"    daysActive={daysActive}",
                 $"    hasBuffInGame={hasBuff}",
                 $"    readyForReviewTopic={reviewTopic ?? "(n/a)"} active={reviewTopicActive}",
                 $"    missedPrescription={missedPrescription}",
                 $"    nextStep={TreatmentNextStep.Resolve(treatment, hasBuff)}",
             ]);
+        }
+
+        private static string FormatQuestCurrentObjective(string? questId)
+        {
+            if (string.IsNullOrEmpty(questId))
+                return "(no questId)";
+
+            if (!Game1.player.hasQuest(questId))
+                return "(quest not in journal)";
+
+            var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == questId);
+            if (quest == null)
+                return "(quest missing from questLog)";
+
+            var objective = quest.currentObjective?.Trim();
+            return string.IsNullOrEmpty(objective) ? "(empty)" : objective;
+        }
+
+        private static string FormatLegacyProgressLine(TreatmentState treatment, SaveData data)
+        {
+            var p = treatment.Progress;
+            if (p == null)
+                return "    progress=(null)";
+
+            return treatment.BuffId switch
+            {
+                BuffIds.Lonely => $"    progress: TalkedUniqueToday={p.TalkedUniqueToday}",
+                BuffIds.Hunger => $"    progress: AteAnyFood={p.AteAnyFood}",
+                BuffIds.NoSleep =>
+                    $"    progress: EarlySleepStreak={p.EarlySleepStreak}, NoSleepLateObjectivePending={data.NoSleepLateObjectivePending}",
+                BuffIds.Overwork =>
+                    $"    progress: OverworkBreaksToday={data.OverworkBreaksToday}, OverworkBreakSeconds={data.OverworkBreakSeconds}, OverworkBreakActive={data.OverworkBreakActive}",
+                BuffIds.TooCold => $"    progress: WarmSeconds={p.WarmSeconds}",
+                _ => $"    progress: WarmSeconds={p.WarmSeconds}, AteAnyFood={p.AteAnyFood}, TalkedUniqueToday={p.TalkedUniqueToday}",
+            };
         }
 
         public static void ShowHud(string message)

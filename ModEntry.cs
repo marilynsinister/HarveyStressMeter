@@ -97,7 +97,8 @@ namespace HarveyStressMeter
                 _harveySafePersonAuraService,
                 _stressMeterHudService,
                 _treatmentEpisodeService,
-                _gameLogicHandler);
+                _gameLogicHandler,
+                _darknessService);
 
             if (_config.EnableStressMcp)
             {
@@ -318,7 +319,7 @@ namespace HarveyStressMeter
             // Create handlers (high-level modules that depend on services)
             _uiHandler = new UIHandler(Monitor, _data, _helper);
             _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _stressGameplayEffectService, _episodeQuestProgressService);
-            _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _gameLogicHandler, _uiHandler, _darknessService, _stressLoadService);
+            _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _treatmentService, _gameLogicHandler, _uiHandler, _darknessService, _stressLoadService);
             _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler, _modResetService, _stressDialogueService);
 
             if (_config.EnableDevTestCommands)
@@ -341,7 +342,8 @@ namespace HarveyStressMeter
                     _stressSystemsCoordinator,
                     _stressLoadService,
                     _treatmentEpisodeService,
-                    _stressGameplayEffectService).RegisterCommands();
+                    _stressGameplayEffectService,
+                    _darknessService).RegisterCommands();
             }
             else
             {

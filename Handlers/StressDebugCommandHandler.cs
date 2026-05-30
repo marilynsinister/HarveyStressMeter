@@ -38,6 +38,7 @@ namespace HarveyStressMeter.Handlers
         private readonly StressLoadService _stressLoadService;
         private readonly TreatmentEpisodeService _treatmentEpisodeService;
         private readonly StressGameplayEffectService _stressGameplayEffectService;
+        private readonly DarknessService _darknessService;
 
         private bool _pendingTalkHarveyWarp = true;
 
@@ -72,7 +73,8 @@ namespace HarveyStressMeter.Handlers
             StressSystemsCoordinator stressSystemsCoordinator,
             StressLoadService stressLoadService,
             TreatmentEpisodeService treatmentEpisodeService,
-            StressGameplayEffectService stressGameplayEffectService)
+            StressGameplayEffectService stressGameplayEffectService,
+            DarknessService darknessService)
         {
             _monitor = monitor;
             _helper = helper;
@@ -92,6 +94,7 @@ namespace HarveyStressMeter.Handlers
             _stressLoadService = stressLoadService;
             _treatmentEpisodeService = treatmentEpisodeService;
             _stressGameplayEffectService = stressGameplayEffectService;
+            _darknessService = darknessService;
         }
 
         public void RegisterCommands()
@@ -99,6 +102,7 @@ namespace HarveyStressMeter.Handlers
             _monitor.Log($"{DevPrefix} Registering hs.test.* and stress_* console commands", LogLevel.Warn);
 
             RegisterStressTreatmentCommands();
+            RegisterDarknessDebugCommands();
 
             _helper.ConsoleCommands.Add(
                 "hs.test.add-stress",
@@ -260,6 +264,205 @@ namespace HarveyStressMeter.Handlers
                 "stress_trust_debug",
                 "DEV/TEST: HarveyCareTrust snapshot only.",
                 (_, __) => StressTrustDebug());
+            _helper.ConsoleCommands.Add(
+                "stress_treatment_debug",
+                "DEV/TEST: treatments, episode, causes, debuffs (MCP snapshot).",
+                (_, __) => StressTreatmentDebug());
+            _helper.ConsoleCommands.Add(
+                "stress_repair_sync",
+                "DEV/TEST: restore missing quests/buffs, episode quest, darkness sync; log before/after snapshot.",
+                (_, __) => StressRepairSync());
+            _helper.ConsoleCommands.Add(
+                "stress_force_remove_quest",
+                "DEV/TEST: remove treatment quest from journal (state kept). Usage: stress_force_remove_quest <buffId>",
+                StressForceRemoveQuest);
+        }
+
+        private void RegisterDarknessDebugCommands()
+        {
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_debug",
+                "DEV/TEST: darkness FearLevel, therapy, buffs, quests, topics.",
+                (_, __) => StressDarknessDebug());
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_set_level",
+                "DEV/TEST: set FearLevel 1–3, sync buffs/topics. Usage: stress_darkness_set_level <1|2|3>",
+                StressDarknessSetLevel);
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_start_therapy",
+                "DEV/TEST: DarknessService.StartTherapy + HarveyMod_DarknessStep1.",
+                (_, __) => StressDarknessStartTherapy());
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_step1_progress",
+                "DEV/TEST: step1 progress. Usage: stress_darkness_step1_progress <evenings> <today>",
+                StressDarknessStep1Progress);
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_sync",
+                "DEV/TEST: DarknessService.SyncDarknessState + snapshot.",
+                (_, __) => StressDarknessSync());
+        }
+
+        private void StressDarknessDebug()
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            var snapshot = _darknessService.BuildDebugSnapshot();
+            DarknessDebugReporter.LogSnapshot(_monitor, "stress_darkness_debug", snapshot);
+            TreatmentDebugReporter.ShowHud("darkness debug — see SMAPI log");
+        }
+
+        private void StressDarknessSetLevel(string command, string[] args)
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            if (args.Length < 1 || !int.TryParse(args[0], out var level))
+            {
+                LogDevError($"Usage: {command} <1|2|3>");
+                return;
+            }
+
+            if (!_darknessService.ApplyDebugFearLevel(level))
+            {
+                LogDevError($"Invalid level {level}. Use 1, 2, or 3.");
+                return;
+            }
+
+            RefreshGameplayEffects();
+            var snapshot = _darknessService.BuildDebugSnapshot();
+            DarknessDebugReporter.LogSnapshot(_monitor, $"stress_darkness_set_level {level}", snapshot);
+            TreatmentDebugReporter.ShowHud($"darkness level set to {level}");
+        }
+
+        private void StressDarknessStartTherapy()
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            _darknessService.StartTherapy();
+            RefreshGameplayEffects();
+            var snapshot = _darknessService.BuildDebugSnapshot();
+            DarknessDebugReporter.LogSnapshot(_monitor, "stress_darkness_start_therapy", snapshot);
+            TreatmentDebugReporter.ShowHud("darkness therapy started");
+        }
+
+        private void StressDarknessStep1Progress(string command, string[] args)
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            if (args.Length < 2
+                || !int.TryParse(args[0], out var evenings)
+                || !int.TryParse(args[1], out var today))
+            {
+                LogDevError($"Usage: {command} <evenings> <today>  (e.g. {command} 2 4)");
+                return;
+            }
+
+            if (!_darknessService.ApplyDebugStep1Progress(evenings, today))
+            {
+                LogDevError("Step1 progress failed — start therapy (stress_darkness_start_therapy) at stage 1 first.");
+                StressDarknessDebug();
+                return;
+            }
+
+            var snapshot = _darknessService.BuildDebugSnapshot();
+            DarknessDebugReporter.LogSnapshot(_monitor, $"stress_darkness_step1_progress {evenings} {today}", snapshot);
+            TreatmentDebugReporter.ShowHud($"darkness step1 evenings={evenings} today={today}");
+        }
+
+        private void StressDarknessSync()
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            _darknessService.SyncDarknessState("debug command");
+            RefreshGameplayEffects();
+            var snapshot = _darknessService.BuildDebugSnapshot();
+            DarknessDebugReporter.LogSnapshot(_monitor, "stress_darkness_sync", snapshot);
+            TreatmentDebugReporter.ShowHud("darkness sync done");
+        }
+
+        private void StressTreatmentDebug()
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            var snapshot = TreatmentDebugReporter.BuildTreatmentDebugSnapshot(
+                _data,
+                _stateService,
+                _stressLoadService,
+                _treatmentEpisodeService,
+                _stressDialogueService);
+
+            foreach (var line in snapshot.Split('\n'))
+                _monitor.Log($"{TreatmentDebugReporter.DevPrefix} {line}", LogLevel.Info);
+
+            TreatmentDebugReporter.ShowHud("treatment debug — see SMAPI log");
+        }
+
+        private void StressRepairSync()
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            _treatmentService.RepairSync("stress_repair_sync");
+            RefreshGameplayEffects();
+            TreatmentDebugReporter.ShowHud("stress_repair_sync done — see SMAPI log");
+        }
+
+        private void StressForceRemoveQuest(string command, string[] args)
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            if (!TryRequireBuffArg(args, out var buffId, command))
+                return;
+
+            var treatment = _stateService.GetActiveTreatment(buffId);
+            if (treatment == null)
+            {
+                LogDevError($"No active treatment for buffId={buffId}. Start treatment first.");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(treatment.QuestId))
+            {
+                LogDevError($"Treatment {treatment.TreatmentKey} has no QuestId.");
+                return;
+            }
+
+            if (!_questService.HasQuest(treatment.QuestId))
+            {
+                LogDevWarn($"Quest {treatment.QuestId} already missing from journal.");
+                WriteBuffReport(buffId);
+                return;
+            }
+
+            Game1.player.removeQuest(treatment.QuestId);
+            LogDev(
+                $"Removed quest {treatment.QuestId} from journal (TreatmentState kept). " +
+                $"Run stress_repair_sync to verify restore.");
+            WriteBuffReport(buffId);
+        }
+
+        private bool EnsureWorldReadyForDarkness()
+        {
+            if (Context.IsWorldReady)
+                return true;
+
+            LogDevError("Load a save first (world not ready).");
+            return false;
         }
 
         private void LogFullState(string? header = null)

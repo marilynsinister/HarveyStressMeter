@@ -218,13 +218,7 @@ namespace HarveyStressMeter.Services
                     break;
 
                 case BuffIds.TooCold:
-                    // Только если в теплой зоне
-                    if (GameStateHelper.IsInWarmZone())
-                    {
-                        progress.WarmSeconds++;
-                        if (progress.WarmSeconds >= 120)
-                            _treatmentService.MarkTreatmentReadyForReview(buffId);
-                    }
+                    UpdateTooColdWarmProgress(questId, progress);
                     break;
 
                 case BuffIds.Tired:
@@ -513,6 +507,30 @@ namespace HarveyStressMeter.Services
                 objective: $"Отдохни в фермерском доме, избегая тяжёлой работы.\n\n{progressLine}");
         }
 
+        private void UpdateTooColdWarmProgress(string questId, TreatmentProgress progress)
+        {
+            if (!_stateService.HasActiveQuestState(questId))
+                return;
+
+            if (IsAwaitingHarveyReview(questId))
+                return;
+
+            if (!GameStateHelper.IsInWarmZone())
+                return;
+
+            progress.WarmSeconds++;
+
+            if (progress.WarmSeconds % 10 == 0 || progress.WarmSeconds >= LegacyTreatmentObjectives.TooColdWarmSecondsRequired)
+            {
+                _treatmentService.UpdateTreatmentObjective(
+                    BuffIds.TooCold,
+                    LegacyTreatmentObjectives.TooColdWarm(progress.WarmSeconds));
+            }
+
+            if (progress.WarmSeconds >= LegacyTreatmentObjectives.TooColdWarmSecondsRequired)
+                _treatmentService.MarkTreatmentReadyForReview(BuffIds.TooCold);
+        }
+
         private void UpdateOverworkBreakProgress()
         {
             if (!_stateService.HasActiveQuestState(QuestIds.Overwork))
@@ -521,8 +539,23 @@ namespace HarveyStressMeter.Services
             if (Game1.CurrentEvent != null)
                 return;
 
-            if (_data.OverworkBreaksToday >= 3)
+            if (IsAwaitingHarveyReview(QuestIds.Overwork))
                 return;
+
+            var overworkTreatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.Overwork);
+            if (overworkTreatment?.Progress != null && !overworkTreatment.Progress.CanEvaluateQuestObjectives()
+                && _data.OverworkBreaksToday >= 3)
+            {
+                return;
+            }
+
+            if (_data.OverworkBreaksToday >= 3)
+            {
+                _treatmentService.UpdateTreatmentObjective(
+                    BuffIds.Overwork,
+                    LegacyTreatmentObjectives.Overwork(_data.OverworkBreaksToday, 0, false));
+                return;
+            }
 
             if (!GameStateHelper.IsInRestZone())
             {
@@ -530,6 +563,7 @@ namespace HarveyStressMeter.Services
                 {
                     _data.OverworkBreakSeconds = 0;
                     _data.OverworkBreakActive = false;
+                    SyncOverworkQuestObjective();
                 }
                 return;
             }
@@ -539,6 +573,7 @@ namespace HarveyStressMeter.Services
 
             _data.OverworkBreakActive = true;
             _data.OverworkBreakSeconds++;
+            SyncOverworkQuestObjective();
 
             if (_data.OverworkBreakSeconds < OverworkBreakSecondsRequired)
                 return;
@@ -546,12 +581,23 @@ namespace HarveyStressMeter.Services
             _data.OverworkBreaksToday = Math.Min(3, _data.OverworkBreaksToday + 1);
             _data.OverworkBreakSeconds = 0;
             _data.OverworkBreakActive = false;
+            SyncOverworkQuestObjective();
 
             Game1.playSound("reward");
             Game1.addHUDMessage(new HUDMessage($"Перерыв {_data.OverworkBreaksToday}/3", HUDMessage.achievement_type));
 
             if (_data.OverworkBreaksToday >= 3)
                 CompleteOverworkTreatment();
+        }
+
+        private void SyncOverworkQuestObjective()
+        {
+            _treatmentService.UpdateTreatmentObjective(
+                BuffIds.Overwork,
+                LegacyTreatmentObjectives.Overwork(
+                    _data.OverworkBreaksToday,
+                    _data.OverworkBreakSeconds,
+                    _data.OverworkBreakActive));
         }
 
         private void CompleteOverworkTreatment()

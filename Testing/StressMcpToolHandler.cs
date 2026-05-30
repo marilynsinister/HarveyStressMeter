@@ -45,6 +45,7 @@ namespace HarveyStressMeter.Testing
         private readonly StressMeterHudService _stressMeterHudService;
         private readonly TreatmentEpisodeService _treatmentEpisodeService;
         private readonly GameLogicHandler _gameLogicHandler;
+        private readonly DarknessService _darknessService;
 
         public StressMcpToolHandler(
             IMonitor monitor,
@@ -61,7 +62,8 @@ namespace HarveyStressMeter.Testing
             HarveySafePersonAuraService harveySafePersonAuraService,
             StressMeterHudService stressMeterHudService,
             TreatmentEpisodeService treatmentEpisodeService,
-            GameLogicHandler gameLogicHandler)
+            GameLogicHandler gameLogicHandler,
+            DarknessService darknessService)
         {
             _monitor = monitor;
             _data = data;
@@ -78,6 +80,7 @@ namespace HarveyStressMeter.Testing
             _stressMeterHudService = stressMeterHudService;
             _treatmentEpisodeService = treatmentEpisodeService;
             _gameLogicHandler = gameLogicHandler;
+            _darknessService = darknessService;
         }
 
         public string Execute(string toolName, JsonElement? arguments)
@@ -137,6 +140,17 @@ namespace HarveyStressMeter.Testing
                     _stressLoadService,
                     _treatmentEpisodeService,
                     _stressDialogueService),
+                "stress_treatment_debug" => McpDarknessTools.TreatmentDebug(
+                    _data,
+                    _stateService,
+                    _stressLoadService,
+                    _treatmentEpisodeService,
+                    _stressDialogueService),
+                "stress_darkness_debug" => McpDarknessTools.DarknessDebug(_darknessService),
+                "stress_darkness_set_level" => McpDarknessTools.DarknessSetLevel(_darknessService, arguments),
+                "stress_darkness_start_therapy" => McpDarknessTools.DarknessStartTherapy(_darknessService),
+                "stress_darkness_step1_progress" => McpDarknessTools.DarknessStep1Progress(_darknessService, arguments),
+                "stress_darkness_sync" => McpDarknessTools.DarknessSync(_darknessService),
                 "mcp_event_snapshot" => McpEventTools.EventSnapshot(),
                 "mcp_start_event" => McpEventTools.StartEvent(_monitor, arguments),
                 "mcp_end_event" => McpEventTools.EndEvent(arguments),
@@ -150,7 +164,7 @@ namespace HarveyStressMeter.Testing
                 "mcp_sleep" => McpPlayerActionTools.Sleep(_gameLogicHandler, _stateService, _data, arguments),
                 "mcp_save_game" => McpSaveTools.SaveGame(_data, _stressLoadService, _monitor),
                 "mcp_reload_save" => McpSaveTools.ReloadSave(
-                    _data, _stateService, _stressLoadService, _gameLogicHandler, _monitor),
+                    _data, _stateService, _darknessService, _stressLoadService, _gameLogicHandler, _monitor),
                 _ => $"Error: unknown tool '{toolName}'.",
             };
         }

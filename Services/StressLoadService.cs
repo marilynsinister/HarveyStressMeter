@@ -299,6 +299,7 @@ namespace HarveyStressMeter.Services
 
         /// <summary>
         /// Синхронизирует causes из активных buff/debuff в игре и пересчитывает StressLoad.
+        /// buffDarknessLevel1/2/3 и legacy buffStressDarkness мапятся на StressCauses.Darkness через BuffToCause.
         /// </summary>
         public void SyncFromGameState()
         {
