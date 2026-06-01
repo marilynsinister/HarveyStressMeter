@@ -30,6 +30,7 @@ namespace HarveyStressMeter.Services
 
         private float _step1ElapsedMs;
         private bool _step1WasProgressing;
+        private int _step1LastLoggedProgressToday = -1;
 
         public DarknessService(
             SaveData data,
@@ -603,7 +604,6 @@ namespace HarveyStressMeter.Services
                     _buffService.RemoveBuff(BuffIds.DimLight);
             }
 
-            LogStep1Trace(isProgressing, evening, atHome, noEvent);
         }
 
         private static bool IsStep1SessionBlocked()
@@ -616,6 +616,9 @@ namespace HarveyStressMeter.Services
 
         private bool IsStep1TodayComplete()
             => _data.Darkness.SafeDarknessProgressToday >= Step1MinutesPerEvening;
+
+        private bool IsStep1TodayCredited()
+            => IsStep1TodayComplete();
 
         private void TryMigrateLegacyStep1Progress()
         {
@@ -658,7 +661,10 @@ namespace HarveyStressMeter.Services
             _monitor.Log("[DarknessStep1] Новый игровой день — сброс «сегодня» для шага 1", LogLevel.Debug);
 
             if (refreshJournalOnDayChange)
+            {
+                _step1LastLoggedProgressToday = -1;
                 RefreshTherapyQuestJournal(1);
+            }
         }
 
         private void IncrementStep1ProgressMinute()
@@ -671,17 +677,11 @@ namespace HarveyStressMeter.Services
             int after = _data.Darkness.SafeDarknessProgressToday;
 
             RefreshTherapyQuestJournal(1);
+            LogStep1ProgressChange(force: true);
 
-            if (after is 1 or 3 or 5)
-            {
-                Game1.addHUDMessage(new HUDMessage(
-                    $"Терапия: сегодня {after}/{Step1MinutesPerEvening}",
-                    HUDMessage.newQuest_type));
-            }
-
-            _monitor.Log(
-                $"[DarknessStep1] +1 мин: сегодня {after}/{Step1MinutesPerEvening}, вечера {_data.Darkness.SafeDarknessEveningsCompleted}/{Step1EveningsRequired}",
-                LogLevel.Info);
+            Game1.addHUDMessage(new HUDMessage(
+                $"Приглушённый свет: {after}/{Step1MinutesPerEvening}",
+                HUDMessage.newQuest_type));
 
             if (after >= Step1MinutesPerEvening)
                 CompleteStep1EveningSegment();
@@ -690,17 +690,26 @@ namespace HarveyStressMeter.Services
         private void CompleteStep1EveningSegment()
         {
             _data.Darkness.SafeDarknessEveningsCompleted++;
+            _data.Darkness.LastSafeDarknessDate = SDate.Now();
             int evenings = _data.Darkness.SafeDarknessEveningsCompleted;
             int remaining = Math.Max(0, Step1EveningsRequired - evenings);
 
-            RefreshTherapyQuestJournal(1);
-            Game1.addHUDMessage(new HUDMessage(
-                $"Сегодняшнее упражнение выполнено. Осталось вечеров: {remaining}.",
-                HUDMessage.achievement_type));
-            _monitor.Log($"[DarknessStep1] Вечер завершён: {evenings}/{Step1EveningsRequired}", LogLevel.Info);
+            LogStep1ProgressChange(force: true);
 
             if (evenings >= Step1EveningsRequired)
+            {
+                RefreshTherapyQuestJournal(1);
+                Game1.addHUDMessage(new HUDMessage(
+                    "Первый этап терапии выполнен.",
+                    HUDMessage.achievement_type));
                 CompleteStep1();
+                return;
+            }
+
+            RefreshTherapyQuestJournal(1);
+            Game1.addHUDMessage(new HUDMessage(
+                $"Сегодняшний вечер зачтён. Осталось вечеров: {remaining}.",
+                HUDMessage.achievement_type));
         }
 
         private void HandleStep1HudState(bool isProgressing)
@@ -708,21 +717,26 @@ namespace HarveyStressMeter.Services
             if (isProgressing && !_step1WasProgressing)
             {
                 Game1.addHUDMessage(new HUDMessage(
-                    "Терапия: останьтесь дома при приглушённом свете.",
+                    "Терапия: побудьте дома при приглушённом свете.",
                     HUDMessage.newQuest_type));
             }
 
             _step1WasProgressing = isProgressing;
         }
 
-        private void LogStep1Trace(bool active, bool evening, bool atHome, bool noEvent)
+        private void LogStep1ProgressChange(bool force = false)
         {
-            bool dimBuff = _stateService.HasBuffInGame(BuffIds.DimLight);
+            int today = _data.Darkness.SafeDarknessProgressToday;
+            if (!force && today == _step1LastLoggedProgressToday)
+                return;
+
+            _step1LastLoggedProgressToday = today;
+            string location = Game1.player?.currentLocation?.NameOrUniqueName ?? "?";
             _monitor.Log(
-                $"[DarknessStep1] active={active}, stage={_data.Darkness.TherapyStage}, atHome={atHome}, evening={evening}, dimBuff={dimBuff}, " +
-                $"today={_data.Darkness.SafeDarknessProgressToday}/{Step1MinutesPerEvening}, " +
-                $"evenings={_data.Darkness.SafeDarknessEveningsCompleted}/{Step1EveningsRequired}",
-                LogLevel.Trace);
+                $"[DarknessStep1] today={today}/{Step1MinutesPerEvening}, " +
+                $"evenings={_data.Darkness.SafeDarknessEveningsCompleted}/{Step1EveningsRequired}, " +
+                $"creditedToday={IsStep1TodayCredited()}, location={location}, time={Game1.timeOfDay}",
+                LogLevel.Debug);
         }
 
         private void ClearStep1SessionState()
@@ -741,6 +755,8 @@ namespace HarveyStressMeter.Services
         /// </summary>
         private void CompleteStep1()
         {
+            RefreshTherapyQuestJournal(1);
+
             _data.Darkness.CompletedStep1 = true;
             _data.Darkness.TherapyStage = 2;
 
@@ -758,9 +774,6 @@ namespace HarveyStressMeter.Services
             }
             
             Game1.playSound("questcomplete");
-            Game1.addHUDMessage(new HUDMessage(
-                "Первый этап выполнен. Начат следующий этап — следуйте подсказкам в журнале.",
-                HUDMessage.achievement_type));
             
             // Добавляем топик и квест Шага 2
             ConversationHelper.AddTopic("topicDarknessStep1Complete", 2);
@@ -1094,10 +1107,28 @@ namespace HarveyStressMeter.Services
         private string BuildStep1ObjectiveForInstance()
         {
             var d = _data.Darkness;
+            int evenings = d.SafeDarknessEveningsCompleted;
+            int today = d.SafeDarknessProgressToday;
+
+            if (evenings >= Step1EveningsRequired)
+            {
+                return
+                    "✅ Первый этап выполнен.\n" +
+                    "Поговорите с Харви или переходите к следующему этапу лечения.";
+            }
+
+            if (IsStep1TodayCredited())
+            {
+                return
+                    "✅ Сегодняшний вечер зачтён.\n" +
+                    $"Зачтённые вечера: {evenings}/{Step1EveningsRequired}.\n" +
+                    "Продолжите завтра вечером после 20:00.";
+            }
+
             return
-                "Побудьте дома при приглушённом свете после 20:00. " +
-                $"Вечера: {d.SafeDarknessEveningsCompleted}/{Step1EveningsRequired}. " +
-                $"Сегодня: {d.SafeDarknessProgressToday}/{Step1MinutesPerEvening}.";
+                "Побудьте дома после 20:00 при приглушённом свете.\n" +
+                $"Сегодня: {today}/{Step1MinutesPerEvening}.\n" +
+                $"Зачтённые вечера: {evenings}/{Step1EveningsRequired}.";
         }
 
         private string BuildStep2ObjectiveForInstance()

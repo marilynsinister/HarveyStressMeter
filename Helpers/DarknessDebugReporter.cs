@@ -72,6 +72,20 @@ namespace HarveyStressMeter.Helpers
                 $"SafeZonesVisited: {(d.SafeZonesVisited?.Count > 0 ? string.Join(", ", d.SafeZonesVisited) : "(none)")}");
             sb.AppendLine($"MountainNightSeconds: {d.MountainNightSeconds}");
 
+            sb.AppendLine("=== Darkness Step1 ===");
+            sb.AppendLine($"  TherapyStage: {d.TherapyStage}");
+            sb.AppendLine($"  IsTherapyActive: {d.IsTherapyActive}");
+            sb.AppendLine(
+                $"  SafeDarknessProgressToday: {d.SafeDarknessProgressToday}/{DarknessLegacyHelper.Step1MinutesPerEvening}");
+            sb.AppendLine(
+                $"  SafeDarknessEveningsCompleted: {d.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired}");
+            sb.AppendLine($"  LastSafeDarknessDate: {d.LastSafeDarknessDate?.ToString() ?? "(null)"}");
+            sb.AppendLine(
+                $"  {QuestIds.DarknessStep1}: {FormatQuestActive(questService, QuestIds.DarknessStep1)}");
+            sb.AppendLine(
+                $"  {QuestIds.DarknessStep1} currentObjective: {GetStep1QuestObjective(questService) ?? "(n/a)"}");
+            sb.AppendLine($"  {BuffIds.DimLight}: {FormatBuffActive(stateService, BuffIds.DimLight)}");
+
             sb.AppendLine("DarknessBuffs:");
             foreach (var buffId in DarknessBuffIds)
                 sb.AppendLine($"  {buffId}: {FormatBuffActive(stateService, buffId)}");
@@ -127,6 +141,21 @@ namespace HarveyStressMeter.Helpers
                 return "n/a";
 
             return ConversationHelper.HasTopic(topicId) ? "active" : "inactive";
+        }
+
+        private static string? GetStep1QuestObjective(QuestService? questService)
+        {
+            if (!Context.IsWorldReady || Game1.player == null)
+                return null;
+
+            if (questService != null && !questService.HasQuest(QuestIds.DarknessStep1))
+                return null;
+
+            if (questService == null && !Game1.player.hasQuest(QuestIds.DarknessStep1))
+                return null;
+
+            var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == QuestIds.DarknessStep1);
+            return quest?.currentObjective?.Replace('\n', ' ');
         }
     }
 }
