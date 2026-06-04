@@ -98,6 +98,7 @@ namespace HarveyStressMeter.Handlers
             _darknessService.SyncDarknessState("SaveLoaded");
             _stressLoadService.SyncFromGameState();
             _gameLogicHandler.RepairStuckSocialTreatments();
+            _gameLogicHandler.MigrateSocialExposure();
         }
 
         private void OnReturnedToTitle(object? s, ReturnedToTitleEventArgs e)

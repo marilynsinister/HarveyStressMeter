@@ -447,7 +447,9 @@ namespace HarveyStressMeter.Services
 
             int seconds = Math.Min(progress.SecondsNearHarvey, ThunderSecondsRequired);
             string progressLine = progress.SecondsNearHarvey >= ThunderSecondsRequired
-                ? "✅ Вы пережили грозу вместе!"
+                ? (HarveyFriendshipHelper.IsDatingHarvey() || HarveyFriendshipHelper.IsMarriedToHarvey()
+                    ? "✅ Ты пережила грозу вместе с Харви!"
+                    : "✅ Вы пережили грозу вместе!")
                 : $"Рядом с Харви в клинике: {seconds}/{ThunderSecondsRequired} сек (нужен дождь или гроза)";
 
             _questService.UpdateQuest(QuestIds.Thunder,

@@ -46,6 +46,7 @@ namespace HarveyStressMeter.Testing
         private readonly TreatmentEpisodeService _treatmentEpisodeService;
         private readonly GameLogicHandler _gameLogicHandler;
         private readonly DarknessService _darknessService;
+        private readonly SocialExposureService _socialExposureService;
 
         public StressMcpToolHandler(
             IMonitor monitor,
@@ -63,7 +64,8 @@ namespace HarveyStressMeter.Testing
             StressMeterHudService stressMeterHudService,
             TreatmentEpisodeService treatmentEpisodeService,
             GameLogicHandler gameLogicHandler,
-            DarknessService darknessService)
+            DarknessService darknessService,
+            SocialExposureService socialExposureService)
         {
             _monitor = monitor;
             _data = data;
@@ -81,6 +83,7 @@ namespace HarveyStressMeter.Testing
             _treatmentEpisodeService = treatmentEpisodeService;
             _gameLogicHandler = gameLogicHandler;
             _darknessService = darknessService;
+            _socialExposureService = socialExposureService;
         }
 
         public string Execute(string toolName, JsonElement? arguments)
@@ -151,6 +154,10 @@ namespace HarveyStressMeter.Testing
                 "stress_darkness_start_therapy" => McpDarknessTools.DarknessStartTherapy(_darknessService),
                 "stress_darkness_step1_progress" => McpDarknessTools.DarknessStep1Progress(_darknessService, arguments),
                 "stress_darkness_sync" => McpDarknessTools.DarknessSync(_darknessService),
+                "stress_social_get" => McpSocialExposureTools.SocialGet(_socialExposureService),
+                "stress_social_set" => McpSocialExposureTools.SocialSet(_socialExposureService, arguments),
+                "stress_social_add" => McpSocialExposureTools.SocialAdd(_socialExposureService, arguments),
+                "stress_social_reset" => McpSocialExposureTools.SocialReset(_socialExposureService),
                 "mcp_event_snapshot" => McpEventTools.EventSnapshot(),
                 "mcp_start_event" => McpEventTools.StartEvent(_monitor, arguments),
                 "mcp_end_event" => McpEventTools.EndEvent(arguments),

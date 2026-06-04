@@ -110,8 +110,8 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// Применяет простой (незалоченный) бафф стресса при срабатывании триггера
-        /// НЕ выдает квест - только бафф и топик для диалога с Харви
+        /// Применяет простой (незалоченный) бафф стресса при срабатывании триггера.
+        /// Consent-реплика — через StressDialogueService; topicStress* только fallback при разговоре.
         /// </summary>
         public void ApplyStressBuff(string buffId, string displayName)
         {
@@ -147,9 +147,6 @@ namespace HarveyStressMeter.Services
             // Делегируем логику применения баффа в StateService
             _stateService.ApplyStressBuff(buffId, displayName);
 
-            // Добавляем топик для диалога с Харви
-            AddTopicForBuff(buffId);
-
             _stressLoadService?.AddCauseFromBuff(buffId);
 
             _monitor.Log($"[ApplyStressBuff] ✅ Стресс {displayName} применен. Поговорите с Харви для начала лечения.", LogLevel.Info);
@@ -158,7 +155,7 @@ namespace HarveyStressMeter.Services
         /// <summary>
         /// Начинает TreatmentEpisode — единое назначение Харви по общему состоянию.
         /// </summary>
-        public bool StartTreatmentEpisode(string episodeId)
+        public bool StartTreatmentEpisode(string episodeId, bool suppressPostStartBubble = false)
         {
             if (_episodeService == null)
             {
@@ -166,7 +163,7 @@ namespace HarveyStressMeter.Services
                 return false;
             }
 
-            return _episodeService.StartTreatmentEpisode(episodeId);
+            return _episodeService.StartTreatmentEpisode(episodeId, suppressPostStartBubble);
         }
 
         /// <summary>
@@ -177,13 +174,16 @@ namespace HarveyStressMeter.Services
             string buffId,
             string displayName,
             string? questIdOverride = null,
-            string? episodeId = null)
+            string? episodeId = null,
+            bool suppressPostStartBubble = false)
         {
             if (GameStateHelper.IsEventActive())
             {
                 _monitor.Log($"[StartTreatment] Пропуск: активно событие ({buffId})", LogLevel.Debug);
                 return;
             }
+
+            RemovePreConsentStressTopics(buffId);
 
             if (DarknessLegacyHelper.IsDarknessLevelBuff(buffId)
                 || (buffId == BuffIds.Darkness && DarknessLegacyHelper.UsesLevelSystem(_data, _stateService)))
@@ -310,16 +310,8 @@ namespace HarveyStressMeter.Services
             treatment.AddedToGameLog = false;
             treatment.Progress ??= new TreatmentProgress();
 
-            // Удаляем исходный топик стресса при начале лечения
-            if (BuffToStressTopic.TryGetValue(buffId, out var stressTopic))
-            {
-                if (ConversationHelper.HasTopic(stressTopic.topic))
-                    ConversationHelper.RemoveTopic(stressTopic.topic);
-            }
-
-            RemoveLegacyTreatmentStartTopic(buffId);
-
-            if (TreatmentTopics.FollowupByBuff.TryGetValue(buffId, out var followupTopic))
+            if (!suppressPostStartBubble
+                && TreatmentTopics.FollowupByBuff.TryGetValue(buffId, out var followupTopic))
             {
                 ConversationHelper.AddTopic(followupTopic, 2);
                 _monitor.Log($"[StartTreatment] Followup topic {followupTopic} for aftercare dialogue", LogLevel.Debug);
@@ -417,12 +409,15 @@ namespace HarveyStressMeter.Services
             if (!ConversationHelper.HasTopic(TopicIds.TreatmentStarted))
                 ConversationHelper.AddTopic(TopicIds.TreatmentStarted, 0);
 
-            // Реакция Харви
-            var harvey = Game1.getCharacterFromName("Harvey");
-            if (harvey?.currentLocation == Game1.currentLocation)
+            // Реакция Харви (fallback, если старт без programmatic consent-диалога)
+            if (!suppressPostStartBubble)
             {
-                harvey.doEmote(32); // happy
-                harvey.showTextAboveHead("Мы справимся вместе!");
+                var harvey = Game1.getCharacterFromName("Harvey");
+                if (harvey?.currentLocation == Game1.currentLocation)
+                {
+                    harvey.doEmote(32); // happy
+                    harvey.showTextAboveHead("Мы справимся вместе!");
+                }
             }
 
             // ⭐ УЛУЧШЕНО: Детальное логирование после старта
@@ -738,9 +733,25 @@ namespace HarveyStressMeter.Services
             }
         }
 
+        /// <summary>Убирает pre-consent CP-топики, чтобы не дублировать programmatic consent.</summary>
+        public void RemovePreConsentStressTopics(string buffId)
+        {
+            if (BuffToStressTopic.TryGetValue(buffId, out var stressTopic)
+                && ConversationHelper.HasTopic(stressTopic.topic))
+            {
+                ConversationHelper.RemoveTopic(stressTopic.topic);
+            }
+
+            RemoveLegacyTreatmentStartTopic(buffId);
+        }
+
+        /// <summary>Fallback: topicStress* только если programmatic consent недоступен.</summary>
         public void AddTopicForBuff(string buffId)
         {
             if (!_stateService.HasActiveTreatmentState(buffId))
+                return;
+
+            if (_stateService.WasTreatmentOfferShownToday(buffId))
                 return;
 
             if (BuffToStressTopic.TryGetValue(buffId, out var topic))

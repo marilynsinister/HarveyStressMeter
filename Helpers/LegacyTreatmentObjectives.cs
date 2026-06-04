@@ -10,12 +10,20 @@ namespace HarveyStressMeter.Helpers
 
         public static string Lonely(int talkedToday) =>
             talkedToday >= 3
-                ? "✅ Вы поговорили с 3 жителями. Поговорите с Харви."
+                ? (StressObjectiveTone.UseInformalToFarmer()
+                    ? "✅ Ты поговорила с 3 жителями. " + StressObjectiveTone.TalkToHarvey()
+                    : "✅ Вы поговорили с 3 жителями. " + StressObjectiveTone.TalkToHarvey())
                 : $"Поговорите с жителями: {talkedToday}/3 сегодня.";
 
-        public const string HungerDone = "✅ Вы поели. Поговорите с Харви.";
+        public static string HungerDone =>
+            StressObjectiveTone.UseInformalToFarmer()
+                ? "✅ Ты поела. " + StressObjectiveTone.TalkToHarvey()
+                : "✅ Вы поели. " + StressObjectiveTone.TalkToHarvey();
 
-        public const string NoSleepDone = "✅ Вы легли до 22:00. Поговорите с Харви.";
+        public static string NoSleepDone =>
+            StressObjectiveTone.UseInformalToFarmer()
+                ? "✅ Ты легла до 22:00. " + StressObjectiveTone.TalkToHarvey()
+                : "✅ Вы легли до 22:00. " + StressObjectiveTone.TalkToHarvey();
 
         public const string NoSleepDefault = "Лягте спать до 22:00 сегодня.";
 
@@ -28,7 +36,7 @@ namespace HarveyStressMeter.Helpers
         public static string Overwork(int breaksToday, int breakSeconds, bool breakActive)
         {
             if (breaksToday >= 3)
-                return "✅ Все перерывы сделаны. Поговорите с Харви.";
+                return "✅ Все перерывы сделаны. " + StressObjectiveTone.TalkToHarvey();
 
             if (breakActive && breakSeconds > 0 && breakSeconds < OverworkBreakSecondsRequired)
                 return $"Перерывы: {breaksToday}/3. Текущий перерыв: {breakSeconds}/{OverworkBreakSecondsRequired} сек.";
@@ -40,11 +48,16 @@ namespace HarveyStressMeter.Helpers
         {
             var seconds = System.Math.Min(warmSeconds, TooColdWarmSecondsRequired);
             if (warmSeconds >= TooColdWarmSecondsRequired)
-                return "✅ Вы согрелись. Поговорите с Харви.";
+                return StressObjectiveTone.UseInformalToFarmer()
+                    ? "✅ Ты согрелась. " + StressObjectiveTone.TalkToHarvey()
+                    : "✅ Вы согрелись. " + StressObjectiveTone.TalkToHarvey();
 
             return $"Согрейтесь в тёплом месте: {seconds}/{TooColdWarmSecondsRequired} сек.";
         }
 
-        public const string TooColdHotDrink = "✅ Вы выпили горячий напиток. Поговорите с Харви.";
+        public static string TooColdHotDrink =>
+            StressObjectiveTone.UseInformalToFarmer()
+                ? "✅ Ты выпила горячий напиток. " + StressObjectiveTone.TalkToHarvey()
+                : "✅ Вы выпили горячий напиток. " + StressObjectiveTone.TalkToHarvey();
     }
 }

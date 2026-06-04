@@ -28,6 +28,7 @@ namespace HarveyStressMeter.Services
         private readonly StressLoadService _stressLoadService;
         private readonly TreatmentEpisodeService _episodeService;
         private readonly StateService _stateService;
+        private readonly SocialExposureService _socialExposureService;
 
         private Texture2D? _meterTexture;
         private bool _debugOverlayVisible;
@@ -44,7 +45,8 @@ namespace HarveyStressMeter.Services
             SaveData data,
             StressLoadService stressLoadService,
             TreatmentEpisodeService episodeService,
-            StateService stateService)
+            StateService stateService,
+            SocialExposureService socialExposureService)
         {
             _helper = helper;
             _monitor = monitor;
@@ -53,6 +55,7 @@ namespace HarveyStressMeter.Services
             _stressLoadService = stressLoadService;
             _episodeService = episodeService;
             _stateService = stateService;
+            _socialExposureService = socialExposureService;
         }
 
         public bool DebugOverlayVisible => _debugOverlayVisible || _config.ShowDebugOverlay;
@@ -110,6 +113,8 @@ namespace HarveyStressMeter.Services
             sb.AppendLine($"activeTreatmentEpisodeId: {_stressLoadService.GetActiveTreatmentEpisodeId() ?? "(none)"}");
             sb.AppendLine($"currentQuestId: {ResolveCurrentQuestId(primaryTreatment, episode)}");
             sb.AppendLine($"displayText: {BuildDisplayText(load, severity, debugMode)}");
+            sb.AppendLine($"socialExposureToday: {_data.SocialExposure.SocialExposureToday}");
+            sb.AppendLine($"socialExposureStatus: {_socialExposureService.GetCompactStatusLabel()}");
             sb.AppendLine($"anchor: {_config.Anchor}");
             sb.AppendLine($"verticalMeter: {_config.VerticalStressMeter}");
             sb.AppendLine($"meterTextureLoaded: {_meterTexture != null}");
@@ -310,7 +315,10 @@ namespace HarveyStressMeter.Services
             if (_data.Darkness.FearLevel > 0 && !_data.Darkness.IsCured)
                 return true;
 
-            if (_data.SocialStressExposure > 0 && !_stateService.HasActiveTreatmentState(BuffIds.Social))
+            if (_data.SocialExposure.SocialExposureToday > 0 && !_stateService.HasActiveTreatmentState(BuffIds.Social))
+                return true;
+
+            if (_stateService.HasBuffInGame(BuffIds.Social))
                 return true;
 
             if (!_config.ShowOnlyWhenStressed && load > 0)
@@ -341,7 +349,8 @@ namespace HarveyStressMeter.Services
             int barWidth = (int)(128 * _config.Scale);
             int barHeight = Math.Max(6, (int)(8 * _config.Scale));
             int padding = Math.Max(4, (int)(4 * _config.Scale));
-            var origin = ResolveAnchorOrigin(barWidth, barHeight + padding + Game1.smallFont.LineSpacing);
+            int extraSocialLines = ShouldShowSocialExposureStatus() ? Game1.smallFont.LineSpacing : 0;
+            var origin = ResolveAnchorOrigin(barWidth, barHeight + padding + Game1.smallFont.LineSpacing + extraSocialLines);
 
             var backRect = new Rectangle(origin.X, origin.Y, barWidth, barHeight);
             DrawFilledRect(spriteBatch, backRect, colors.Background * opacity);
@@ -358,6 +367,14 @@ namespace HarveyStressMeter.Services
 
             DrawMeterLabel(spriteBatch, label, load, debugMode, colors.Text, opacity,
                 origin.X, origin.Y + barHeight + 2, barWidth, centerHorizontally: true);
+
+            if (ShouldShowSocialExposureStatus())
+            {
+                var socialLabel = BuildSocialExposureDisplayText(debugMode);
+                var socialY = origin.Y + barHeight + 2 + Game1.smallFont.LineSpacing;
+                DrawMeterLabel(spriteBatch, socialLabel, load, debugMode, colors.Text * 0.92f, opacity * 0.95f,
+                    origin.X, socialY, barWidth, centerHorizontally: true);
+            }
         }
 
         /// <summary>Vertical bar to the left of vanilla stamina (bottom-right cluster).</summary>
@@ -402,6 +419,16 @@ namespace HarveyStressMeter.Services
                 y + barLength - textSize.Y);
 
             DrawMeterLabel(spriteBatch, text, load, debugMode, colors.Text, opacity, textPos, drawValueInLabel: false);
+
+            if (ShouldShowSocialExposureStatus())
+            {
+                var socialText = BuildSocialExposureDisplayText(debugMode);
+                var socialSize = Game1.smallFont.MeasureString(socialText);
+                var socialPos = new Vector2(
+                    x - socialSize.X - labelPadding,
+                    textPos.Y - socialSize.Y - 2);
+                DrawMeterLabel(spriteBatch, socialText, load, debugMode, colors.Text * 0.92f, opacity * 0.95f, socialPos, drawValueInLabel: false);
+            }
         }
 
         private float GetMeterOpacity(out float pulse)
@@ -504,7 +531,7 @@ namespace HarveyStressMeter.Services
                     $"Step2 zones {_data.Darkness.SafeZonesVisited.Count}/2, Step3 {_data.Darkness.MountainNightSeconds}/120 sec");
             }
             sb.AppendLine("--- Social ---");
-            sb.AppendLine($"Exposure: {_data.SocialStressExposure}/{SocialStressHelper.DebuffThreshold}");
+            sb.AppendLine(_socialExposureService.BuildDebugSnapshot());
 
             var text = sb.ToString().TrimEnd();
             var size = Game1.smallFont.MeasureString(text);
@@ -605,6 +632,23 @@ namespace HarveyStressMeter.Services
                 StressSeverity.Mild => (new Color(40, 40, 16), new Color(210, 190, 64), new Color(255, 245, 200)),
                 _ => (new Color(24, 32, 24), new Color(96, 140, 96), new Color(210, 230, 210)),
             };
+
+        private bool ShouldShowSocialExposureStatus()
+        {
+            if (_stateService.HasBuffInGame(BuffIds.Social))
+                return true;
+
+            return _data.SocialExposure.SocialExposureToday >= SocialStressHelper.ThresholdWarning;
+        }
+
+        private string BuildSocialExposureDisplayText(bool debugMode)
+        {
+            var status = _socialExposureService.GetCompactStatusLabel();
+            if (!debugMode && !_config.ShowDebugNumbers)
+                return status;
+
+            return $"{status} {_data.SocialExposure.SocialExposureToday}";
+        }
 
         private static bool IsFestivalUiContext()
         {

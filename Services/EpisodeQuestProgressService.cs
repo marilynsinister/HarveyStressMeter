@@ -276,7 +276,9 @@ namespace HarveyStressMeter.Services
             else if (progress.AnxietySafeSeconds == EpisodeQuestRules.AnxietySafeSecondsRequired)
             {
                 Game1.addHUDMessage(new HUDMessage(
-                    "✅ Вы пережили пик тревоги в безопасном месте",
+                    HarveyFriendshipHelper.IsDatingHarvey() || HarveyFriendshipHelper.IsMarriedToHarvey()
+                        ? "✅ Ты пережила пик тревоги в безопасном месте"
+                        : "✅ Вы пережили пик тревоги в безопасном месте",
                     HUDMessage.achievement_type));
             }
 
@@ -417,15 +419,22 @@ namespace HarveyStressMeter.Services
             }
 
             sb.AppendLine();
-            sb.AppendLine("Затем поговорите с Харви.");
+            sb.AppendLine("Затем " + StressObjectiveTone.TalkToHarvey());
             return sb.ToString().TrimEnd();
         }
 
         private static string BuildBurnoutObjective(TreatmentProgress progress)
         {
+            var informal = HarveyFriendshipHelper.IsDatingHarvey() || HarveyFriendshipHelper.IsMarriedToHarvey();
             var minesLine = progress.BurnoutAvoidedMinesToday
                 ? "✅ Без шахт сегодня"
-                : "⚠️ Вы были в шахте — нужен новый день без шахт";
+                : informal
+                    ? "⚠️ Ты была в шахте — нужен новый день без шахт"
+                    : "⚠️ Вы были в шахте — нужен новый день без шахт";
+
+            var talkHarvey = informal
+                ? "Затем поговори с Харви."
+                : "Затем поговорите с Харви.";
 
             return $"""
                 Остановитесь, не «дотяните ещё чуть-чуть»:
@@ -433,7 +442,7 @@ namespace HarveyStressMeter.Services
                 {minesLine}
                 ⬜ Лечь спать до 22:00 (проверка при отходе ко сну)
 
-                Затем поговорите с Харви.
+                {talkHarvey}
                 """.Trim();
         }
 

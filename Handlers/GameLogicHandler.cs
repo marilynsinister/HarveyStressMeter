@@ -32,6 +32,7 @@ namespace HarveyStressMeter.Handlers
         private readonly HarveyFlashbackRescueService _harveyFlashbackRescueService;
         private readonly HarveyCareTrustService _harveyCareTrustService;
         private readonly HarveySafePersonAuraService _harveySafePersonAuraService;
+        private readonly SocialExposureService _socialExposureService;
         private readonly StressGameplayEffectService _stressGameplayEffectService;
         private readonly EpisodeQuestProgressService? _episodeQuestProgressService;
 
@@ -95,6 +96,7 @@ namespace HarveyStressMeter.Handlers
             HarveyFlashbackRescueService harveyFlashbackRescueService,
             HarveyCareTrustService harveyCareTrustService,
             HarveySafePersonAuraService harveySafePersonAuraService,
+            SocialExposureService socialExposureService,
             StressGameplayEffectService stressGameplayEffectService,
             EpisodeQuestProgressService? episodeQuestProgressService = null)
         {
@@ -112,6 +114,7 @@ namespace HarveyStressMeter.Handlers
             _harveyFlashbackRescueService = harveyFlashbackRescueService;
             _harveyCareTrustService = harveyCareTrustService;
             _harveySafePersonAuraService = harveySafePersonAuraService;
+            _socialExposureService = socialExposureService;
             _stressGameplayEffectService = stressGameplayEffectService;
             _episodeQuestProgressService = episodeQuestProgressService;
         }
@@ -126,6 +129,9 @@ namespace HarveyStressMeter.Handlers
         public void RepairStuckSocialTreatments()
             => _triggerService.RepairStuckSocialTreatments();
 
+        public void MigrateSocialExposure()
+            => _socialExposureService.MigrateLegacyExposure();
+
         public void ResetDailyData()
         {
             // ⭐ НОВОЕ: Проверяем топики вчерашнего дня ПЕРЕД очисткой
@@ -138,9 +144,7 @@ namespace HarveyStressMeter.Handlers
             _data.OverworkBreakActive = false;
             _data.TalkedToHarveyToday = false;
 
-            _data.SocialStressExposure = Math.Max(
-                0,
-                _data.SocialStressExposure - SocialStressHelper.DailyExposureDecay);
+            _socialExposureService.ResetDaily();
 
             ResetDailyQuestCounters();
             ApplyPendingNoSleepLateObjective();
@@ -265,6 +269,8 @@ namespace HarveyStressMeter.Handlers
                     _thunderFlashbackService.UpdateActiveFlashback(1);
 
                 _harveyFlashbackRescueService.Update(1);
+
+                _socialExposureService.UpdateRecovery(harveyNearby);
 
                 _stressGameplayEffectService.UpdateEffects();
             }
@@ -599,14 +605,18 @@ namespace HarveyStressMeter.Handlers
                     LogLevel.Debug);
             }
 
-            if (!StressDebuffSelector.BuffToStressTopic.TryGetValue(primary, out var topicData))
+            if (_stateService.WasTreatmentOfferShownToday(primary))
+            {
+                _monitor.Log(
+                    $"[HandleHarveyDialogue] Fallback topic skipped: programmatic offer already shown today for {primary}",
+                    LogLevel.Debug);
+                return;
+            }
+
+            if (!_stateService.HasActiveTreatmentState(primary))
                 return;
 
-            if (_stateService.HasActiveTreatmentState(primary) && !ConversationHelper.HasTopic(topicData.topic))
-            {
-                ConversationHelper.AddTopic(topicData.topic, topicData.days);
-                _monitor.Log($"[HandleHarveyDialogue] ✅ Fallback topic {topicData.topic} for primary debuff {primary}", LogLevel.Info);
-            }
+            _treatmentService.AddTopicForBuff(primary);
         }
 
         private void HandleHarveyDialogueEnd()
@@ -682,40 +692,7 @@ namespace HarveyStressMeter.Handlers
         }
 
         private void CheckSocialStressTrigger(NPC npc)
-        {
-            if (Game1.CurrentEvent != null) return;
-            
-            if (Game1.stats.DaysPlayed < 5) return;
-            if (_stateService.HasActiveTreatmentState(BuffIds.Social)) return;
-            if (_stateService.HasImmunity(BuffIds.Social)) return;
-            if (!SocialStressHelper.IsQualifyingNpc(npc)) return;
-
-            var gain = SocialStressHelper.ApplyTrustMultiplier(
-                SocialStressHelper.ExposurePerTalk,
-                _harveyCareTrustService.GetEffectiveStressGainMultiplier());
-
-            _data.SocialStressExposure += gain;
-
-            _monitor.Log(
-                $"[Social Stress] +{gain} exposure ({_data.SocialStressExposure}/{SocialStressHelper.DebuffThreshold}) " +
-                $"при разговоре с {npc.Name}",
-                LogLevel.Debug);
-
-            if (_data.SocialStressExposure >= SocialStressHelper.DebuffThreshold)
-            {
-                _data.SocialStressExposure = 0;
-                _treatmentService.ApplyStressBuff(BuffIds.Social, "Социальный дискомфорт");
-                _monitor.Log($"[Social Stress] Порог накопления — выдан debuff при разговоре с {npc.Name}", LogLevel.Info);
-                return;
-            }
-
-            if (_data.SocialStressExposure % SocialStressHelper.ExposurePerTalk == 0)
-            {
-                Game1.addHUDMessage(new HUDMessage(
-                    $"Социальное напряжение: {_data.SocialStressExposure}/{SocialStressHelper.DebuffThreshold}",
-                    HUDMessage.newQuest_type));
-            }
-        }
+            => _socialExposureService.OnNpcConversationStarted(npc);
 
         private void UpdateLonelyQuestProgress()
         {

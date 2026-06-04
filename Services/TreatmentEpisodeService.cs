@@ -66,7 +66,7 @@ namespace HarveyStressMeter.Services
             return episode;
         }
 
-        public bool StartTreatmentEpisode(string episodeId)
+        public bool StartTreatmentEpisode(string episodeId, bool suppressPostStartBubble = false)
         {
             if (_coordinator != null && !_coordinator.CanStartTreatmentEpisode(episodeId))
                 return false;
@@ -128,9 +128,11 @@ namespace HarveyStressMeter.Services
                 primaryBuffId,
                 definition.DisplayName,
                 questIdOverride: definition.QuestId,
-                episodeId: episodeId);
+                episodeId: episodeId,
+                suppressPostStartBubble: suppressPostStartBubble);
 
-            ShowHudMessage(StressQuestCopy.TreatmentAssignedHud);
+            if (!suppressPostStartBubble)
+                ShowHudMessage(StressQuestCopy.TreatmentAssignedHud);
 
             _monitor.Log(
                 $"[StartTreatmentEpisode] Episode={episodeId}, quest={definition.QuestId}, " +

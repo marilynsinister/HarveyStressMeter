@@ -129,7 +129,11 @@ namespace HarveyStressMeter.Helpers
             target.OverworkBreakSeconds = source.OverworkBreakSeconds;
             target.OverworkBreakActive = source.OverworkBreakActive;
             target.TalkedToHarveyToday = source.TalkedToHarveyToday;
+            target.SocialExposure ??= new SocialExposureState();
+            CopySocialExposureInto(target.SocialExposure, source.SocialExposure ?? new SocialExposureState());
+#pragma warning disable CS0618
             target.SocialStressExposure = source.SocialStressExposure;
+#pragma warning restore CS0618
             target.DaysWithoutTalking = source.DaysWithoutTalking;
             target.DaysWithoutEating = source.DaysWithoutEating;
             target.DaysWithLateSleep = source.DaysWithLateSleep;
@@ -195,6 +199,7 @@ namespace HarveyStressMeter.Helpers
             target.HarveyCareTrust = new HarveyCareTrustState();
             target.ActiveTreatmentEpisode = null;
             target.EpisodeImmunityUntil = new Dictionary<string, SDate>();
+            target.SocialExposure = new SocialExposureState();
 
 #pragma warning disable CS0618
             target.ActiveLockedDebuffs = new Dictionary<string, string>();
@@ -356,6 +361,12 @@ namespace HarveyStressMeter.Helpers
             target.LastAmbientTrustEpisodeId = source.LastAmbientTrustEpisodeId;
             target.SupportiveTalkTrustToday = source.SupportiveTalkTrustToday;
             target.ShownCareTrustDialogueKeys = new HashSet<string>(source.ShownCareTrustDialogueKeys ?? new HashSet<string>());
+        }
+
+        private static void CopySocialExposureInto(SocialExposureState target, SocialExposureState source)
+        {
+            target.SocialExposureToday = source.SocialExposureToday;
+            target.ThresholdsShownToday = source.ThresholdsShownToday;
         }
 
         private static void CopyHarveySafePersonAuraInto(

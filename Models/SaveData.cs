@@ -19,7 +19,10 @@ namespace HarveyStressMeter.Models
 
         public bool TalkedToHarveyToday { get; set; } = false;
 
-        /// <summary>Накопленный социальный дискомфорт (0 → порог → buffStressSocial).</summary>
+        /// <summary>Дневная социальная усталость (шкала 0–100, сброс утром).</summary>
+        public SocialExposureState SocialExposure { get; set; } = new();
+
+        [Obsolete("Используйте SocialExposure.SocialExposureToday (миграция при загрузке).")]
         public int SocialStressExposure { get; set; }
 
         // ⭐ НОВОЕ: Счетчики для накопительных дебаффов

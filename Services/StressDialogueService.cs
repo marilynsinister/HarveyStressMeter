@@ -67,6 +67,24 @@ namespace HarveyStressMeter.Services
 
         private string? _deferredDialogueText;
 
+        private enum StressHarveyDialogueMode
+
+        {
+
+            None,
+
+            Review,
+
+            Start,
+
+            Reminder,
+
+            Ambient,
+
+        }
+
+        private StressHarveyDialogueMode _activeStressDialogueMode = StressHarveyDialogueMode.None;
+
 
 
         /// <summary>Открыт programmatic stress-диалог — fallback-топики добавлять нельзя.</summary>
@@ -250,6 +268,24 @@ namespace HarveyStressMeter.Services
 
 
 
+            if (!string.IsNullOrEmpty(selection.PrimaryBuffId)
+
+                && CannotOfferStartDialogueAgain(selection.PrimaryBuffId, selection.EpisodeId, out var blockReason))
+
+            {
+
+                _monitor.Log(
+
+                    $"[StressDialogue] Episode start blocked ({selection.EpisodeId}, buff={selection.PrimaryBuffId}): {blockReason}",
+
+                    LogLevel.Debug);
+
+                return null;
+
+            }
+
+
+
             return selection;
 
         }
@@ -282,7 +318,7 @@ namespace HarveyStressMeter.Services
 
 
 
-            string? selected = StressDebuffSelector.GetPrimaryUntreatedDebuff(_stateService, _data);
+            string? selected = SelectStartEligibleUntreatedBuff();
 
 
 
@@ -528,6 +564,17 @@ namespace HarveyStressMeter.Services
 
 
 
+        private static string? FirstNonEmpty(params string?[] candidates)
+        {
+            foreach (var candidate in candidates)
+            {
+                if (!string.IsNullOrWhiteSpace(candidate))
+                    return candidate;
+            }
+
+            return null;
+        }
+
         private StressDialogueData? FindDialogueEntry(string key)
 
         {
@@ -566,29 +613,21 @@ namespace HarveyStressMeter.Services
 
 
 
-            string dialogue;
+            string? dialogue = isMarried
+                ? FirstNonEmpty(dialogueData.DialogueMarried, dialogueData.DialogueDating, dialogueData.DialogueHighFriendship)
+                : isDating
+                    ? FirstNonEmpty(dialogueData.DialogueDating, dialogueData.DialogueHighFriendship, dialogueData.DialogueMediumFriendship)
+                    : friendship >= 7
+                        ? FirstNonEmpty(dialogueData.DialogueHighFriendship, dialogueData.DialogueMediumFriendship, dialogueData.DialogueLowFriendship)
+                        : friendship >= 3
+                            ? FirstNonEmpty(dialogueData.DialogueMediumFriendship, dialogueData.DialogueLowFriendship)
+                            : dialogueData.DialogueLowFriendship;
 
-            if (isMarried)
-
-                dialogue = dialogueData.DialogueMarried;
-
-            else if (isDating)
-
-                dialogue = dialogueData.DialogueDating;
-
-            else if (friendship >= 7)
-
-                dialogue = dialogueData.DialogueHighFriendship;
-
-            else if (friendship >= 3)
-
-                dialogue = dialogueData.DialogueMediumFriendship;
-
-            else
-
-                dialogue = dialogueData.DialogueLowFriendship;
-
-
+            if (string.IsNullOrWhiteSpace(dialogue))
+            {
+                _monitor.Log($"[StressDialogueService] Пустой текст диалога для ключа {key}", LogLevel.Warn);
+                return null;
+            }
 
             dialogue = dialogue.Replace("@", Game1.player.Name);
 
@@ -758,9 +797,35 @@ namespace HarveyStressMeter.Services
 
             var dialogueText = _deferredDialogueText;
 
+
+
+            if (CannotOfferStartDialogueAgain(buffId, null, out var blockReason)
+
+                || _stateService.WasTreatmentOfferShownToday(buffId))
+
+            {
+
+                _monitor.Log(
+
+                    $"[StressDialogue] Deferred start skipped (buff={buffId}): {blockReason ?? "OfferShownToday"}",
+
+                    LogLevel.Debug);
+
+                ClearDeferredStressDialogue();
+
+                return false;
+
+            }
+
+
+
             ClearDeferredStressDialogue();
 
 
+
+            _activeStressDialogueMode = StressHarveyDialogueMode.Start;
+
+            _autoStartTreatmentAfterClose = true;
 
             DisplayStressDialogue(harvey, buffId, dialogueText);
 
@@ -779,6 +844,26 @@ namespace HarveyStressMeter.Services
         public void ShowStressDialogue(string buffId, string dialogueText)
 
         {
+
+            if (_activeStressDialogueMode == StressHarveyDialogueMode.Start
+
+                && CannotOfferStartDialogueAgain(buffId, _selectedEpisodeIdForDialogue, out var blockReason))
+
+            {
+
+                _monitor.Log(
+
+                    $"[StressDialogue] ShowStressDialogue blocked (buff={buffId}): {blockReason}",
+
+                    LogLevel.Debug);
+
+                _selectedEpisodeIdForDialogue = null;
+
+                _activeStressDialogueMode = StressHarveyDialogueMode.None;
+
+                return;
+
+            }
 
             var harvey = Game1.getCharacterFromName("Harvey");
 
@@ -804,6 +889,22 @@ namespace HarveyStressMeter.Services
 
             {
 
+                // HandleHarveyDialogue вызывается уже при открытом DialogueBox — заменяем, не откладываем.
+
+                if (Game1.currentSpeaker is NPC { Name: "Harvey" })
+
+                {
+
+                    DisplayStressDialogue(harvey, buffId, dialogueText, _selectedEpisodeIdForDialogue);
+
+                    _selectedEpisodeIdForDialogue = null;
+
+                    return;
+
+                }
+
+
+
                 ScheduleDeferredStressDialogue(buffId, dialogueText);
 
                 return;
@@ -823,6 +924,30 @@ namespace HarveyStressMeter.Services
         private void DisplayStressDialogue(NPC harvey, string buffId, string dialogueText, string? episodeId = null)
 
         {
+
+            if (_activeStressDialogueMode == StressHarveyDialogueMode.Start
+
+                && CannotOfferStartDialogueAgain(buffId, episodeId, out var blockReason))
+
+            {
+
+                _monitor.Log(
+
+                    $"[StressDialogue] DisplayStressDialogue blocked (buff={buffId}, episode={episodeId ?? "(none)"}): {blockReason}",
+
+                    LogLevel.Debug);
+
+                _pendingBuffIdForTreatment = null;
+
+                _pendingEpisodeIdForTreatment = null;
+
+                _isShowingDialogue = false;
+
+                _activeStressDialogueMode = StressHarveyDialogueMode.None;
+
+                return;
+
+            }
 
             if (_autoStartTreatmentAfterClose)
 
@@ -848,6 +973,12 @@ namespace HarveyStressMeter.Services
 
 
 
+            if (_activeStressDialogueMode == StressHarveyDialogueMode.Start)
+
+                _treatmentService.RemovePreConsentStressTopics(buffId);
+
+            harvey.CurrentDialogue.Clear();
+
             var dialogue = new Dialogue(harvey, null, dialogueText);
 
             harvey.CurrentDialogue.Push(dialogue);
@@ -856,11 +987,13 @@ namespace HarveyStressMeter.Services
 
 
 
-            _stateService.MarkTreatmentOfferShown(buffId);
+            if (_activeStressDialogueMode is StressHarveyDialogueMode.Start or StressHarveyDialogueMode.Ambient)
+
+                _stateService.MarkTreatmentOfferShown(buffId);
 
             _monitor.Log(
 
-                $"[StressDialogueService] ✅ Показана стартовая реплика лечения episode={episodeId ?? "(buff-only)"} buff={buffId}",
+                $"[StressDialogueService] ✅ Показана реплика mode={_activeStressDialogueMode} episode={episodeId ?? "(none)"} buff={buffId}",
 
                 LogLevel.Info);
 
@@ -883,6 +1016,8 @@ namespace HarveyStressMeter.Services
             {
 
                 _isShowingDialogue = false;
+
+                _activeStressDialogueMode = StressHarveyDialogueMode.None;
 
                 return;
 
@@ -918,6 +1053,32 @@ namespace HarveyStressMeter.Services
 
             _isShowingDialogue = false;
 
+            _activeStressDialogueMode = StressHarveyDialogueMode.None;
+
+
+
+            if (IsTreatmentStartComplete(
+
+                    DarknessLegacyHelper.ResolveTreatmentBuffId(buffId ?? ""),
+
+                    episodeId,
+
+                    out var skipReason))
+
+            {
+
+                _monitor.Log(
+
+                    $"[StressDialogue] Auto-start skipped (buff={buffId}, episode={episodeId ?? "(none)"}): {skipReason}",
+
+                    LogLevel.Debug);
+
+                ClearDeferredStressDialogue();
+
+                return;
+
+            }
+
 
 
             if (!string.IsNullOrEmpty(episodeId))
@@ -930,7 +1091,9 @@ namespace HarveyStressMeter.Services
 
                     LogLevel.Info);
 
-                _treatmentService.StartTreatmentEpisode(episodeId);
+                _treatmentService.StartTreatmentEpisode(episodeId, suppressPostStartBubble: true);
+
+                ClearDeferredStressDialogue();
 
                 return;
 
@@ -960,7 +1123,9 @@ namespace HarveyStressMeter.Services
 
                 LogLevel.Info);
 
-            _treatmentService.StartTreatment(treatmentBuffId, displayName);
+            _treatmentService.StartTreatment(treatmentBuffId, displayName, suppressPostStartBubble: true);
+
+            ClearDeferredStressDialogue();
 
         }
 
@@ -984,6 +1149,8 @@ namespace HarveyStressMeter.Services
 
             _isShowingDialogue = false;
 
+            _activeStressDialogueMode = StressHarveyDialogueMode.None;
+
             ClearDeferredStressDialogue();
 
         }
@@ -1004,7 +1171,9 @@ namespace HarveyStressMeter.Services
 
         /// <summary>
 
-        /// Проверяет, нужно ли показать диалог стресса при клике на Харви
+        /// Проверяет, нужно ли показать диалог стресса при клике на Харви.
+
+        /// Один клик — один режим: review → start → reminder → ambient.
 
         /// </summary>
 
@@ -1024,9 +1193,9 @@ namespace HarveyStressMeter.Services
 
 
 
-            // ⭐ НОВОЕ: Проверяем, нет ли уже топика завершения лечения
+            PurgeStaleDeferredStartDialogue();
 
-            // Если есть топик Cured, Content Patcher покажет свой диалог
+
 
             var curedTopics = new[]
 
@@ -1072,19 +1241,29 @@ namespace HarveyStressMeter.Services
 
             _selectedEpisodeIdForDialogue = null;
 
-            _autoStartTreatmentAfterClose = true;
+            _activeStressDialogueMode = StressHarveyDialogueMode.None;
+
+            _autoStartTreatmentAfterClose = false;
 
 
 
-            if (_reviewService.TryPrepareEpisodeReviewDialogue(out buffId, out dialogueText))
+            var episodeSelection = _episodeService.EvaluateSelection();
+
+
+
+            // 1. review — цель квеста выполнена, завершение через разговор
+
+            if (TrySelectReviewDialogue(out buffId, out dialogueText))
 
             {
+
+                _activeStressDialogueMode = StressHarveyDialogueMode.Review;
 
                 _autoStartTreatmentAfterClose = false;
 
                 _monitor.Log(
 
-                    $"[StressDialogueService] Episode review dialogue (buff={buffId})",
+                    $"[StressDialogueService] Mode=review (buff={buffId})",
 
                     LogLevel.Debug);
 
@@ -1092,110 +1271,61 @@ namespace HarveyStressMeter.Services
 
             }
 
-            var episodeSelection = _episodeService.EvaluateSelection();
+
 
             if (_trustDialogueService != null
+
                 && _trustDialogueService.TrySelectTrustProgressDialogue(
+
                     episodeSelection,
+
                     out _,
+
                     out var trustText))
+
             {
+
                 buffId = BuffIds.TrustProgress;
+
                 dialogueText = trustText;
+
                 _autoStartTreatmentAfterClose = false;
+
                 _monitor.Log("[StressDialogueService] HarveyCareTrust progress dialogue", LogLevel.Debug);
+
                 return true;
+
             }
 
 
 
             if (episodeSelection.Action == EpisodeSelectionAction.AwaitingReview)
 
+            {
+
+                _monitor.Log("[StressDialogueService] AwaitingReview — CP review path, programmatic modes skipped", LogLevel.Debug);
+
                 return false;
 
+            }
 
 
-            if (episodeSelection.Action == EpisodeSelectionAction.AmbientOnly)
+
+            // 2. start — первое назначение лечения, квест после закрытия диалога
+
+            if (TrySelectStartDialogue(out buffId, out dialogueText, out var startEpisodeId))
 
             {
 
-                var untreatedBuffId = CheckForActiveDebuffWithoutTreatment();
+                _selectedEpisodeIdForDialogue = startEpisodeId;
 
-                if (untreatedBuffId != null)
+                _activeStressDialogueMode = StressHarveyDialogueMode.Start;
 
-                {
-
-                    dialogueText = GetDialogueForBuff(untreatedBuffId);
-
-                    if (dialogueText != null)
-
-                    {
-
-                        buffId = untreatedBuffId;
-
-                        _monitor.Log(
-
-                            $"[StressDialogueService] Untreated debuff {untreatedBuffId} overrides ambient-only",
-
-                            LogLevel.Debug);
-
-                        return true;
-
-                    }
-
-                }
-
-
-
-                var ctx = _episodeService.BuildContext();
-
-                var causeId = ResolveAmbientCauseId(ctx.ActiveCauseIds);
-
-                if (causeId == null)
-
-                {
-
-                    _monitor.Log("[StressDialogueService] Ambient-only: no ambient cause dialogue found", LogLevel.Debug);
-
-                    return false;
-
-                }
-
-
-
-                buffId = StressCauses.CauseToBuff.GetValueOrDefault(causeId, causeId);
-
-                dialogueText = GetAmbientDialogue(causeId);
-
-
-
-                if (dialogueText == null)
-
-                    return false;
-
-
-
-                if (_stateService.WasTreatmentOfferShownToday(buffId))
-
-                {
-
-                    _monitor.Log(
-
-                        $"[StressDialogueService] Ambient notice already shown today for {buffId}",
-
-                        LogLevel.Debug);
-
-                    return false;
-
-                }
-
-
-
-                _autoStartTreatmentAfterClose = false;
+                _autoStartTreatmentAfterClose = true;
 
                 _monitor.Log(
 
-                    $"[StressDialogueService] Ambient notice for cause={causeId}, load={ctx.StressLoad}",
+                    $"[StressDialogueService] Mode=start (episode={startEpisodeId ?? "(none)"}, buff={buffId})",
 
                     LogLevel.Debug);
 
@@ -1205,35 +1335,19 @@ namespace HarveyStressMeter.Services
 
 
 
-            if (episodeSelection.Action == EpisodeSelectionAction.ReminderOnly
+            // 3. reminder — лечение активно, короткое напоминание без нового квеста
 
-                && !string.IsNullOrEmpty(episodeSelection.EpisodeId))
+            if (TrySelectReminderDialogue(episodeSelection, out buffId, out dialogueText))
 
             {
 
-                buffId = episodeSelection.PrimaryBuffId
-
-                    ?? TreatmentEpisodeDefinitions.ResolvePrimaryBuffId(
-
-                        episodeSelection.EpisodeId,
-
-                        _episodeService.BuildContext().ActiveCauseIds);
-
-                dialogueText = GetReminderDialogue(episodeSelection.EpisodeId);
-
-
-
-                if (dialogueText == null)
-
-                    return false;
-
-
+                _activeStressDialogueMode = StressHarveyDialogueMode.Reminder;
 
                 _autoStartTreatmentAfterClose = false;
 
                 _monitor.Log(
 
-                    $"[StressDialogueService] Reminder dialogue for episode={episodeSelection.EpisodeId}",
+                    $"[StressDialogueService] Mode=reminder (episode={episodeSelection.EpisodeId}, buff={buffId})",
 
                     LogLevel.Debug);
 
@@ -1243,7 +1357,73 @@ namespace HarveyStressMeter.Services
 
 
 
-            episodeSelection = CheckForEpisodeStart();
+            // 4. ambient — замечает состояние, лечение не назначает
+
+            if (TrySelectAmbientDialogue(episodeSelection, out buffId, out dialogueText))
+
+            {
+
+                _activeStressDialogueMode = StressHarveyDialogueMode.Ambient;
+
+                _autoStartTreatmentAfterClose = false;
+
+                _monitor.Log(
+
+                    $"[StressDialogueService] Mode=ambient (buff={buffId})",
+
+                    LogLevel.Debug);
+
+                return true;
+
+            }
+
+
+
+            return false;
+
+        }
+
+
+
+        private bool TrySelectReviewDialogue(out string? buffId, out string? dialogueText)
+
+        {
+
+            buffId = null;
+
+            dialogueText = null;
+
+            return _reviewService.TryPrepareEpisodeReviewDialogue(out buffId, out dialogueText);
+
+        }
+
+
+
+        private bool TrySelectStartDialogue(out string? buffId, out string? dialogueText, out string? episodeId)
+
+        {
+
+            buffId = null;
+
+            dialogueText = null;
+
+            episodeId = null;
+
+
+
+            if (HasDeferredStressDialogue)
+
+            {
+
+                _monitor.Log("[StressDialogue] Start offer skipped: deferred start dialogue pending", LogLevel.Debug);
+
+                return false;
+
+            }
+
+
+
+            var episodeSelection = CheckForEpisodeStart();
 
             if (episodeSelection != null)
 
@@ -1267,13 +1447,7 @@ namespace HarveyStressMeter.Services
 
 
 
-                _selectedEpisodeIdForDialogue = episodeSelection.EpisodeId;
-
-                _monitor.Log(
-
-                    $"[StressDialogueService] ShouldShowStressDialogue=true, episode={episodeSelection.EpisodeId}, primaryBuff={buffId}",
-
-                    LogLevel.Debug);
+                episodeId = episodeSelection.EpisodeId;
 
                 return true;
 
@@ -1283,23 +1457,13 @@ namespace HarveyStressMeter.Services
 
             buffId = CheckForActiveDebuffWithoutTreatment();
 
-            
-
             if (buffId == null)
 
-            {
-
-                dialogueText = null;
-
                 return false;
-
-            }
 
 
 
             dialogueText = GetDialogueForBuff(buffId);
-
-            
 
             if (dialogueText == null)
 
@@ -1313,9 +1477,359 @@ namespace HarveyStressMeter.Services
 
 
 
-            _monitor.Log($"[StressDialogueService] ShouldShowStressDialogue=true, buffId={buffId}", LogLevel.Debug);
+            return true;
+
+        }
+
+
+
+        private bool TrySelectReminderDialogue(
+
+            EpisodeSelectionResult episodeSelection,
+
+            out string? buffId,
+
+            out string? dialogueText)
+
+        {
+
+            buffId = null;
+
+            dialogueText = null;
+
+
+
+            if (episodeSelection.Action != EpisodeSelectionAction.ReminderOnly
+
+                || string.IsNullOrEmpty(episodeSelection.EpisodeId))
+
+            {
+
+                return false;
+
+            }
+
+
+
+            buffId = episodeSelection.PrimaryBuffId
+
+                ?? TreatmentEpisodeDefinitions.ResolvePrimaryBuffId(
+
+                    episodeSelection.EpisodeId,
+
+                    _episodeService.BuildContext().ActiveCauseIds);
+
+            dialogueText = GetReminderDialogue(episodeSelection.EpisodeId);
+
+
+
+            return dialogueText != null;
+
+        }
+
+
+
+        private bool TrySelectAmbientDialogue(
+
+            EpisodeSelectionResult episodeSelection,
+
+            out string? buffId,
+
+            out string? dialogueText)
+
+        {
+
+            buffId = null;
+
+            dialogueText = null;
+
+
+
+            if (episodeSelection.Action != EpisodeSelectionAction.AmbientOnly)
+
+                return false;
+
+
+
+            var ctx = _episodeService.BuildContext();
+
+            var causeId = ResolveAmbientCauseId(ctx.ActiveCauseIds);
+
+            if (causeId == null)
+
+            {
+
+                _monitor.Log("[StressDialogueService] Ambient-only: no ambient cause dialogue found", LogLevel.Debug);
+
+                return false;
+
+            }
+
+
+
+            buffId = StressCauses.CauseToBuff.GetValueOrDefault(causeId, causeId);
+
+            dialogueText = GetAmbientDialogue(causeId);
+
+
+
+            if (dialogueText == null)
+
+                return false;
+
+
+
+            if (_stateService.WasTreatmentOfferShownToday(buffId))
+
+            {
+
+                _monitor.Log(
+
+                    $"[StressDialogueService] Ambient notice already shown today for {buffId}",
+
+                    LogLevel.Debug);
+
+                return false;
+
+            }
+
+
+
+            _monitor.Log(
+
+                $"[StressDialogueService] Ambient notice for cause={causeId}, load={ctx.StressLoad}",
+
+                LogLevel.Debug);
 
             return true;
+
+        }
+
+
+
+        private static readonly Dictionary<string, string> BuffIdToQuestId = new()
+
+        {
+
+            [BuffIds.Thunder] = QuestIds.Thunder,
+
+            [BuffIds.Darkness] = QuestIds.Darkness,
+
+            [BuffIds.Lonely] = QuestIds.Lonely,
+
+            [BuffIds.Overwork] = QuestIds.Overwork,
+
+            [BuffIds.Hunger] = QuestIds.Hunger,
+
+            [BuffIds.TooCold] = QuestIds.TooCold,
+
+            [BuffIds.Social] = QuestIds.Social,
+
+            [BuffIds.NoSleep] = QuestIds.NoSleep,
+
+            [BuffIds.Tired] = QuestIds.Tired,
+
+        };
+
+
+
+        private string? SelectStartEligibleUntreatedBuff()
+
+        {
+
+            foreach (var buffId in StressDebuffSelector.GetUntreatedDebuffs(_stateService, _data))
+
+            {
+
+                if (!CannotOfferStartDialogueAgain(buffId, null, out var reason))
+
+                    return buffId;
+
+                _monitor.Log(
+
+                    $"[StressDialogue] Skipping untreated {buffId} for start offer: {reason}",
+
+                    LogLevel.Debug);
+
+            }
+
+            return null;
+
+        }
+
+
+
+        private void PurgeStaleDeferredStartDialogue()
+
+        {
+
+            if (_deferredBuffId == null)
+
+                return;
+
+            if (IsTreatmentStartComplete(_deferredBuffId, null, out var reason)
+
+                || _stateService.WasTreatmentOfferShownToday(_deferredBuffId))
+
+            {
+
+                _monitor.Log(
+
+                    $"[StressDialogue] Purging stale deferred start (buff={_deferredBuffId}, reason={reason ?? "OfferShownToday"})",
+
+                    LogLevel.Debug);
+
+                ClearDeferredStressDialogue();
+
+            }
+
+        }
+
+
+
+        private bool CannotOfferStartDialogueAgain(string buffId, string? episodeId, out string reason)
+
+        {
+
+            reason = "";
+
+            if (string.IsNullOrEmpty(buffId))
+
+                return false;
+
+            var resolvedBuff = DarknessLegacyHelper.ResolveTreatmentBuffId(buffId);
+
+            if (_stateService.WasTreatmentOfferShownToday(resolvedBuff)
+
+                || (!string.Equals(resolvedBuff, buffId, StringComparison.Ordinal)
+
+                    && _stateService.WasTreatmentOfferShownToday(buffId)))
+
+            {
+
+                reason = "OfferShownToday";
+
+                return true;
+
+            }
+
+            if (IsTreatmentStartComplete(resolvedBuff, episodeId, out reason))
+
+                return true;
+
+            if (_isShowingDialogue
+
+                && !string.IsNullOrEmpty(_pendingBuffIdForTreatment)
+
+                && string.Equals(_pendingBuffIdForTreatment, buffId, StringComparison.Ordinal))
+
+            {
+
+                reason = "PendingStartDialogue";
+
+                return true;
+
+            }
+
+            return false;
+
+        }
+
+
+
+        private bool IsTreatmentStartComplete(string buffId, string? episodeId, out string reason)
+
+        {
+
+            reason = "";
+
+            if (!string.IsNullOrEmpty(episodeId))
+
+            {
+
+                var episode = _data.ActiveTreatmentEpisode;
+
+                if (episode != null
+
+                    && string.Equals(episode.EpisodeId, episodeId, StringComparison.Ordinal)
+
+                    && episode.IsActiveEpisode())
+
+                {
+
+                    reason = "EpisodeTreatmentStarted";
+
+                    return true;
+
+                }
+
+                if (TreatmentEpisodeDefinitions.TryGet(episodeId, out var definition)
+
+                    && (_stateService.HasQuestInGameJournal(definition.QuestId)
+
+                        || _stateService.HasActiveQuestState(definition.QuestId)))
+
+                {
+
+                    reason = "EpisodeQuestActive";
+
+                    return true;
+
+                }
+
+            }
+
+            if (string.IsNullOrEmpty(buffId))
+
+                return false;
+
+            var treatment = _stateService.GetActiveTreatment(buffId);
+
+            if (treatment != null && treatment.TreatmentStarted && !treatment.IsCured)
+
+            {
+
+                reason = "TreatmentStarted";
+
+                return true;
+
+            }
+
+            var questId = ResolveQuestIdForStartGuard(buffId, episodeId);
+
+            if (!string.IsNullOrEmpty(questId)
+
+                && (_stateService.HasQuestInGameJournal(questId) || _stateService.HasActiveQuestState(questId)))
+
+            {
+
+                reason = "QuestActive";
+
+                return true;
+
+            }
+
+            return false;
+
+        }
+
+
+
+        private static string? ResolveQuestIdForStartGuard(string buffId, string? episodeId)
+
+        {
+
+            if (!string.IsNullOrEmpty(episodeId)
+
+                && TreatmentEpisodeDefinitions.TryGet(episodeId, out var definition))
+
+            {
+
+                return definition.QuestId;
+
+            }
+
+            return BuffIdToQuestId.TryGetValue(buffId, out var questId) ? questId : null;
 
         }
 

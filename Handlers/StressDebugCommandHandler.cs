@@ -39,6 +39,7 @@ namespace HarveyStressMeter.Handlers
         private readonly TreatmentEpisodeService _treatmentEpisodeService;
         private readonly StressGameplayEffectService _stressGameplayEffectService;
         private readonly DarknessService _darknessService;
+        private readonly SocialExposureService _socialExposureService;
 
         private bool _pendingTalkHarveyWarp = true;
 
@@ -74,7 +75,8 @@ namespace HarveyStressMeter.Handlers
             StressLoadService stressLoadService,
             TreatmentEpisodeService treatmentEpisodeService,
             StressGameplayEffectService stressGameplayEffectService,
-            DarknessService darknessService)
+            DarknessService darknessService,
+            SocialExposureService socialExposureService)
         {
             _monitor = monitor;
             _helper = helper;
@@ -95,6 +97,7 @@ namespace HarveyStressMeter.Handlers
             _treatmentEpisodeService = treatmentEpisodeService;
             _stressGameplayEffectService = stressGameplayEffectService;
             _darknessService = darknessService;
+            _socialExposureService = socialExposureService;
         }
 
         public void RegisterCommands()
@@ -103,6 +106,7 @@ namespace HarveyStressMeter.Handlers
 
             RegisterStressTreatmentCommands();
             RegisterDarknessDebugCommands();
+            RegisterSocialExposureDebugCommands();
 
             _helper.ConsoleCommands.Add(
                 "hs.test.add-stress",
@@ -276,6 +280,86 @@ namespace HarveyStressMeter.Handlers
                 "stress_force_remove_quest",
                 "DEV/TEST: remove treatment quest from journal (state kept). Usage: stress_force_remove_quest <buffId>",
                 StressForceRemoveQuest);
+        }
+
+        private void RegisterSocialExposureDebugCommands()
+        {
+            _helper.ConsoleCommands.Add(
+                "stress_social_get",
+                "DEV/TEST: social exposure snapshot (SocialExposureToday, thresholds, recovery).",
+                (_, __) => StressSocialGet());
+            _helper.ConsoleCommands.Add(
+                "stress_social_set",
+                "DEV/TEST: set SocialExposureToday 0–100. Usage: stress_social_set <0..100>",
+                StressSocialSet);
+            _helper.ConsoleCommands.Add(
+                "stress_social_add",
+                "DEV/TEST: add to SocialExposureToday. Usage: stress_social_add <amount>",
+                StressSocialAdd);
+            _helper.ConsoleCommands.Add(
+                "stress_social_reset",
+                "DEV/TEST: reset SocialExposureToday and daily threshold HUD flags.",
+                (_, __) => StressSocialReset());
+        }
+
+        private void StressSocialGet()
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            _monitor.Log($"[SocialExposure]\n{_socialExposureService.BuildDebugSnapshot()}", LogLevel.Info);
+            TreatmentDebugReporter.ShowHud($"social: {_socialExposureService.GetCompactStatusLabel()} {_socialExposureService.ExposureToday}/100");
+        }
+
+        private void StressSocialSet(string command, string[] args)
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            if (args.Length < 1 || !int.TryParse(args[0], out var value) || value < 0 || value > 100)
+            {
+                LogDevError($"Usage: {command} <0..100>");
+                return;
+            }
+
+            _socialExposureService.SetExposure(value);
+            StressSocialGet();
+        }
+
+        private void StressSocialAdd(string command, string[] args)
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            if (args.Length < 1 || !int.TryParse(args[0], out var amount))
+            {
+                LogDevError($"Usage: {command} <amount>");
+                return;
+            }
+
+            _socialExposureService.AddExposure(amount, "debug stress_social_add");
+            StressSocialGet();
+        }
+
+        private void StressSocialReset()
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            _socialExposureService.ResetDaily();
+            StressSocialGet();
         }
 
         private void RegisterDarknessDebugCommands()

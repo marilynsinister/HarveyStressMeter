@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using StardewValley;
-using HarveyStressMeter.Models;
 using HarveyStressMeter.Constants;
+using HarveyStressMeter.Helpers;
+using HarveyStressMeter.Models;
 
 namespace HarveyStressMeter.UI
 {
@@ -67,6 +68,7 @@ namespace HarveyStressMeter.UI
                 [BuffIds.Hunger] = "Tea",
                 [BuffIds.TooCold] = "Cold",
                 [BuffIds.Tired] = "Glass",
+                [BuffIds.Social] = "Crowd",
                 [BuffIds.CareAura] = "Heart",
             };
 
@@ -75,13 +77,22 @@ namespace HarveyStressMeter.UI
                 string iconKey = iconKeyByBuff.TryGetValue(state.Id, out var k) ? k : "Blank";
                 Rectangle src = _iconRects[iconKey];
 
+                var cureSummary = state.CureText;
+                if (string.Equals(state.Id, BuffIds.Social, StringComparison.OrdinalIgnoreCase))
+                {
+                    var exposure = data.SocialExposure.SocialExposureToday;
+                    var socialActive = activeBuffIds.Contains(BuffIds.Social);
+                    var exposureLabel = SocialStressHelper.GetCompactStatusLabel(exposure, socialActive);
+                    cureSummary = $"{cureSummary} Сегодня: {exposureLabel} ({exposure}/100).";
+                }
+
                 var row = new HandbookRow
                 {
                     BuffId = state.Id,
                     Title = state.Title,
                     Effects = state.EffectsText,
                     Causes = state.CauseText,
-                    CureSummary = state.CureText,
+                    CureSummary = cureSummary,
                     IconSprite = new SpriteView(_iconsTex, src),
                 };
 
@@ -197,6 +208,15 @@ namespace HarveyStressMeter.UI
                 EffectsText = "Эффекты: легкая вялость.",
                 CauseText = "Причина: обычная нагрузка.",
                 CureText = "Лечение: короткий отдых дома."
+            };
+
+            yield return new StateInfo
+            {
+                Id = BuffIds.Social,
+                Title = "Социальный дискомфорт",
+                EffectsText = "Эффекты: -1 защита.",
+                CauseText = "Причина: слишком много разговоров с малознакомыми за день.",
+                CureText = "Лечение: 3 разговора + 60 сек с Харви или 5 разговоров."
             };
         }
 
