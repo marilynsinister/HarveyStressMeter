@@ -87,6 +87,40 @@ namespace HarveyStressMeter.Testing
             return BuildBeforeAfterResponse(before, after);
         }
 
+        public static string DarknessStatus(DarknessService darknessService)
+        {
+            var line = darknessService.BuildStep1DebugStatusLine();
+            return $"{line}\n\n{darknessService.BuildDebugSnapshot()}";
+        }
+
+        public static string DarknessAddMinutes(DarknessService darknessService, JsonElement? arguments)
+        {
+            if (!TryGetInt(arguments, "minutes", out var minutes) && !TryGetInt(arguments, "n", out minutes))
+                return "Error: minutes is required.";
+
+            var before = darknessService.BuildStep1DebugStatusLine();
+            if (!darknessService.ApplyDebugAddStep1Minutes(minutes))
+                return $"Error: add_minutes failed.\n\nbefore: {before}";
+
+            return $"before: {before}\nafter: {darknessService.BuildStep1DebugStatusLine()}";
+        }
+
+        public static string DarknessCompleteEvening(DarknessService darknessService)
+        {
+            var before = darknessService.BuildStep1DebugStatusLine();
+            if (!darknessService.ApplyDebugCompleteEvening())
+                return $"Error: complete_evening failed.\n\nbefore: {before}";
+
+            return $"before: {before}\nafter: {darknessService.BuildStep1DebugStatusLine()}";
+        }
+
+        public static string DarknessResetTherapy(DarknessService darknessService)
+        {
+            var before = darknessService.BuildStep1DebugStatusLine();
+            darknessService.ApplyDebugResetStep1Therapy();
+            return $"before: {before}\nafter: {darknessService.BuildStep1DebugStatusLine()}";
+        }
+
         public static string TreatmentDebug(
             SaveData data,
             StateService stateService,
@@ -120,6 +154,58 @@ namespace HarveyStressMeter.Testing
                 return false;
 
             return prop.ValueKind == JsonValueKind.Number && prop.TryGetInt32(out value);
+        }
+
+        public static string DarknessRemissionStatus(DarknessRemissionService remission)
+            => remission.BuildStatusLine();
+
+        public static string DarknessRelapseAdd(DarknessRemissionService remission, JsonElement? arguments)
+        {
+            if (!TryGetInt(arguments, "amount", out var amount) && !TryGetInt(arguments, "n", out amount))
+                return "Error: amount is required.";
+
+            var before = remission.BuildStatusLine();
+            remission.AdjustRelapseRisk(amount, "mcp_add");
+            return BuildBeforeAfterResponse(before, remission.BuildStatusLine());
+        }
+
+        public static string DarknessRelapseSet(DarknessRemissionService remission, JsonElement? arguments)
+        {
+            if (!TryGetInt(arguments, "amount", out var amount) && !TryGetInt(arguments, "value", out amount))
+                return "Error: amount (0-100) is required.";
+
+            var before = remission.BuildStatusLine();
+            remission.SetRelapseRisk(amount, "mcp_set");
+            return BuildBeforeAfterResponse(before, remission.BuildStatusLine());
+        }
+
+        public static string DarknessRemissionStart(DarknessRemissionService remission, SaveData data, DarknessService darkness)
+        {
+            var before = remission.BuildStatusLine();
+            data.Darkness.IsCured = true;
+            data.Darkness.HasOvercomeBonus = true;
+            data.Darkness.FearLevel = 0;
+            data.Darkness.IsTherapyActive = false;
+            remission.StartRemission();
+            darkness.SyncDarknessState("mcp_remission_start");
+            return BuildBeforeAfterResponse(before, remission.BuildStatusLine());
+        }
+
+        public static string DarknessRemissionClear(DarknessRemissionService remission)
+        {
+            var before = remission.BuildStatusLine();
+            remission.ClearRemission();
+            return BuildBeforeAfterResponse(before, remission.BuildStatusLine());
+        }
+
+        public static string DarknessForceRelapse(DarknessRemissionService remission, DarknessService darkness)
+        {
+            var before = remission.BuildStatusLine();
+            if (!remission.TryForceRelapse("mcp"))
+                return $"Error: remission not active.\n\n{before}";
+
+            darkness.SyncDarknessState("mcp_force_relapse");
+            return BuildBeforeAfterResponse(before, remission.BuildStatusLine());
         }
 
         private static bool TryGetBool(JsonElement? arguments, string name, out bool value)

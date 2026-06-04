@@ -524,9 +524,10 @@ namespace HarveyStressMeter.Services
                 var stepQuest = DarknessLegacyHelper.GetStepQuestIdForStage(_data.Darkness.TherapyStage);
                 sb.AppendLine(
                     $"Step quest {stepQuest}: journal={DarknessLegacyHelper.HasStepQuestInJournal(_data.Darkness.TherapyStage)}");
+                int minToday = _data.Darkness.SafeDarknessProgressToday / 60;
                 sb.AppendLine(
                     $"Step1 {_data.Darkness.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired} " +
-                    $"today {_data.Darkness.SafeDarknessProgressToday}/{DarknessLegacyHelper.Step1MinutesPerEvening}");
+                    $"today {minToday}/{DarknessLegacyHelper.Step1MinutesPerEvening} min todayDone={_data.Darkness.DarknessTherapyTodayCompleted}");
                 sb.AppendLine(
                     $"Step2 zones {_data.Darkness.SafeZonesVisited.Count}/2, Step3 {_data.Darkness.MountainNightSeconds}/120 sec");
             }

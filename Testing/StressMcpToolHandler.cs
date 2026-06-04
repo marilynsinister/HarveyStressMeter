@@ -46,6 +46,7 @@ namespace HarveyStressMeter.Testing
         private readonly TreatmentEpisodeService _treatmentEpisodeService;
         private readonly GameLogicHandler _gameLogicHandler;
         private readonly DarknessService _darknessService;
+        private readonly DarknessRemissionService _darknessRemissionService;
         private readonly SocialExposureService _socialExposureService;
 
         public StressMcpToolHandler(
@@ -65,6 +66,7 @@ namespace HarveyStressMeter.Testing
             TreatmentEpisodeService treatmentEpisodeService,
             GameLogicHandler gameLogicHandler,
             DarknessService darknessService,
+            DarknessRemissionService darknessRemissionService,
             SocialExposureService socialExposureService)
         {
             _monitor = monitor;
@@ -83,6 +85,7 @@ namespace HarveyStressMeter.Testing
             _treatmentEpisodeService = treatmentEpisodeService;
             _gameLogicHandler = gameLogicHandler;
             _darknessService = darknessService;
+            _darknessRemissionService = darknessRemissionService;
             _socialExposureService = socialExposureService;
         }
 
@@ -154,6 +157,16 @@ namespace HarveyStressMeter.Testing
                 "stress_darkness_start_therapy" => McpDarknessTools.DarknessStartTherapy(_darknessService),
                 "stress_darkness_step1_progress" => McpDarknessTools.DarknessStep1Progress(_darknessService, arguments),
                 "stress_darkness_sync" => McpDarknessTools.DarknessSync(_darknessService),
+                "stress_darkness_status" => McpDarknessTools.DarknessStatus(_darknessService),
+                "stress_darkness_add_minutes" => McpDarknessTools.DarknessAddMinutes(_darknessService, arguments),
+                "stress_darkness_complete_evening" => McpDarknessTools.DarknessCompleteEvening(_darknessService),
+                "stress_darkness_reset_therapy" => McpDarknessTools.DarknessResetTherapy(_darknessService),
+                "stress_darkness_remission_status" => McpDarknessTools.DarknessRemissionStatus(_darknessRemissionService),
+                "stress_darkness_relapse_add" => McpDarknessTools.DarknessRelapseAdd(_darknessRemissionService, arguments),
+                "stress_darkness_relapse_set" => McpDarknessTools.DarknessRelapseSet(_darknessRemissionService, arguments),
+                "stress_darkness_remission_start" => McpDarknessTools.DarknessRemissionStart(_darknessRemissionService, _data, _darknessService),
+                "stress_darkness_remission_clear" => McpDarknessTools.DarknessRemissionClear(_darknessRemissionService),
+                "stress_darkness_force_relapse" => McpDarknessTools.DarknessForceRelapse(_darknessRemissionService, _darknessService),
                 "stress_social_get" => McpSocialExposureTools.SocialGet(_socialExposureService),
                 "stress_social_set" => McpSocialExposureTools.SocialSet(_socialExposureService, arguments),
                 "stress_social_add" => McpSocialExposureTools.SocialAdd(_socialExposureService, arguments),

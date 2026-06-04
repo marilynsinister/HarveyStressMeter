@@ -20,7 +20,6 @@ namespace HarveyStressMeter.Helpers
             BuffIds.DarknessLevel1,
             BuffIds.DarknessLevel2,
             BuffIds.DarknessLevel3,
-            BuffIds.DimLight,
             BuffIds.HarveyLantern,
             BuffIds.DarknessOvercome,
         };
@@ -38,6 +37,7 @@ namespace HarveyStressMeter.Helpers
             "topicStressDarknessLevel2",
             "topicStressDarknessLevel3",
             "topicDarknessTherapyStart",
+            DarknessLegacyHelper.Step1ReadyForHarveyTopic,
             "topicDarknessStep1Complete",
             "topicDarknessStep2Complete",
             "topicDarknessFullyCured",
@@ -66,7 +66,9 @@ namespace HarveyStressMeter.Helpers
             sb.AppendLine(
                 $"SafeDarknessEveningsCompleted: {d.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired}");
             sb.AppendLine(
-                $"SafeDarknessProgressToday: {d.SafeDarknessProgressToday}/{DarknessLegacyHelper.Step1MinutesPerEvening}");
+                $"DarknessTherapyTodaySeconds: {d.SafeDarknessProgressToday}/{DarknessLegacyHelper.Step1SecondsPerEvening}");
+            sb.AppendLine($"DarknessTherapyTodayCompleted: {d.DarknessTherapyTodayCompleted}");
+            sb.AppendLine($"DarknessTherapyLastCompletedDay: {d.DarknessTherapyLastCompletedDay}");
             sb.AppendLine($"LastSafeDarknessDate: {d.LastSafeDarknessDate?.ToString() ?? "(null)"}");
             sb.AppendLine(
                 $"SafeZonesVisited: {(d.SafeZonesVisited?.Count > 0 ? string.Join(", ", d.SafeZonesVisited) : "(none)")}");
@@ -75,16 +77,18 @@ namespace HarveyStressMeter.Helpers
             sb.AppendLine("=== Darkness Step1 ===");
             sb.AppendLine($"  TherapyStage: {d.TherapyStage}");
             sb.AppendLine($"  IsTherapyActive: {d.IsTherapyActive}");
+            int minToday = d.SafeDarknessProgressToday / 60;
             sb.AppendLine(
-                $"  SafeDarknessProgressToday: {d.SafeDarknessProgressToday}/{DarknessLegacyHelper.Step1MinutesPerEvening}");
+                $"  DarknessTherapyTodaySeconds: {d.SafeDarknessProgressToday} ({minToday}/{DarknessLegacyHelper.Step1MinutesPerEvening} min)");
             sb.AppendLine(
-                $"  SafeDarknessEveningsCompleted: {d.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired}");
+                $"  DarknessTherapyEveningsCompleted: {d.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired}");
+            sb.AppendLine($"  DarknessTherapyTodayCompleted: {d.DarknessTherapyTodayCompleted}");
+            sb.AppendLine($"  DarknessTherapyLastCompletedDay: {d.DarknessTherapyLastCompletedDay}");
             sb.AppendLine($"  LastSafeDarknessDate: {d.LastSafeDarknessDate?.ToString() ?? "(null)"}");
             sb.AppendLine(
                 $"  {QuestIds.DarknessStep1}: {FormatQuestActive(questService, QuestIds.DarknessStep1)}");
             sb.AppendLine(
                 $"  {QuestIds.DarknessStep1} currentObjective: {GetStep1QuestObjective(questService) ?? "(n/a)"}");
-            sb.AppendLine($"  {BuffIds.DimLight}: {FormatBuffActive(stateService, BuffIds.DimLight)}");
 
             sb.AppendLine("DarknessBuffs:");
             foreach (var buffId in DarknessBuffIds)
@@ -114,6 +118,12 @@ namespace HarveyStressMeter.Helpers
             monitor.Log($"{DevPrefix} === {header} ===", LogLevel.Info);
             foreach (var line in snapshot.Split('\n'))
                 monitor.Log($"{DevPrefix} {line}", LogLevel.Info);
+        }
+
+        public static void LogSnapshot(IMonitor monitor, string header, string before, string after)
+        {
+            LogSnapshot(monitor, $"{header} (before)", before);
+            LogSnapshot(monitor, $"{header} (after)", after);
         }
 
         private static string FormatBuffActive(StateService? stateService, string buffId)

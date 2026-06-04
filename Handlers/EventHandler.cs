@@ -26,6 +26,7 @@ namespace HarveyStressMeter.Handlers
         private readonly GameLogicHandler _gameLogicHandler;
         private readonly UIHandler _uiHandler;
         private readonly DarknessService _darknessService;
+        private readonly DarknessRemissionService _darknessRemissionService;
         private readonly StressLoadService _stressLoadService;
 
         public EventHandler(
@@ -37,6 +38,7 @@ namespace HarveyStressMeter.Handlers
             GameLogicHandler gameLogicHandler,
             UIHandler uiHandler,
             DarknessService darknessService,
+            DarknessRemissionService darknessRemissionService,
             StressLoadService stressLoadService)
         {
             _monitor = monitor;
@@ -47,6 +49,7 @@ namespace HarveyStressMeter.Handlers
             _gameLogicHandler = gameLogicHandler;
             _uiHandler = uiHandler;
             _darknessService = darknessService;
+            _darknessRemissionService = darknessRemissionService;
             _stressLoadService = stressLoadService;
         }
 
@@ -127,6 +130,7 @@ namespace HarveyStressMeter.Handlers
 
             _gameLogicHandler.UpdateDailyDarknessState();
 
+            _darknessRemissionService.OnDayStarted();
             _darknessService.SyncDarknessState("DayStarted");
             
             _gameLogicHandler.CheckDayStartedStressTriggers();
@@ -137,6 +141,7 @@ namespace HarveyStressMeter.Handlers
 
         private void OnDayEnding(object? s, DayEndingEventArgs e)
         {
+            _darknessRemissionService.OnDayEnding();
             _gameLogicHandler.CheckDayEndingQuestCompletion();
             _gameLogicHandler.CheckLateSleepPattern();  // ⭐ НОВОЕ: Отслеживание позднего сна
             _stressLoadService.SyncFromGameState();

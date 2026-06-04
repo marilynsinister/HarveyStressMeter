@@ -58,11 +58,29 @@ namespace HarveyStressMeter.Models
         /// <summary>Шаг 1: завершённые вечера (0–3), по 5 минут за вечер.</summary>
         public int SafeDarknessEveningsCompleted { get; set; } = 0;
 
-        /// <summary>Шаг 1: минуты при приглушённом свете сегодня (0–5).</summary>
+        /// <summary>Шаг 1: секунды спокойного вечера дома при свете сегодня (0–3600).</summary>
         public int SafeDarknessProgressToday { get; set; } = 0;
 
         /// <summary>Календарный день, к которому относится SafeDarknessProgressToday.</summary>
         public SDate? LastSafeDarknessDate { get; set; }
+
+        /// <summary>Сегодняшний вечер уже зачтён (не начислять второй раз в тот же день).</summary>
+        public bool DarknessTherapyTodayCompleted { get; set; }
+
+        /// <summary>DaysSinceStart последнего зачтённого вечера; -1 если ещё не было.</summary>
+        public int DarknessTherapyLastCompletedDay { get; set; } = -1;
+
+        public int DarknessTherapyEveningsCompleted
+        {
+            get => SafeDarknessEveningsCompleted;
+            set => SafeDarknessEveningsCompleted = value;
+        }
+
+        public int DarknessTherapyTodaySeconds
+        {
+            get => SafeDarknessProgressToday;
+            set => SafeDarknessProgressToday = value;
+        }
         
         /// <summary>
         /// Шаг 2: Посещенные безопасные зоны
@@ -105,10 +123,8 @@ namespace HarveyStressMeter.Models
         /// </summary>
         public SDate? TherapyCompletedDate { get; set; }
         
-        // ===== Флаги для предметов =====
-        /// <summary>
-        /// Игрок получил диммер от Харви
-        /// </summary>
+        // ===== Флаги (legacy save) =====
+        /// <summary>Устаревший флаг; предметы не выдаются.</summary>
         public bool HasReceivedDimmer { get; set; } = false;
         
         /// <summary>
@@ -136,6 +152,28 @@ namespace HarveyStressMeter.Models
         /// Игрок выполнил Шаг 3 (ночь в горах)
         /// </summary>
         public bool CompletedStep3 { get; set; } = false;
+
+        // ===== Ремиссия / рецидив =====
+        public bool DarknessRemissionActive { get; set; }
+        public int DarknessRemissionStartDay { get; set; } = -1;
+        public int DarknessRemissionMinSafeDays { get; set; } = 7;
+        public int DarknessRemissionBaseDays { get; set; } = 14;
+        public int DarknessRemissionMaxDays { get; set; } = 21;
+        public int DarknessRelapseRisk { get; set; }
+        public bool DarknessRelapseWarning50ShownToday { get; set; }
+        public bool DarknessRelapseWarning75ShownToday { get; set; }
+        public int DarknessRelapseCount { get; set; }
+        public bool DarknessProphylaxisActive { get; set; }
+        public int DarknessProphylaxisTodaySeconds { get; set; }
+        public bool DarknessRelapseTreatmentActive { get; set; }
+        /// <summary>Сколько вечеров нужно для текущего курса (3 обычно, 1–3 при рецидиве).</summary>
+        public int DarknessTherapyEveningsRequired { get; set; } = 3;
+        public bool DarknessRemissionHadPassOut { get; set; }
+        public bool DarknessRemissionHadNightDamage { get; set; }
+        public bool DarknessRemissionHadDangerLocation { get; set; }
+        public bool DarknessRemissionSeriousEventToday { get; set; }
+        public int DarknessRemissionCalmHomeMinutesToday { get; set; }
+        public bool DarknessRemissionCalmCreditToday { get; set; }
         
         // ===== Методы =====
         

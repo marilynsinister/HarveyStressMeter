@@ -39,6 +39,7 @@ namespace HarveyStressMeter.Handlers
         private readonly TreatmentEpisodeService _treatmentEpisodeService;
         private readonly StressGameplayEffectService _stressGameplayEffectService;
         private readonly DarknessService _darknessService;
+        private readonly DarknessRemissionService _darknessRemissionService;
         private readonly SocialExposureService _socialExposureService;
 
         private bool _pendingTalkHarveyWarp = true;
@@ -76,6 +77,7 @@ namespace HarveyStressMeter.Handlers
             TreatmentEpisodeService treatmentEpisodeService,
             StressGameplayEffectService stressGameplayEffectService,
             DarknessService darknessService,
+            DarknessRemissionService darknessRemissionService,
             SocialExposureService socialExposureService)
         {
             _monitor = monitor;
@@ -97,6 +99,7 @@ namespace HarveyStressMeter.Handlers
             _treatmentEpisodeService = treatmentEpisodeService;
             _stressGameplayEffectService = stressGameplayEffectService;
             _darknessService = darknessService;
+            _darknessRemissionService = darknessRemissionService;
             _socialExposureService = socialExposureService;
         }
 
@@ -384,6 +387,203 @@ namespace HarveyStressMeter.Handlers
                 "stress_darkness_sync",
                 "DEV/TEST: DarknessService.SyncDarknessState + snapshot.",
                 (_, __) => StressDarknessSync());
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_status",
+                "DEV/TEST: step1 therapy status (evenings, today timer, objective).",
+                (_, __) => StressDarknessStatus());
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_add_minutes",
+                "DEV/TEST: add minutes to today's step1 timer. Usage: stress_darkness_add_minutes <n>",
+                StressDarknessAddMinutes);
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_complete_evening",
+                "DEV/TEST: force-credit one evening (checks duplicate same day).",
+                (_, __) => StressDarknessCompleteEvening());
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_reset_therapy",
+                "DEV/TEST: reset step1 darkness therapy progress (keeps FearLevel/therapy active).",
+                (_, __) => StressDarknessResetTherapy());
+            RegisterDarknessRemissionDebugCommands();
+        }
+
+        private void RegisterDarknessRemissionDebugCommands()
+        {
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_remission_status",
+                "DEV/TEST: remission/relapse risk snapshot.",
+                (_, __) => StressDarknessRemissionStatus());
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_relapse_add",
+                "DEV/TEST: add relapse risk. Usage: stress_darkness_relapse_add <amount>",
+                StressDarknessRelapseAdd);
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_relapse_set",
+                "DEV/TEST: set relapse risk 0-100. Usage: stress_darkness_relapse_set <amount>",
+                StressDarknessRelapseSet);
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_remission_start",
+                "DEV/TEST: start remission (as after full cure).",
+                (_, __) => StressDarknessRemissionStart());
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_remission_clear",
+                "DEV/TEST: clear remission and risk.",
+                (_, __) => StressDarknessRemissionClear());
+            _helper.ConsoleCommands.Add(
+                "stress_darkness_force_relapse",
+                "DEV/TEST: force relapse if remission active.",
+                (_, __) => StressDarknessForceRelapse());
+        }
+
+        private void StressDarknessRemissionStatus()
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            LogDev(_darknessRemissionService.BuildStatusLine());
+            DarknessDebugReporter.LogSnapshot(_monitor, "stress_darkness_remission_status", _darknessService.BuildDebugSnapshot());
+        }
+
+        private void StressDarknessRelapseAdd(string command, string[] args)
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            if (args.Length < 1 || !int.TryParse(args[0], out var amount))
+            {
+                LogDevError($"Usage: {command} <amount>");
+                return;
+            }
+
+            var before = _darknessRemissionService.BuildStatusLine();
+            _darknessRemissionService.AdjustRelapseRisk(amount, "debug_add");
+            LogDev($"before: {before}");
+            LogDev($"after: {_darknessRemissionService.BuildStatusLine()}");
+        }
+
+        private void StressDarknessRelapseSet(string command, string[] args)
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            if (args.Length < 1 || !int.TryParse(args[0], out var amount))
+            {
+                LogDevError($"Usage: {command} <0-100>");
+                return;
+            }
+
+            var before = _darknessRemissionService.BuildStatusLine();
+            _darknessRemissionService.SetRelapseRisk(amount, "debug_set");
+            LogDev($"before: {before}");
+            LogDev($"after: {_darknessRemissionService.BuildStatusLine()}");
+        }
+
+        private void StressDarknessRemissionStart()
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            var before = _darknessRemissionService.BuildStatusLine();
+            _data.Darkness.IsCured = true;
+            _data.Darkness.HasOvercomeBonus = true;
+            _data.Darkness.FearLevel = 0;
+            _data.Darkness.IsTherapyActive = false;
+            _darknessRemissionService.StartRemission();
+            LogDev($"before: {before}");
+            LogDev($"after: {_darknessRemissionService.BuildStatusLine()}");
+        }
+
+        private void StressDarknessRemissionClear()
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            var before = _darknessRemissionService.BuildStatusLine();
+            _darknessRemissionService.ClearRemission();
+            LogDev($"before: {before}");
+            LogDev($"after: {_darknessRemissionService.BuildStatusLine()}");
+        }
+
+        private void StressDarknessForceRelapse()
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            var before = _darknessRemissionService.BuildStatusLine();
+            if (!_darknessRemissionService.TryForceRelapse("debug"))
+            {
+                LogDevError("Force relapse failed — start remission first (stress_darkness_remission_start).");
+                return;
+            }
+
+            LogDev($"before: {before}");
+            LogDev($"after: {_darknessRemissionService.BuildStatusLine()}");
+            _darknessService.SyncDarknessState("debug_force_relapse");
+        }
+
+        private void StressDarknessStatus()
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            var line = _darknessService.BuildStep1DebugStatusLine();
+            var snapshot = _darknessService.BuildDebugSnapshot();
+            _monitor.Log($"[DEV] stress_darkness_status: {line}", LogLevel.Info);
+            DarknessDebugReporter.LogSnapshot(_monitor, "stress_darkness_status", snapshot);
+            TreatmentDebugReporter.ShowHud(line);
+        }
+
+        private void StressDarknessAddMinutes(string command, string[] args)
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            if (args.Length < 1 || !int.TryParse(args[0], out var minutes))
+            {
+                LogDevError($"Usage: {command} <minutes>");
+                return;
+            }
+
+            var before = _darknessService.BuildStep1DebugStatusLine();
+            if (!_darknessService.ApplyDebugAddStep1Minutes(minutes))
+            {
+                LogDevError("add_minutes failed — start therapy at stage 1 or check awaiting Harvey.");
+                StressDarknessStatus();
+                return;
+            }
+
+            var after = _darknessService.BuildStep1DebugStatusLine();
+            DarknessDebugReporter.LogSnapshot(_monitor, $"{command} {minutes}", $"before: {before}", $"after: {after}");
+            TreatmentDebugReporter.ShowHud(after);
+        }
+
+        private void StressDarknessCompleteEvening()
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            var before = _darknessService.BuildStep1DebugStatusLine();
+            if (!_darknessService.ApplyDebugCompleteEvening())
+            {
+                LogDevError("complete_evening failed.");
+                StressDarknessStatus();
+                return;
+            }
+
+            var after = _darknessService.BuildStep1DebugStatusLine();
+            DarknessDebugReporter.LogSnapshot(_monitor, "stress_darkness_complete_evening", $"before: {before}", $"after: {after}");
+            TreatmentDebugReporter.ShowHud(_darknessService.BuildStep1DebugStatusLine());
+        }
+
+        private void StressDarknessResetTherapy()
+        {
+            if (!EnsureWorldReadyForDarkness())
+                return;
+
+            var before = _darknessService.BuildStep1DebugStatusLine();
+            _darknessService.ApplyDebugResetStep1Therapy();
+            var after = _darknessService.BuildStep1DebugStatusLine();
+            DarknessDebugReporter.LogSnapshot(_monitor, "stress_darkness_reset_therapy", $"before: {before}", $"after: {after}");
+            TreatmentDebugReporter.ShowHud("darkness step1 progress reset");
         }
 
         private void StressDarknessDebug()
@@ -440,7 +640,7 @@ namespace HarveyStressMeter.Handlers
                 || !int.TryParse(args[0], out var evenings)
                 || !int.TryParse(args[1], out var today))
             {
-                LogDevError($"Usage: {command} <evenings> <today>  (e.g. {command} 2 4)");
+                LogDevError($"Usage: {command} <evenings> <todayMinutes>  (e.g. {command} 2 30, max 60)");
                 return;
             }
 

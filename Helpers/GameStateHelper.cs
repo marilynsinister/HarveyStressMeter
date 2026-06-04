@@ -173,6 +173,20 @@ namespace HarveyStressMeter.Helpers
             => HarveyFriendshipHelper.IsMarriedToHarvey()
                && IsLocationOneOf(Game1.currentLocation, "FarmHouse");
 
+        /// <summary>Дом игрока: фермерский дом, островной дом, хижина (мультиплеер).</summary>
+        public static bool IsPlayerHomeLocation(GameLocation? location = null)
+        {
+            location ??= Game1.player?.currentLocation;
+            if (location == null)
+                return false;
+
+            if (location is StardewValley.Locations.FarmHouse)
+                return true;
+
+            var name = location.NameOrUniqueName;
+            return name is "FarmHouse" or "IslandFarmHouse" or "Cabin";
+        }
+
         public static bool IsInRestZone()
         {
             var location = Game1.currentLocation;

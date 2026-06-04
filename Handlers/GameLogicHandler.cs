@@ -25,6 +25,7 @@ namespace HarveyStressMeter.Handlers
         private readonly BuffService _buffService;
         private readonly StateService _stateService;
         private readonly DarknessService _darknessService;
+        private readonly DarknessRemissionService _darknessRemissionService;
         private readonly StressDialogueService _stressDialogueService;
         private readonly StressTreatmentReviewService _stressTreatmentReviewService;
         private readonly StressLoadService _stressLoadService;
@@ -89,6 +90,7 @@ namespace HarveyStressMeter.Handlers
             BuffService buffService,
             StateService stateService,
             DarknessService darknessService,
+            DarknessRemissionService darknessRemissionService,
             StressDialogueService stressDialogueService,
             StressTreatmentReviewService stressTreatmentReviewService,
             StressLoadService stressLoadService,
@@ -107,6 +109,7 @@ namespace HarveyStressMeter.Handlers
             _buffService = buffService;
             _stateService = stateService;
             _darknessService = darknessService;
+            _darknessRemissionService = darknessRemissionService;
             _stressDialogueService = stressDialogueService;
             _stressTreatmentReviewService = stressTreatmentReviewService;
             _stressLoadService = stressLoadService;
@@ -527,6 +530,7 @@ namespace HarveyStressMeter.Handlers
         private void HandleHarveyDialogue(NPC harveyNpc, MenuChangedEventArgs e)
         {
             _hadDarknessTherapyTopicAtTalkStart = ConversationHelper.HasTopic("topicDarknessTherapyStart");
+            _darknessService.CaptureStep1ReadyTopicAtHarveyTalkStart();
 
             if (!CanRunStressDialoguePipeline(harveyNpc))
                 return;
@@ -639,6 +643,13 @@ namespace HarveyStressMeter.Handlers
             TryStartDarknessTherapyFromCpDialogue();
 
             _hadDarknessTherapyTopicAtTalkStart = false;
+
+            if (_darknessService.TryFinalizeStep1AfterHarveyTalk())
+            {
+                _monitor.Log("[DarknessTherapy] Шаг 1 закрыт после разговора с Харви (3/3 вечера)", LogLevel.Info);
+            }
+
+            _darknessRemissionService.OnHarveyTalkEnded();
 
             // Финальное завершение лечения после programmatic review-диалога.
             _stressTreatmentReviewService.OnReviewDialogueClosed();

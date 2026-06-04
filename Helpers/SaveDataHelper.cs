@@ -274,6 +274,8 @@ namespace HarveyStressMeter.Helpers
             target.SafeDarknessEveningsCompleted = source.SafeDarknessEveningsCompleted;
             target.SafeDarknessProgressToday = source.SafeDarknessProgressToday;
             target.LastSafeDarknessDate = source.LastSafeDarknessDate;
+            target.DarknessTherapyTodayCompleted = source.DarknessTherapyTodayCompleted;
+            target.DarknessTherapyLastCompletedDay = source.DarknessTherapyLastCompletedDay;
             target.SafeZonesVisited.Clear();
             if (source.SafeZonesVisited != null)
                 target.SafeZonesVisited.AddRange(source.SafeZonesVisited);
@@ -290,6 +292,25 @@ namespace HarveyStressMeter.Helpers
             target.CompletedStep1 = source.CompletedStep1;
             target.CompletedStep2 = source.CompletedStep2;
             target.CompletedStep3 = source.CompletedStep3;
+            target.DarknessRemissionActive = source.DarknessRemissionActive;
+            target.DarknessRemissionStartDay = source.DarknessRemissionStartDay;
+            target.DarknessRemissionMinSafeDays = source.DarknessRemissionMinSafeDays;
+            target.DarknessRemissionBaseDays = source.DarknessRemissionBaseDays;
+            target.DarknessRemissionMaxDays = source.DarknessRemissionMaxDays;
+            target.DarknessRelapseRisk = source.DarknessRelapseRisk;
+            target.DarknessRelapseWarning50ShownToday = source.DarknessRelapseWarning50ShownToday;
+            target.DarknessRelapseWarning75ShownToday = source.DarknessRelapseWarning75ShownToday;
+            target.DarknessRelapseCount = source.DarknessRelapseCount;
+            target.DarknessProphylaxisActive = source.DarknessProphylaxisActive;
+            target.DarknessProphylaxisTodaySeconds = source.DarknessProphylaxisTodaySeconds;
+            target.DarknessRelapseTreatmentActive = source.DarknessRelapseTreatmentActive;
+            target.DarknessTherapyEveningsRequired = source.DarknessTherapyEveningsRequired;
+            target.DarknessRemissionHadPassOut = source.DarknessRemissionHadPassOut;
+            target.DarknessRemissionHadNightDamage = source.DarknessRemissionHadNightDamage;
+            target.DarknessRemissionHadDangerLocation = source.DarknessRemissionHadDangerLocation;
+            target.DarknessRemissionSeriousEventToday = source.DarknessRemissionSeriousEventToday;
+            target.DarknessRemissionCalmHomeMinutesToday = source.DarknessRemissionCalmHomeMinutesToday;
+            target.DarknessRemissionCalmCreditToday = source.DarknessRemissionCalmCreditToday;
         }
 
         private static void CopyStressLoadInto(StressLoadState target, StressLoadState source)

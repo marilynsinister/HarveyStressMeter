@@ -10,6 +10,7 @@ namespace HarveyStressMeter.Constants
         public const string DarknessStep1 = "HarveyMod_DarknessStep1";
         public const string DarknessStep2 = "HarveyMod_DarknessStep2";
         public const string DarknessStep3 = "HarveyMod_DarknessStep3";
+        public const string DarknessProphylaxis = "HarveyMod_DarknessProphylaxis";
         public const string Lonely = "HarveyMod_LonelyRecovery";
         public const string Overwork = "HarveyMod_OverworkRecovery";
         public const string Hunger = "HarveyMod_HungerRecovery";

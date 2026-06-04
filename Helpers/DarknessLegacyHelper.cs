@@ -20,7 +20,11 @@ namespace HarveyStressMeter.Helpers
         };
 
         public const int Step1EveningsRequired = 3;
-        public const int Step1MinutesPerEvening = 5;
+        public const int Step1MinutesPerEvening = 60;
+        public const int Step1SecondsPerEvening = Step1MinutesPerEvening * 60;
+
+        /// <summary>Топик после 3/3 вечеров — финальный разговор с Харви (CP).</summary>
+        public const string Step1ReadyForHarveyTopic = "topicDarknessStep1ReadyForHarvey";
 
         /// <summary>
         /// Уровневая система: FearLevel, терапия/излечение в save, или активный level-buff в игре.
@@ -146,7 +150,7 @@ namespace HarveyStressMeter.Helpers
         {
             sb.AppendLine($"  fearLevel={d.FearLevel} therapy={d.IsTherapyActive} stage={d.TherapyStage} cured={d.IsCured}");
             sb.AppendLine(
-                $"  step1 evenings={d.SafeDarknessEveningsCompleted}/{Step1EveningsRequired} today={d.SafeDarknessProgressToday}/{Step1MinutesPerEvening}");
+                $"  step1 evenings={d.SafeDarknessEveningsCompleted}/{Step1EveningsRequired} todaySec={d.SafeDarknessProgressToday}/{Step1SecondsPerEvening} todayDone={d.DarknessTherapyTodayCompleted} lastDay={d.DarknessTherapyLastCompletedDay}");
             sb.AppendLine($"  step2 zones=[{string.Join(", ", d.SafeZonesVisited)}] step3 mountainSec={d.MountainNightSeconds}/120");
             if (d.IsTherapyActive && d.TherapyStage >= 1)
             {

@@ -32,6 +32,7 @@ namespace HarveyStressMeter
         private TriggerService _triggerService = null!;
         private EpisodeQuestProgressService _episodeQuestProgressService = null!;
         private DarknessService _darknessService = null!;
+        private DarknessRemissionService _darknessRemissionService = null!;
         private StressDialogueService _stressDialogueService = null!;
         private StressTreatmentReviewService _stressTreatmentReviewService = null!;
         private GameDataService _gameDataService = null!;
@@ -100,6 +101,7 @@ namespace HarveyStressMeter
                 _treatmentEpisodeService,
                 _gameLogicHandler,
                 _darknessService,
+                _darknessRemissionService,
                 _socialExposureService);
 
             if (_config.EnableStressMcp)
@@ -230,6 +232,8 @@ namespace HarveyStressMeter
             _triggerService.SetEpisodeQuestProgressService(_episodeQuestProgressService);
             _darknessService = new DarknessService(_data, _buffService, _stateService, _questService, Monitor);
             _darknessService.SetStressLoadService(_stressLoadService);
+            _darknessRemissionService = new DarknessRemissionService(_data, _darknessService, _questService, Monitor);
+            _darknessService.SetRemissionService(_darknessRemissionService);
             _treatmentService.SetDarknessService(_darknessService);
             _thunderFlashbackService = new ThunderFlashbackService(
                 _data,
@@ -326,8 +330,8 @@ namespace HarveyStressMeter
         {
             // Create handlers (high-level modules that depend on services)
             _uiHandler = new UIHandler(Monitor, _data, _helper);
-            _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _socialExposureService, _stressGameplayEffectService, _episodeQuestProgressService);
-            _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _treatmentService, _gameLogicHandler, _uiHandler, _darknessService, _stressLoadService);
+            _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _darknessRemissionService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _socialExposureService, _stressGameplayEffectService, _episodeQuestProgressService);
+            _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _treatmentService, _gameLogicHandler, _uiHandler, _darknessService, _darknessRemissionService, _stressLoadService);
             _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler, _modResetService, _stressDialogueService);
 
             if (_config.EnableDevTestCommands)
@@ -352,6 +356,7 @@ namespace HarveyStressMeter
                     _treatmentEpisodeService,
                     _stressGameplayEffectService,
                     _darknessService,
+                    _darknessRemissionService,
                     _socialExposureService).RegisterCommands();
             }
             else

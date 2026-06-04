@@ -152,8 +152,8 @@ namespace HarveyStressMeter.UI
                 Id = BuffIds.Darkness,
                 Title = "Боязнь темноты",
                 EffectsText = "Эффекты: -1 защита.",
-                CauseText = "Причина: ночь на улице.",
-                CureText = "Лечение: 180 сек в светлом месте."
+                CauseText = "Причина: ночь на улице, нарастающий страх.",
+                CureText = "Лечение: 3 вечера × 60 мин дома при свете (после 20:00), затем разговор с Харви."
             };
 
             yield return new StateInfo
