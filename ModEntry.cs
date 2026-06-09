@@ -49,6 +49,7 @@ namespace HarveyStressMeter
         private StressGameplayEffectService _stressGameplayEffectService = null!;
         private StressMeterHudService _stressMeterHudService = null!;
         private SocialAnxietyTherapyService? _socialAnxietyTherapyService;
+        private HarveyStressActionHandler? _harveyStressActionHandler;
 
         // Handlers (following SRP)
         private Handlers.EventHandler _eventHandler = null!;
@@ -318,6 +319,14 @@ namespace HarveyStressMeter
                 _triggerService,
                 _stressDialogueService,
                 _stressTreatmentReviewService);
+            _harveyStressActionHandler = new HarveyStressActionHandler(
+                Monitor,
+                _treatmentService,
+                _treatmentEpisodeService,
+                _stressTreatmentReviewService,
+                _stressDialogueService,
+                _socialAnxietyTherapyService);
+            _harveyStressActionHandler.RegisterTriggerActions();
             _triggerService.SetSocialAnxietyTherapyService(_socialAnxietyTherapyService);
             _treatmentService.SetSocialAnxietyTherapyService(_socialAnxietyTherapyService);
 

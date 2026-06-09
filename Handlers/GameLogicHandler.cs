@@ -43,6 +43,7 @@ namespace HarveyStressMeter.Handlers
         private bool _harveyStressDialogueCycleHandled;
         /// <summary>topicDarknessTherapyStart уже был до текущего разговора (не CP #$t в этом диалоге).</summary>
         private bool _hadDarknessTherapyTopicAtTalkStart;
+        private int _clearStressConsumedAtTick = -1;
 
         // ⭐ ОПТИМИЗАЦИЯ: Кэширование и интервальные проверки
         private bool _lastHarveyNearby = false;
@@ -216,6 +217,8 @@ namespace HarveyStressMeter.Handlers
         {
             if (!Context.IsWorldReady)
                 return;
+
+            ProcessStressInteractionConsumedClear();
 
             var harveyNearby = _harveySafePersonAuraService.IsHarveyWithinCareAuraRange();
 
@@ -564,35 +567,23 @@ namespace HarveyStressMeter.Handlers
                 _monitor.Log($"[Диалог] Обнаружен активный дебафф {buffId} без лечения.", LogLevel.Info);
 
                 _stressDialogueService.ShowStressDialogue(buffId!, dialogueText!);
-                if (string.Equals(buffId, BuffIds.Social, StringComparison.Ordinal)
-                    && _socialAnxietyTherapyService?.IsReadyToComplete == true)
-                {
-                    _socialAnxietyTherapyService.OnFollowupDialogueStarted();
-                }
-
                 _lastDialogueNpc = "Harvey";
                 _harveyStressDialogueCycleHandled = true;
                 return;
             }
 
-            if (_stressTreatmentReviewService.TryArmReviewCompletionOnHarveyTalk(out var reviewBuffId))
+            if (_socialAnxietyTherapyService?.IsReadyToComplete == true)
             {
-                if (string.Equals(reviewBuffId, BuffIds.Social, StringComparison.Ordinal))
-                {
-                    _monitor.Log(
-                        "[Диалог] Social review — CP topic path skipped (programmatic follow-up only)",
-                        LogLevel.Debug);
-                }
-                else
-                {
-                    _monitor.Log(
-                        $"[Диалог] Treatment review via CP topic (buff={reviewBuffId}) — vanilla dialogue, completion after close",
-                        LogLevel.Info);
-                }
+                _monitor.Log(
+                    "[Диалог] Social review pending — programmatic intercept or CP $action only (no auto-arm)",
+                    LogLevel.Debug);
+            }
 
-                _lastDialogueNpc = "Harvey";
-                _harveyStressDialogueCycleHandled = true;
-                return;
+            if (_stressTreatmentReviewService.GetTreatmentAwaitingReview() != null)
+            {
+                _monitor.Log(
+                    "[Диалог] Stress review pending — completion via CP/programmatic $action only",
+                    LogLevel.Debug);
             }
 
             _monitor.Log("[Диалог] No programmatic stress dialogue; fallback topics allowed", LogLevel.Debug);
@@ -659,8 +650,8 @@ namespace HarveyStressMeter.Handlers
                 return;
             }
 
-            // Auto-start treatment/quest after programmatic stress start dialogue closes.
-            _stressDialogueService.CheckAndStartTreatmentAfterDialogue();
+            // Основной путь: $action HarveyStress_* в реплике. Ниже — только repair fallback.
+            _stressDialogueService.TryFallbackStartTreatmentAfterDialogue();
 
             // CP level 2/3: #$t topicDarknessTherapyStart добавляет топик в конце диалога — старт только тогда.
             TryStartDarknessTherapyFromCpDialogue();
@@ -674,10 +665,7 @@ namespace HarveyStressMeter.Handlers
 
             _darknessRemissionService.OnHarveyTalkEnded();
 
-            // Финальное завершение лечения после programmatic review-диалога.
-            _stressTreatmentReviewService.OnReviewDialogueClosed();
-
-            _socialAnxietyTherapyService?.OnQuestCompletedIfTreatmentFinished();
+            _stressTreatmentReviewService.TryFallbackCompleteReviewAfterDialogue();
 
             _harveyCareTrustService.TryAwardSupportiveTalk();
 
@@ -689,6 +677,23 @@ namespace HarveyStressMeter.Handlers
             {
                 ConversationHelper.AddTopic(TopicIds.SpokeToday, 1);
             }
+
+            ScheduleClearStressInteractionConsumed();
+        }
+
+        private void ScheduleClearStressInteractionConsumed()
+        {
+            _clearStressConsumedAtTick = Game1.ticks + 90;
+        }
+
+        public void ProcessStressInteractionConsumedClear()
+        {
+            if (_clearStressConsumedAtTick < 0 || Game1.ticks < _clearStressConsumedAtTick)
+                return;
+
+            HarveyInteractionGuard.ClearConsumed();
+            _clearStressConsumedAtTick = -1;
+            _monitor.Log("[HarveyInteraction] Stress consumed flag cleared (dialogue cycle ended)", LogLevel.Debug);
         }
 
         private void HandleDialogueEnd()

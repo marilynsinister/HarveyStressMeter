@@ -331,6 +331,16 @@ namespace HarveyStressMeter.Handlers
                 "harvey_stress_debug_state",
                 "DEV/TEST: dump Social anxiety therapy debug snapshot.",
                 (_, __) => HarveyStressSocialDebugState());
+            _helper.ConsoleCommands.Add(
+                "harvey_stress_clear_consumed_interaction",
+                "DEV/TEST: clear HarveyStressMeter/HarveyInteractionConsumed* modData flags.",
+                (_, __) => HarveyStressClearConsumedInteraction());
+        }
+
+        private void HarveyStressClearConsumedInteraction()
+        {
+            HarveyInteractionGuard.ClearConsumed();
+            LogDev("HarveyInteraction consumed flags cleared.");
         }
 
         private void HarveyStressSocialStart()

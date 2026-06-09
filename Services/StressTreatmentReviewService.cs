@@ -1,3 +1,4 @@
+using System;
 using StardewModdingAPI;
 using StardewValley;
 using HarveyStressMeter.Constants;
@@ -139,47 +140,121 @@ namespace HarveyStressMeter.Services
             return true;
         }
 
-        public void OnReviewDialogueClosed()
+        /// <summary>Игровой путь: $action HarveyStress_CompleteReview / HarveyStress_SocialAnxiety_Complete.</summary>
+        public bool TryCompleteReviewFromAction(string buffId, out string error)
         {
+            error = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(buffId))
+            {
+                error = "buffId missing";
+                return false;
+            }
+
+            if (!HasPendingReviewCompletion)
+            {
+                if (!TryArmPendingForBuff(buffId))
+                {
+                    error = $"no review pending for {buffId}";
+                    _monitor.Log($"[StressTreatmentReview] CompleteReview action skipped: {error}", LogLevel.Warn);
+                    return false;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(_pendingBuffIdForCompletion)
+                && !string.Equals(_pendingBuffIdForCompletion, buffId, StringComparison.Ordinal))
+            {
+                error = $"pending review is for {_pendingBuffIdForCompletion}, not {buffId}";
+                return false;
+            }
+
+            return ApplyPendingReviewCompletion(fromAction: true, out error);
+        }
+
+        /// <summary>Repair/debug fallback после закрытия programmatic review без $action.</summary>
+        public void TryFallbackCompleteReviewAfterDialogue()
+        {
+            if (!HasPendingReviewCompletion)
+                return;
+
+            if (HarveyInteractionGuard.IsConsumed(out _))
+            {
+                _monitor.Log(
+                    "[StressTreatmentReview] Fallback complete skipped: HarveyStress action already consumed this cycle",
+                    LogLevel.Debug);
+                ClearPendingReview();
+                return;
+            }
+
+            if (!EnsurePipelineGuard(nameof(TryFallbackCompleteReviewAfterDialogue), requireDialogueBox: false))
+                return;
+
+            _monitor.Log(
+                "[StressTreatmentReview] ⚠️ Repair fallback: completing review without $action (legacy save/dialogue)",
+                LogLevel.Warn);
+
+            ApplyPendingReviewCompletion(fromAction: false, out _);
+        }
+
+        private bool ApplyPendingReviewCompletion(bool fromAction, out string error)
+        {
+            error = string.Empty;
+
             if (!string.IsNullOrEmpty(_pendingEpisodeIdForCompletion))
             {
-                if (!EnsurePipelineGuard(nameof(OnReviewDialogueClosed), requireDialogueBox: false))
-                    return;
-
                 var episodeId = _pendingEpisodeIdForCompletion;
                 var fallbackBuffId = _pendingBuffIdForCompletion;
                 _pendingEpisodeIdForCompletion = null;
                 _pendingBuffIdForCompletion = null;
 
                 _monitor.Log(
-                    $"[StressTreatmentReview] Финальное завершение TreatmentEpisode после реплики Харви: {episodeId}",
+                    $"[StressTreatmentReview] Complete review episode={episodeId} fromAction={fromAction}",
                     LogLevel.Info);
 
                 if (!_episodeService.CompleteTreatmentEpisode(episodeId)
                     && !string.IsNullOrEmpty(fallbackBuffId))
                 {
-                    _monitor.Log(
-                        $"[StressTreatmentReview] Episode complete failed — fallback legacy buff={fallbackBuffId}",
-                        LogLevel.Warn);
                     _treatmentService.CompleteTreatment(fallbackBuffId, "Лечение завершено.");
                 }
 
-                return;
+                return true;
             }
 
             if (string.IsNullOrEmpty(_pendingBuffIdForCompletion))
-                return;
-
-            if (!EnsurePipelineGuard(nameof(OnReviewDialogueClosed), requireDialogueBox: false))
-                return;
+            {
+                error = "no pending review";
+                return false;
+            }
 
             var buffId = _pendingBuffIdForCompletion;
             _pendingBuffIdForCompletion = null;
 
             _monitor.Log(
-                $"[StressTreatmentReview] Финальное завершение legacy лечения после реплики Харви: {buffId}",
+                $"[StressTreatmentReview] Complete legacy review buff={buffId} fromAction={fromAction}",
                 LogLevel.Info);
             _treatmentService.CompleteTreatment(buffId, "Лечение завершено.");
+            return true;
+        }
+
+        private bool TryArmPendingForBuff(string buffId)
+        {
+            var episode = _episodeService.GetTreatmentAwaitingReview();
+            if (episode != null)
+            {
+                var episodeBuff = ResolvePrimaryBuffId(episode);
+                if (!string.Equals(episodeBuff, buffId, StringComparison.Ordinal))
+                    return false;
+
+                _pendingEpisodeIdForCompletion = episode.EpisodeId;
+                return true;
+            }
+
+            var treatment = GetTreatmentAwaitingReview();
+            if (treatment == null || !string.Equals(treatment.BuffId, buffId, StringComparison.Ordinal))
+                return false;
+
+            _pendingBuffIdForCompletion = buffId;
+            return true;
         }
 
         public void ClearPendingReview()

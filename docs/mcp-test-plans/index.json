@@ -16,6 +16,7 @@
     "gotoro_forest_rescue": ["gotoro_rescue", "events", "environment"],
     "thunder_stabilization_relapse": ["thunder_relapse"],
     "social_anxiety_completion": ["social_anxiety_completion"],
+    "social_anxiety_injury_conflict": ["social_anxiety_injury_conflict"],
     "cp_events_mcp": ["events", "gotoro_rescue"],
     "environment_warp_weather_time": ["environment"],
     "social_friendship_topics": ["social_topics"],
@@ -41,6 +42,7 @@
   "manual_only_plans": [
     { "id": "thunder_relapse", "file": "thunder_relapse.json" },
     { "id": "social_anxiety_completion", "file": "social_anxiety_completion.json" },
+    { "id": "social_anxiety_injury_conflict", "file": "social_anxiety_injury_conflict.json" },
     { "id": "hud", "file": "hud.json" },
     { "id": "severity", "file": "severity.json" },
     { "id": "environment", "file": "environment.json" },

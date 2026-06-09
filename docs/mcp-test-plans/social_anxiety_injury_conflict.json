@@ -1,0 +1,28 @@
+{
+  "name": "social_anxiety_injury_conflict",
+  "description": "Social anxiety final review must not trigger injury treatment in the same Harvey click; injury starts only on next click via TreatmentNeeded $action.",
+  "tests": [
+    {
+      "id": "SOC-INJ-A",
+      "title": "Social review complete + untreated DeepCuts (yesterday) — single Harvey talk",
+      "steps": [
+        { "tool": "harvey_stress_clear_consumed_interaction", "arguments": {}, "expect": ["cleared"] },
+        { "tool": "harvey_stress_social_reset", "arguments": {}, "expect": [] },
+        { "tool": "harvey_stress_social_start", "arguments": {}, "expect": [] },
+        { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": ["ReadyToComplete"] },
+        { "tool": "injury_force_debuff", "arguments": { "buff_id": "buffDeepCuts" }, "expect": ["buffDeepCuts"] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Hospital", "x": 10, "y": 10 }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Hospital", "x": 11, "y": 10 }, "expect": [] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] },
+        { "tool": "stress_dialogue_advance", "arguments": { "steps": 5 }, "expect": [] },
+        { "tool": "harvey_stress_debug_state", "arguments": {}, "expect": ["Phase: None", "QuestActive: False"] },
+        { "tool": "injury_phase_list", "arguments": {}, "expect": ["buffDeepCuts", "TreatmentStarted=false"] },
+        { "tool": "mcp_wait_seconds", "arguments": { "seconds": 2 }, "expect": [] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] },
+        { "tool": "stress_dialogue_advance", "arguments": { "steps": 3 }, "expect": [] },
+        { "tool": "injury_phase_list", "arguments": {}, "expect": ["TreatmentStarted=true"] }
+      ],
+      "notes": "First click: only social review + HarveyStress_SocialAnxiety_Complete. Second click: HarveyMod_TreatmentNeeded_DeepCuts + HarveyOverhaulInjury_StartTreatment."
+    }
+  ]
+}
