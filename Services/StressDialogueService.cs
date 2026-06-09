@@ -921,6 +921,47 @@ namespace HarveyStressMeter.Services
 
 
 
+        /// <summary>
+        /// Programmatic review-диалог (Social Anxiety и др.) — не зависит от CP topic / daily dialogue limit.
+        /// </summary>
+        public bool TryShowProgrammaticReviewDialogue(string? preferredBuffId = null)
+        {
+            string? buffId;
+            string? dialogueText;
+
+            if (_reviewService.TryPrepareEpisodeReviewDialogue(out buffId, out dialogueText))
+            {
+                if (!string.IsNullOrEmpty(preferredBuffId))
+                    buffId = preferredBuffId;
+            }
+            else if (_reviewService.HasPendingReviewCompletion)
+            {
+                buffId = _reviewService.PendingBuffIdForCompletion
+                    ?? _reviewService.PendingEpisodeIdForCompletion
+                    ?? preferredBuffId
+                    ?? BuffIds.Social;
+                dialogueText = GetDialogueByKey(StressDialogueKeys.SocialAnxietyReview)
+                    ?? StressQuestCopy.ReviewDialogue;
+            }
+            else
+            {
+                return false;
+            }
+
+            if (string.Equals(buffId, BuffIds.Social, StringComparison.Ordinal))
+            {
+                dialogueText = GetDialogueByKey(StressDialogueKeys.SocialAnxietyReview)
+                    ?? dialogueText;
+            }
+
+            _activeStressDialogueMode = StressHarveyDialogueMode.Review;
+            _autoStartTreatmentAfterClose = false;
+            ShowStressDialogue(buffId!, dialogueText!);
+            return true;
+        }
+
+
+
         private void DisplayStressDialogue(NPC harvey, string buffId, string dialogueText, string? episodeId = null)
 
         {

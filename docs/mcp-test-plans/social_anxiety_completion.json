@@ -1,0 +1,111 @@
+{
+  "name": "social_anxiety_completion",
+  "description": "Social anxiety therapy: timer 60/60, programmatic Harvey follow-up (independent of daily dialogue / Custom Kisses).",
+  "tests": [
+    {
+      "id": "SOC-A",
+      "title": "Start quest, wait 60/60 without talking, talk to Harvey — quest completes",
+      "steps": [
+        { "tool": "harvey_stress_social_reset", "arguments": {}, "expect": ["Phase: None"] },
+        { "tool": "harvey_stress_social_start", "arguments": {}, "expect": ["Phase: TimerActive"] },
+        { "tool": "harvey_stress_social_set_timer", "arguments": { "seconds": 60 }, "expect": ["Phase: TimerCompleted"] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Town", "x": 50, "y": 50 }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town", "x": 51, "y": 50 }, "expect": [] },
+        { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": ["Phase: ReadyToComplete", "IsReadyToComplete: True"] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] },
+        { "tool": "stress_dialogue_advance", "arguments": { "steps": 5 }, "expect": [] },
+        { "tool": "harvey_stress_debug_state", "arguments": {}, "expect": ["Phase: None", "QuestActive: False"] }
+      ]
+    },
+    {
+      "id": "SOC-B",
+      "title": "Exhaust Harvey daily dialogues before 60/60, then complete via programmatic follow-up",
+      "steps": [
+        { "tool": "harvey_stress_social_reset", "arguments": {}, "expect": [] },
+        { "tool": "harvey_stress_social_start", "arguments": {}, "expect": [] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] },
+        { "tool": "stress_dialogue_advance", "arguments": { "steps": 8 }, "expect": [] },
+        { "tool": "harvey_stress_social_set_timer", "arguments": { "seconds": 60 }, "expect": ["TimerCompleted"] },
+        { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": ["ReadyToComplete"] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] },
+        { "tool": "stress_dialogue_advance", "arguments": { "steps": 5 }, "expect": [] },
+        { "tool": "harvey_stress_debug_state", "arguments": {}, "expect": ["Phase: None"] }
+      ],
+      "notes": "Vanilla Harvey lines may be exhausted; programmatic review must still open."
+    },
+    {
+      "id": "SOC-C",
+      "title": "Repeat B outside clinic (Town)",
+      "steps": [
+        { "tool": "mcp_warp", "arguments": { "location": "Town", "x": 50, "y": 50 }, "expect": [] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Town", "x": 50, "y": 50 }, "expect": [] },
+        { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": ["ReadyToComplete"] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] }
+      ]
+    },
+    {
+      "id": "SOC-D",
+      "title": "Repeat B in clinic (Hospital)",
+      "steps": [
+        { "tool": "mcp_warp", "arguments": { "location": "Hospital", "x": 10, "y": 10 }, "expect": [] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Hospital", "x": 10, "y": 10 }, "expect": [] },
+        { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": [] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] }
+      ]
+    },
+    {
+      "id": "SOC-E",
+      "title": "Dating/married tone — programmatic review uses tiered dialogue",
+      "steps": [
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "hearts": 10 }, "expect": [] },
+        { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": [] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] },
+        { "tool": "stress_list_responses", "arguments": {}, "expect": ["HasDialogueBox="] }
+      ],
+      "notes": "Set Relationship:Dating/Married manually if needed; dialogue key social_anxiety_review has dating/married lines."
+    },
+    {
+      "id": "SOC-F",
+      "title": "Custom Kisses priority — programmatic follow-up before kiss",
+      "steps": [
+        { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": ["ReadyToComplete"] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] },
+        { "tool": "stress_game_context", "arguments": {}, "expect": ["DialogueBox="] }
+      ],
+      "notes": "Requires Custom Kissing Mod installed; Harmony checkAction prefix must win."
+    },
+    {
+      "id": "SOC-G",
+      "title": "Save after 60/60, reload, click Harvey — ReadyToComplete persists",
+      "steps": [
+        { "tool": "harvey_stress_social_set_timer", "arguments": { "seconds": 60 }, "expect": [] },
+        { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": ["ReadyToComplete"] },
+        { "tool": "mcp_save_game", "arguments": {}, "expect": [] },
+        { "tool": "harvey_stress_debug_state", "arguments": {}, "expect": ["Phase: ReadyToComplete"] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] }
+      ]
+    },
+    {
+      "id": "SOC-H",
+      "title": "Next day after 60/60 — quest must not stuck",
+      "steps": [
+        { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": ["ReadyToComplete"] },
+        { "tool": "mcp_sleep", "arguments": {}, "expect": [] },
+        { "tool": "harvey_stress_debug_state", "arguments": {}, "expect": ["ReadyToComplete", "QuestActive: True"] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] }
+      ]
+    },
+    {
+      "id": "SOC-I",
+      "title": "Walk away after 60/60 — quest waits for follow-up, no silent reset",
+      "steps": [
+        { "tool": "harvey_stress_social_set_timer", "arguments": { "seconds": 60 }, "expect": ["TimerCompleted"] },
+        { "tool": "mcp_warp", "arguments": { "location": "FarmHouse", "x": 5, "y": 5 }, "expect": [] },
+        { "tool": "harvey_stress_debug_state", "arguments": {}, "expect": ["Phase: TimerCompleted", "QuestActive: True"] },
+        { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": ["ReadyToComplete"] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "FarmHouse", "x": 6, "y": 5 }, "expect": [] },
+        { "tool": "stress_talk_harvey", "arguments": {}, "expect": [] }
+      ]
+    }
+  ]
+}

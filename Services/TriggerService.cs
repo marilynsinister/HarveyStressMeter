@@ -26,6 +26,7 @@ namespace HarveyStressMeter.Services
         private readonly StateService _stateService;
         private readonly IMonitor _monitor;
         private EpisodeQuestProgressService? _episodeQuestProgressService;
+        private SocialAnxietyTherapyService? _socialAnxietyTherapyService;
 
         public TriggerService(SaveData data, BuffService buffService, QuestService questService, StateService stateService, TreatmentService treatmentService, IMonitor monitor)
         {
@@ -39,6 +40,9 @@ namespace HarveyStressMeter.Services
 
         public void SetEpisodeQuestProgressService(EpisodeQuestProgressService episodeQuestProgressService)
             => _episodeQuestProgressService = episodeQuestProgressService;
+
+        public void SetSocialAnxietyTherapyService(SocialAnxietyTherapyService socialAnxietyTherapyService)
+            => _socialAnxietyTherapyService = socialAnxietyTherapyService;
 
         /// <summary>После загрузки: перевести в review, если цели уже выполнены (старые сейвы).</summary>
         public void RepairStuckSocialTreatments()
@@ -69,6 +73,10 @@ namespace HarveyStressMeter.Services
 
             if (episodeId != null)
                 _treatmentService.MarkTreatmentReadyForReviewByEpisode(episodeId);
+            else if (buffId == BuffIds.Social)
+                _socialAnxietyTherapyService?.MarkReadyToComplete(
+                    treatment.Progress,
+                    treatment.Progress.GetSocialCompletionPath());
             else if (buffId != null)
                 _treatmentService.MarkTreatmentReadyForReview(buffId);
         }
@@ -126,7 +134,7 @@ namespace HarveyStressMeter.Services
                 $"[Social Quest] Условия выполнены ({completionPath}) — ожидание разговора с Харви",
                 LogLevel.Info);
 
-            _treatmentService.MarkTreatmentReadyForReview(BuffIds.Social);
+            _socialAnxietyTherapyService?.MarkReadyToComplete(socialTreatment.Progress, completionPath);
         }
 
         private void CheckSocialShutdownQuestCompleteTrigger()
@@ -207,6 +215,10 @@ namespace HarveyStressMeter.Services
                     break;
 
                 case BuffIds.Darkness:
+                    // Уровневая терапия темноты — отдельный прогресс в DarknessProgress / DarknessService.
+                    if (DarknessLegacyHelper.UsesLevelSystem(_data, _stateService))
+                        break;
+
                     bool night = Game1.timeOfDay >= 2000;
                     bool indoors = !(Game1.currentLocation?.IsOutdoors == true);
                     if (night && indoors)
@@ -655,7 +667,7 @@ namespace HarveyStressMeter.Services
                     UpdateQuestDescription(progress);
                     return true;
                 case 60:
-                    Game1.addHUDMessage(new HUDMessage("✅ Время с Харви: 60/60 сек!", HUDMessage.achievement_type));
+                    _socialAnxietyTherapyService?.OnTimerReachedSixty(progress);
                     UpdateQuestDescription(progress);
                     return true;
             }
@@ -666,7 +678,12 @@ namespace HarveyStressMeter.Services
         public void UpdateQuestDescription(TreatmentProgress progress)
         {
             if (IsAwaitingHarveyReview(QuestIds.Social))
+            {
+                _questService.UpdateQuest(
+                    QuestIds.Social,
+                    objective: SocialAnxietyTherapyCopy.ReadyForReviewObjective);
                 return;
+            }
 
             string progressText = GetProgressText(progress);
             const string intro =
@@ -703,6 +720,13 @@ namespace HarveyStressMeter.Services
                 return "✅ Задача выполнена! (5 разговоров)";
             }
 
+            if (timeWithHarvey >= SocialAnxietyTherapyService.HarveySecondsRequired
+                && _data.SocialAnxietyTherapy.Phase >= SocialAnxietyTherapyPhase.TimerCompleted)
+            {
+                return SocialAnxietyTherapyCopy.TimerCompletedQuestLine + "\n" +
+                       $"Поговорили с персонажами: {conversationsAfterQuest}/3 (или 5)";
+            }
+
             // ⭐ НОВОЕ: Показываем прогресс для обоих путей
             // Если выполнено условие с разговорами для варианта 1
             if (conversationsAfterQuest >= 3)
@@ -732,14 +756,14 @@ namespace HarveyStressMeter.Services
             if (progress.SocialTalksAfterQuest >= 3 && progress.SecondsNearHarvey >= 60)
             {
                 _monitor.Log("[Social Quest] Условия выполнены: 3 разговора + 60 сек с Харви", LogLevel.Info);
-                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Social);
+                _socialAnxietyTherapyService?.MarkReadyToComplete(progress, "path1");
                 return;
             }
 
             if (progress.SocialTalksAfterQuest >= 5)
             {
                 _monitor.Log("[Social Quest] Условия выполнены: 5 разговоров", LogLevel.Info);
-                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Social);
+                _socialAnxietyTherapyService?.MarkReadyToComplete(progress, "path2");
                 return;
             }
 

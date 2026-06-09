@@ -66,7 +66,9 @@ namespace HarveyStressMeter.Helpers
             sb.AppendLine(
                 $"SafeDarknessEveningsCompleted: {d.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired}");
             sb.AppendLine(
-                $"DarknessTherapyTodaySeconds: {d.SafeDarknessProgressToday}/{DarknessLegacyHelper.Step1SecondsPerEvening}");
+                $"DarknessSafeSecondsToday: {d.SafeDarknessProgressToday}/{DarknessLegacyHelper.Step1SecondsPerEvening}");
+            sb.AppendLine($"DarknessEveningCountedToday: {d.DarknessTherapyTodayCompleted}");
+            sb.AppendLine($"DarknessLastCountedDay: {d.DarknessTherapyLastCompletedDay}");
             sb.AppendLine($"DarknessTherapyTodayCompleted: {d.DarknessTherapyTodayCompleted}");
             sb.AppendLine($"DarknessTherapyLastCompletedDay: {d.DarknessTherapyLastCompletedDay}");
             sb.AppendLine($"LastSafeDarknessDate: {d.LastSafeDarknessDate?.ToString() ?? "(null)"}");
@@ -82,8 +84,10 @@ namespace HarveyStressMeter.Helpers
                 $"  DarknessTherapyTodaySeconds: {d.SafeDarknessProgressToday} ({minToday}/{DarknessLegacyHelper.Step1MinutesPerEvening} min)");
             sb.AppendLine(
                 $"  DarknessTherapyEveningsCompleted: {d.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired}");
-            sb.AppendLine($"  DarknessTherapyTodayCompleted: {d.DarknessTherapyTodayCompleted}");
-            sb.AppendLine($"  DarknessTherapyLastCompletedDay: {d.DarknessTherapyLastCompletedDay}");
+            sb.AppendLine($"  DarknessEveningCountedToday: {d.DarknessTherapyTodayCompleted}");
+            sb.AppendLine($"  DarknessLastCountedDay: {d.DarknessTherapyLastCompletedDay}");
+            sb.AppendLine(
+                $"  awaitingHarveyReview: {d.IsTherapyActive && d.TherapyStage == 1 && !d.CompletedStep1 && d.SafeDarknessEveningsCompleted >= DarknessLegacyHelper.Step1EveningsRequired}");
             sb.AppendLine($"  LastSafeDarknessDate: {d.LastSafeDarknessDate?.ToString() ?? "(null)"}");
             sb.AppendLine(
                 $"  {QuestIds.DarknessStep1}: {FormatQuestActive(questService, QuestIds.DarknessStep1)}");

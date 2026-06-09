@@ -3,53 +3,56 @@ namespace HarveyStressMeter.Helpers
     /// <summary>Игровые строки терапии темноты (HUD, квест, подсказки).</summary>
     public static class DarknessTherapyCopy
     {
+        public const int SecondsPerEvening = DarknessLegacyHelper.Step1SecondsPerEvening;
         public const int MinutesPerEvening = DarknessLegacyHelper.Step1MinutesPerEvening;
         public const int EveningsRequired = DarknessLegacyHelper.Step1EveningsRequired;
 
+        public const string Step1QuestTitle = "Терапия темноты";
+
         public static string Step1QuestObjectiveAwaitingHarvey(int required)
-            => $"Зачтённые вечера: {required}/{required}.\n" +
-               "Приди к Харви и поговори. Без этого я не переведу тебя на следующий шаг.";
+            => $"{Step1QuestTitle}\n" +
+               $"Вечера дома при мягком свете: {required}/{required}\n" +
+               "✅ Назначение выполнено.\n" +
+               "Поговорите с Харви.";
 
         public static string Step1QuestObjectiveTodayCredited(int evenings, int required)
-            => $"Зачтённые вечера: {evenings}/{required}.\n" +
-               "Сегодняшний вечер зачтён. Завтра после 20:00 — снова час дома при свете.";
+            => $"{Step1QuestTitle}\n" +
+               $"Вечера дома при мягком свете: {evenings}/{required}\n" +
+               "✅ Сегодняшний вечер зачтён.\n" +
+               "Продолжайте терапию в другой вечер.";
 
-        public static string Step1QuestObjectiveInProgress(int evenings, int required, int minutesToday)
-            => $"Зачтённые вечера: {evenings}/{required}.\n" +
-               $"Сегодня: {minutesToday}/{MinutesPerEvening} минут (после 20:00, дома при свете).\n" +
-               "Можно заниматься делами. Не уходи в ночь и не оставляй себя одну с паникой.";
+        public static string Step1QuestObjectiveInProgress(int evenings, int required, int secondsToday)
+            => $"{Step1QuestTitle}\n" +
+               $"Вечера дома при мягком свете: {evenings}/{required}\n" +
+               $"⬜ Сегодня: побыть дома при свете {FormatDailyRequirement()} после 20:00.\n" +
+               $"Прогресс сегодня: {secondsToday}/{SecondsPerEvening} сек.";
 
         public static string StartTherapyHud()
             => "Терапия началась. После восьми — час дома при свете. Не проверяй себя темнотой специально: мы лечим страх, а не спорим с ним.";
 
-        public static string TimerHudAtHome(int minutes)
-            => $"Терапия темноты: {minutes}/{MinutesPerEvening} минут";
+        public static string TimerHudAtHome(int secondsToday)
+            => $"Терапия темноты: {secondsToday}/{SecondsPerEvening} сек.";
 
-        public static string TimerHudAwayFromHome(int minutes)
-            => $"Терапия темноты: {minutes}/{MinutesPerEvening} минут. Вернись домой при свете — таймер идёт только там, после 20:00.";
+        public static string TimerHudAwayFromHome(int secondsToday)
+            => $"Терапия темноты: {secondsToday}/{SecondsPerEvening} сек. Вернись домой при свете — таймер идёт только там, после 20:00.";
 
         public static string TimerHintAtHome()
             => "Останься дома при свете. Можно заниматься делами — главное, не убегай в ночь.";
 
         public static string AllEveningsCreditedHud(int required)
             => required <= 1
-                ? "Вечер зачтён. Приди поговорить с Харви — я проверю, очень внимательно."
-                : $"Все {required} вечера за тобой. Приди поговорить с Харви — я проверю, очень внимательно.";
+                ? "✅ Все вечера зачтены. Поговорите с Харви."
+                : $"✅ Все {required} вечера зачтены. Поговорите с Харви.";
 
         public static string EveningCreditedHud(int evenings, int required)
         {
             if (evenings >= required)
                 return AllEveningsCreditedHud(required);
 
-            return evenings switch
-            {
-                1 =>
-                    $"Хорошо. Первый вечер зачтён (1/{required}). Ты не обязана побеждать страх сразу — достаточно не отдавать ему весь дом.",
-                2 when required >= 2 =>
-                    $"Второй вечер зачтён (2/{required}). Ты держишься. Завтра после восьми — снова час дома при свете.",
-                _ =>
-                    $"Вечер зачтён ({evenings}/{required}).",
-            };
+            return $"✅ Вечер терапии зачтён ({evenings}/{required})";
         }
+
+        private static string FormatDailyRequirement()
+            => $"{MinutesPerEvening} минут";
     }
 }

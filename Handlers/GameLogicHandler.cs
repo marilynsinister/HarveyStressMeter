@@ -36,6 +36,7 @@ namespace HarveyStressMeter.Handlers
         private readonly SocialExposureService _socialExposureService;
         private readonly StressGameplayEffectService _stressGameplayEffectService;
         private readonly EpisodeQuestProgressService? _episodeQuestProgressService;
+        private SocialAnxietyTherapyService? _socialAnxietyTherapyService;
 
         private string? _lastDialogueNpc;
         /// <summary>Один stress debuff за MenuChanged/DialogueBox cycle с Харви.</summary>
@@ -128,6 +129,9 @@ namespace HarveyStressMeter.Handlers
             _stressDialogueService.ClearPendingTreatment();
             _stressTreatmentReviewService.ClearPendingReview();
         }
+
+        public void SetSocialAnxietyTherapyService(SocialAnxietyTherapyService socialAnxietyTherapyService)
+            => _socialAnxietyTherapyService = socialAnxietyTherapyService;
 
         public void RepairStuckSocialTreatments()
             => _triggerService.RepairStuckSocialTreatments();
@@ -270,6 +274,9 @@ namespace HarveyStressMeter.Handlers
 
                 if (_thunderFlashbackService.State.IsActive)
                     _thunderFlashbackService.UpdateActiveFlashback(1);
+
+                if (Game1.isLightning)
+                    _thunderFlashbackService.UpdateRelapseMonitoring(Game1.timeOfDay);
 
                 _harveyFlashbackRescueService.Update(1);
 
@@ -557,6 +564,12 @@ namespace HarveyStressMeter.Handlers
                 _monitor.Log($"[Диалог] Обнаружен активный дебафф {buffId} без лечения.", LogLevel.Info);
 
                 _stressDialogueService.ShowStressDialogue(buffId!, dialogueText!);
+                if (string.Equals(buffId, BuffIds.Social, StringComparison.Ordinal)
+                    && _socialAnxietyTherapyService?.IsReadyToComplete == true)
+                {
+                    _socialAnxietyTherapyService.OnFollowupDialogueStarted();
+                }
+
                 _lastDialogueNpc = "Harvey";
                 _harveyStressDialogueCycleHandled = true;
                 return;
@@ -564,9 +577,19 @@ namespace HarveyStressMeter.Handlers
 
             if (_stressTreatmentReviewService.TryArmReviewCompletionOnHarveyTalk(out var reviewBuffId))
             {
-                _monitor.Log(
-                    $"[Диалог] Treatment review via CP topic (buff={reviewBuffId}) — vanilla dialogue, completion after close",
-                    LogLevel.Info);
+                if (string.Equals(reviewBuffId, BuffIds.Social, StringComparison.Ordinal))
+                {
+                    _monitor.Log(
+                        "[Диалог] Social review — CP topic path skipped (programmatic follow-up only)",
+                        LogLevel.Debug);
+                }
+                else
+                {
+                    _monitor.Log(
+                        $"[Диалог] Treatment review via CP topic (buff={reviewBuffId}) — vanilla dialogue, completion after close",
+                        LogLevel.Info);
+                }
+
                 _lastDialogueNpc = "Harvey";
                 _harveyStressDialogueCycleHandled = true;
                 return;
@@ -653,6 +676,8 @@ namespace HarveyStressMeter.Handlers
 
             // Финальное завершение лечения после programmatic review-диалога.
             _stressTreatmentReviewService.OnReviewDialogueClosed();
+
+            _socialAnxietyTherapyService?.OnQuestCompletedIfTreatmentFinished();
 
             _harveyCareTrustService.TryAwardSupportiveTalk();
 
@@ -1144,8 +1169,18 @@ namespace HarveyStressMeter.Handlers
             var socialTreatment = GetTreatmentByQuest(QuestIds.Social);
             if (socialTreatment?.Progress != null)
             {
-                socialTreatment.Progress.SocialTalksAfterQuest = 0;
-                socialTreatment.Progress.SecondsNearHarvey = 0;
+                if (socialTreatment.AwaitingHarveyReview
+                    || _data.SocialAnxietyTherapy.Phase >= SocialAnxietyTherapyPhase.ReadyToComplete)
+                {
+                    _monitor.Log(
+                        "[SocialAnxiety] Daily reset skipped — awaiting Harvey follow-up",
+                        LogLevel.Debug);
+                }
+                else
+                {
+                    socialTreatment.Progress.SocialTalksAfterQuest = 0;
+                    socialTreatment.Progress.SecondsNearHarvey = 0;
+                }
             }
 
             var socialShutdownTreatment = GetTreatmentByQuest(QuestIds.SocialShutdown);

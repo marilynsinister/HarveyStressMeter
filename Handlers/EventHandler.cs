@@ -28,6 +28,7 @@ namespace HarveyStressMeter.Handlers
         private readonly DarknessService _darknessService;
         private readonly DarknessRemissionService _darknessRemissionService;
         private readonly StressLoadService _stressLoadService;
+        private readonly SocialAnxietyTherapyService? _socialAnxietyTherapyService;
 
         public EventHandler(
             IMonitor monitor,
@@ -39,7 +40,8 @@ namespace HarveyStressMeter.Handlers
             UIHandler uiHandler,
             DarknessService darknessService,
             DarknessRemissionService darknessRemissionService,
-            StressLoadService stressLoadService)
+            StressLoadService stressLoadService,
+            SocialAnxietyTherapyService? socialAnxietyTherapyService = null)
         {
             _monitor = monitor;
             _helper = helper;
@@ -51,6 +53,7 @@ namespace HarveyStressMeter.Handlers
             _darknessService = darknessService;
             _darknessRemissionService = darknessRemissionService;
             _stressLoadService = stressLoadService;
+            _socialAnxietyTherapyService = socialAnxietyTherapyService;
         }
 
         public void SubscribeToEvents()
@@ -102,6 +105,7 @@ namespace HarveyStressMeter.Handlers
             _stressLoadService.SyncFromGameState();
             _gameLogicHandler.RepairStuckSocialTreatments();
             _gameLogicHandler.MigrateSocialExposure();
+            _socialAnxietyTherapyService?.RepairStateAfterLoad();
         }
 
         private void OnReturnedToTitle(object? s, ReturnedToTitleEventArgs e)
@@ -135,6 +139,7 @@ namespace HarveyStressMeter.Handlers
             
             _gameLogicHandler.CheckDayStartedStressTriggers();
             _stressLoadService.SyncFromGameState();
+            _socialAnxietyTherapyService?.OnDayStarted();
 
             _monitor.Log($"[OnDayStarted] New day initialized: active treatments={_data.StressState.ActiveTreatments.Count}, stressLoad={_stressLoadService.GetCurrentStressLoad()} ({_stressLoadService.GetSeverity()})", LogLevel.Info);
         }

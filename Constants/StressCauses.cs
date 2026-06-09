@@ -9,6 +9,8 @@ namespace HarveyStressMeter.Constants
         public const string NoSleep = "NoSleep";
         public const string TooCold = "TooCold";
         public const string Thunder = "Thunder";
+        public const string ThunderRelapse = "ThunderRelapse";
+        public const string ThunderSensitivity = "ThunderSensitivity";
         public const string Overwork = "Overwork";
         public const string Tired = "Tired";
         public const string Darkness = "Darkness";
@@ -28,6 +30,8 @@ namespace HarveyStressMeter.Constants
             [Overwork] = 20,
             [NoSleep] = 25,
             [Thunder] = 30,
+            [ThunderRelapse] = 15,
+            [ThunderSensitivity] = 10,
             [GotoroFlashback] = 50,
         };
 
@@ -70,7 +74,8 @@ namespace HarveyStressMeter.Constants
             => BaseWeights.GetValueOrDefault(causeId, 10);
 
         public static bool CanSelfResolve(string causeId) =>
-            causeId is Hunger or Tired or TooCold or Darkness or Social or Lonely;
+            causeId is Hunger or Tired or TooCold or Darkness or Social or Lonely
+                or ThunderRelapse or ThunderSensitivity;
 
         public static bool RequiresHarveyIfSevere(string causeId) =>
             causeId is NoSleep or Overwork or Thunder or GotoroFlashback;

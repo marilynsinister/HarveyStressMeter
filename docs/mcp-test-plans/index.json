@@ -14,6 +14,8 @@
     "harvey_care_trust": ["trust", "social_topics"],
     "safe_person_aura": ["safe_aura"],
     "gotoro_forest_rescue": ["gotoro_rescue", "events", "environment"],
+    "thunder_stabilization_relapse": ["thunder_relapse"],
+    "social_anxiety_completion": ["social_anxiety_completion"],
     "cp_events_mcp": ["events", "gotoro_rescue"],
     "environment_warp_weather_time": ["environment"],
     "social_friendship_topics": ["social_topics"],
@@ -37,6 +39,8 @@
     { "id": "daily_regression", "file": "daily_regression.json", "runner": true }
   ],
   "manual_only_plans": [
+    { "id": "thunder_relapse", "file": "thunder_relapse.json" },
+    { "id": "social_anxiety_completion", "file": "social_anxiety_completion.json" },
     { "id": "hud", "file": "hud.json" },
     { "id": "severity", "file": "severity.json" },
     { "id": "environment", "file": "environment.json" },
@@ -51,7 +55,10 @@
     "mcp_eat_item",
     "mcp_sleep",
     "mcp_save_game",
-    "mcp_reload_save"
+    "stress_thunder_debug",
+    "stress_thunder_force_relapse",
+    "stress_thunder_stabilize_harvey",
+    "stress_thunder_clear"
   ],
   "recommended_run_order": [
     "smoke",
@@ -67,6 +74,7 @@
     "safe_aura",
     "environment",
     "gotoro_rescue",
+    "thunder_relapse",
     "events",
     "negative",
     "quests",

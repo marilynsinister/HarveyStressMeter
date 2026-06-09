@@ -29,6 +29,7 @@ namespace HarveyStressMeter.Testing
         public HarveySafePersonAuraService SafeAuraService { get; init; } = null!;
         public TreatmentEpisodeService EpisodeService { get; init; } = null!;
         public GameLogicHandler GameLogicHandler { get; init; } = null!;
+        public ThunderFlashbackService? ThunderFlashbackService { get; init; }
     }
 
     internal enum TestStepStatus

@@ -29,5 +29,8 @@ namespace HarveyStressMeter.Constants
         public const string TrustRecoveryRepeated = "trust_recovery_repeated";
 
         public static string TrustRescueForTier(string tier) => $"trust_rescue_{tier}";
+
+        /// <summary>Финальная programmatic-реплика после терапии социальной тревожности.</summary>
+        public const string SocialAnxietyReview = "social_anxiety_review";
     }
 }

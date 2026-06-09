@@ -32,7 +32,8 @@ namespace HarveyStressMeter.Models
         public int SecondsNearHarvey { get; set; } = 0;      // гроза
         // ===== Темнота (Darkness) =====
         /// <summary>
-        /// Секунды, проведенные в помещении вечером при свете
+        /// Legacy: секунды в светлой локации (только buffStressDarkness без уровневой системы).
+        /// Шаг 1 уровневой терапии — DarknessProgress.SafeDarknessProgressToday / DarknessService.
         /// </summary>
         public int EveningInLightSeconds { get; set; } = 0;  // темнота
 

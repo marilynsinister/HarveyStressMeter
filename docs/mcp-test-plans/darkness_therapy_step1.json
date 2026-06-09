@@ -17,17 +17,17 @@
     },
     {
       "id": "TC-DARK-002",
-      "title": "30/60 в квесте",
+      "title": "1800/3600 сек в квесте",
       "steps": [
-        { "tool": "stress_darkness_add_minutes", "arguments": { "minutes": 30 }, "expect": ["todayMin=30/60"] },
-        { "tool": "stress_darkness_status", "arguments": {}, "expect": ["Сегодня: 30/60"] }
+        { "tool": "stress_darkness_add_minutes", "arguments": { "minutes": 30 }, "expect": ["secondsToday=1800/3600"] },
+        { "tool": "stress_darkness_status", "arguments": {}, "expect": ["Прогресс сегодня: 1800/3600"] }
       ]
     },
     {
       "id": "TC-DARK-003",
       "title": "Зачёт вечера 1/3",
       "steps": [
-        { "tool": "stress_darkness_complete_evening", "arguments": {}, "expect": ["evenings=1/3", "todayCompleted=True"] },
+        { "tool": "stress_darkness_complete_evening", "arguments": {}, "expect": ["completedEvenings=1/3", "eveningCountedToday=True", "Сегодняшний вечер зачтён"] },
         { "tool": "stress_darkness_complete_evening", "arguments": {}, "expect": ["evenings=1/3"] }
       ],
       "assertions": ["Второй complete_evening в тот же день не увеличивает evenings"]
@@ -38,7 +38,7 @@
       "steps": [
         { "tool": "stress_darkness_reset_therapy", "arguments": {}, "expect": [] },
         { "tool": "stress_darkness_step1_progress", "arguments": { "evenings": 3, "today": 0 }, "expect": ["evenings=3"] },
-        { "tool": "stress_darkness_status", "arguments": {}, "expect": ["Поговорите с Харви", "topicDarknessStep1ReadyForHarvey: active"] }
+        { "tool": "stress_darkness_status", "arguments": {}, "expect": ["Поговорите с Харви", "awaitingHarveyReview=True", "topicDarknessStep1ReadyForHarvey: active"] }
       ]
     }
   ]

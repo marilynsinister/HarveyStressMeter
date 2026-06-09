@@ -148,6 +148,11 @@ namespace HarveyStressMeter.Services
                     $"[SafeAura] Gotoro flashback stabilization +{shelterBonus}s shelter (Harvey nearby)",
                     LogLevel.Trace);
             }
+            else if (_thunderFlashbackService.State.IsStabilizedByHarveyToday)
+            {
+                _thunderFlashbackService.ResolveThunderRelapseCauses(includeSensitivity: false);
+                State.LastDecayAmount = 0;
+            }
             else if (_stressLoadService.GetCurrentStressLoad() > 0)
             {
                 _stressLoadService.DecayStress(reduction);
@@ -191,6 +196,11 @@ namespace HarveyStressMeter.Services
             sb.AppendLine($"lastAppliedAt: {FormatLastAppliedAt()}");
             sb.AppendLine($"lastDecayAmount: {State.LastDecayAmount}");
             sb.AppendLine($"lastProcessTime: {State.LastProcessTime}");
+            sb.AppendLine($"thunderStabilizedByHarveyToday: {_thunderFlashbackService.State.IsStabilizedByHarveyToday}");
+            sb.AppendLine($"harveyAnchorGraceUntil: {_thunderFlashbackService.State.HarveyAnchorGraceUntil}");
+            sb.AppendLine($"thunderRelapseCooldownUntil: {_thunderFlashbackService.State.ThunderRelapseCooldownUntil}");
+            sb.AppendLine($"leftHarveyAnchor: {_thunderFlashbackService.State.LeftHarveyAnchorAfterStabilization}");
+            sb.AppendLine($"relapseChanceNow: {_thunderFlashbackService.CalculateRelapseChancePercent()}");
             return sb.ToString().TrimEnd();
         }
 
@@ -255,6 +265,11 @@ namespace HarveyStressMeter.Services
             sb.AppendLine($"Max distance: {eval.EffectiveMaxDistanceTiles:F1} tiles");
             sb.AppendLine($"Stress decay from aura last tick: {State.LastDecayAmount}");
             sb.AppendLine($"Last process time: {State.LastProcessTime}");
+            sb.AppendLine($"Thunder stabilized by Harvey today: {_thunderFlashbackService.State.IsStabilizedByHarveyToday}");
+            sb.AppendLine($"Harvey anchor grace until: {_thunderFlashbackService.State.HarveyAnchorGraceUntil}");
+            sb.AppendLine($"Thunder relapse cooldown until: {_thunderFlashbackService.State.ThunderRelapseCooldownUntil}");
+            sb.AppendLine($"Left Harvey anchor: {_thunderFlashbackService.State.LeftHarveyAnchorAfterStabilization}");
+            sb.AppendLine($"Relapse chance now: {_thunderFlashbackService.CalculateRelapseChancePercent()}%");
             if (!string.IsNullOrEmpty(eval.BlockReason))
                 sb.AppendLine($"Block reason: {eval.BlockReason}");
             return sb.ToString().TrimEnd();

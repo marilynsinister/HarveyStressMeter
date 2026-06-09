@@ -26,6 +26,7 @@ namespace HarveyStressMeter.Services
         private TreatmentEpisodeService? _episodeService;
         private EpisodeQuestProgressService? _episodeQuestProgressService;
         private DarknessService? _darknessService;
+        private SocialAnxietyTherapyService? _socialAnxietyTherapyService;
 
         // Карты связей buff -> quest/topic/mail
         private static readonly Dictionary<string, string> BuffToQuest = new()
@@ -108,6 +109,9 @@ namespace HarveyStressMeter.Services
             _darknessService = darknessService;
             _monitor.Log("[TreatmentService] DarknessService установлен", LogLevel.Debug);
         }
+
+        public void SetSocialAnxietyTherapyService(SocialAnxietyTherapyService socialAnxietyTherapyService)
+            => _socialAnxietyTherapyService = socialAnxietyTherapyService;
 
         /// <summary>
         /// Применяет простой (незалоченный) бафф стресса при срабатывании триггера.
@@ -395,6 +399,7 @@ namespace HarveyStressMeter.Services
                 _monitor.Log($"[StartTreatment] TalkedUniqueToday (база): {treatment.Progress.TalkedUniqueToday}", LogLevel.Info);
                 _monitor.Log($"[StartTreatment] SocialTalksAfterQuest (счетчик): {treatment.Progress.SocialTalksAfterQuest}", LogLevel.Info);
                 _monitor.Log($"[StartTreatment] SecondsNearHarvey: {treatment.Progress.SecondsNearHarvey}", LogLevel.Info);
+                _socialAnxietyTherapyService?.StartTherapy();
             }
             else if (!string.IsNullOrEmpty(episodeId))
             {
@@ -486,7 +491,10 @@ namespace HarveyStressMeter.Services
         /// <summary>
         /// Условия назначения выполнены — квест и дебафф остаются до финального разговора с Харви.
         /// </summary>
-        public void MarkTreatmentReadyForReview(string buffId, string? optionalMessage = null)
+        public void MarkTreatmentReadyForReview(
+            string buffId,
+            string? optionalMessage = null,
+            bool skipConversationTopic = false)
         {
             var episode = _data.ActiveTreatmentEpisode;
             if (episode?.IsActiveEpisode() == true && _episodeService != null)
@@ -503,10 +511,13 @@ namespace HarveyStressMeter.Services
                 }
             }
 
-            MarkTreatmentReadyForReviewLegacy(buffId, optionalMessage);
+            MarkTreatmentReadyForReviewLegacy(buffId, optionalMessage, skipConversationTopic);
         }
 
-        private void MarkTreatmentReadyForReviewLegacy(string buffId, string? optionalMessage = null)
+        private void MarkTreatmentReadyForReviewLegacy(
+            string buffId,
+            string? optionalMessage = null,
+            bool skipConversationTopic = false)
         {
             var activeTreatment = _data.StressState.GetActiveTreatment(buffId);
             if (activeTreatment == null)
@@ -542,7 +553,7 @@ namespace HarveyStressMeter.Services
                 _questService.UpdateQuest(questId, objective: StressQuestCopy.ReadyForReviewObjective);
             }
 
-            if (TreatmentTopics.GetReadyForReviewTopic(buffId) is { } reviewTopic)
+            if (!skipConversationTopic && TreatmentTopics.GetReadyForReviewTopic(buffId) is { } reviewTopic)
                 ConversationHelper.AddTopic(reviewTopic, 2);
 
             var hudMessage = optionalMessage ?? StressQuestCopy.ReadyForReviewHud;
@@ -615,6 +626,9 @@ namespace HarveyStressMeter.Services
 
             ApplyEpisodeCompletionStressReduction(buffId);
             ApplyCompletionRewards(buffId, message);
+
+            if (buffId == BuffIds.Social)
+                _socialAnxietyTherapyService?.OnQuestCompleted();
 
             _monitor.Log($"[CompleteTreatment] Legacy завершение для {buffId}", LogLevel.Info);
         }

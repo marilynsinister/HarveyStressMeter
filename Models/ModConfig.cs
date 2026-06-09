@@ -111,6 +111,15 @@ namespace HarveyStressMeter.Models
 
         public int GotoroForestShelterBonusSeconds { get; set; } = 30;
 
+        /// <summary>Grace period (игровые минуты) после стабилизации Харви — relapse подавлен.</summary>
+        public int HarveyStabilizationGraceMinutes { get; set; } = 120;
+
+        /// <summary>Cooldown (игровые минуты) между проверками thunder relapse.</summary>
+        public int ThunderRelapseCooldownMinutes { get; set; } = 60;
+
+        /// <summary>Дней скрытой чувствительности к грозе после помощи Харви.</summary>
+        public int ThunderSensitivityDaysAfterHarveyCare { get; set; } = 3;
+
         // --- Harvey Gotoro forest rescue ---
 
         public bool EnableHarveyFlashbackRescue { get; set; } = true;

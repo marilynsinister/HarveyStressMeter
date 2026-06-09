@@ -162,6 +162,11 @@ namespace HarveyStressMeter.Helpers
                 target.HarveySafePersonAura,
                 source.HarveySafePersonAura ?? new HarveySafePersonAuraState());
 
+            target.SocialAnxietyTherapy ??= new SocialAnxietyTherapyState();
+            CopySocialAnxietyTherapyInto(
+                target.SocialAnxietyTherapy,
+                source.SocialAnxietyTherapy ?? new SocialAnxietyTherapyState());
+
             target.ActiveTreatmentEpisode = CloneTreatmentEpisodeState(source.ActiveTreatmentEpisode);
             CopyEpisodeImmunityInto(target, source);
 
@@ -200,6 +205,7 @@ namespace HarveyStressMeter.Helpers
             target.ActiveTreatmentEpisode = null;
             target.EpisodeImmunityUntil = new Dictionary<string, SDate>();
             target.SocialExposure = new SocialExposureState();
+            target.SocialAnxietyTherapy = new SocialAnxietyTherapyState();
 
 #pragma warning disable CS0618
             target.ActiveLockedDebuffs = new Dictionary<string, string>();
@@ -362,6 +368,16 @@ namespace HarveyStressMeter.Helpers
             target.LightningFrightIntensity = source.LightningFrightIntensity;
             target.IsGotoroFlashback = source.IsGotoroFlashback;
             target.DeferredGotoroShelterSeconds = source.DeferredGotoroShelterSeconds;
+            target.IsStabilizedByHarveyToday = source.IsStabilizedByHarveyToday;
+            target.StabilizedByHarveyAtTime = source.StabilizedByHarveyAtTime;
+            target.HarveyAnchorGraceUntil = source.HarveyAnchorGraceUntil;
+            target.ThunderRelapseCooldownUntil = source.ThunderRelapseCooldownUntil;
+            target.LeftHarveyAnchorAfterStabilization = source.LeftHarveyAnchorAfterStabilization;
+            target.WasPrimaryFlashbackTriggeredToday = source.WasPrimaryFlashbackTriggeredToday;
+            target.WasRelapseTriggeredToday = source.WasRelapseTriggeredToday;
+            target.ThunderSensitivityDays = source.ThunderSensitivityDays;
+            target.LastRelapseTime = source.LastRelapseTime;
+            target.StabilizedByHarveyLocation = source.StabilizedByHarveyLocation;
         }
 
         private static void CopyHarveyCareTrustInto(HarveyCareTrustState target, HarveyCareTrustState source)
@@ -518,6 +534,15 @@ namespace HarveyStressMeter.Helpers
 
             foreach (var (key, value) in source)
                 target[key] = value;
+        }
+
+        private static void CopySocialAnxietyTherapyInto(SocialAnxietyTherapyState target, SocialAnxietyTherapyState source)
+        {
+            target.Phase = source.Phase;
+            target.TimerCompletedOn = source.TimerCompletedOn;
+            target.ReadyToCompleteOn = source.ReadyToCompleteOn;
+            target.TimerSecondsAtCompletion = source.TimerSecondsAtCompletion;
+            target.CompletionPath = source.CompletionPath ?? "";
         }
 
         private static void CopyTreatmentProgressDictionary(

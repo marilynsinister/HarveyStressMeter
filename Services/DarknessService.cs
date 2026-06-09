@@ -28,7 +28,7 @@ namespace HarveyStressMeter.Services
         private float _step1ElapsedMs;
         private bool _step1WasProgressing;
         private bool _step1WasAwayFromHome;
-        private int _step1LastHudMinuteDisplayed = -1;
+        private int _step1LastHudSecondsDisplayed = -1;
         private bool _step1EveningCreditedHudShown;
         private bool _step1AllEveningsHudShown;
         private bool _step1HadReadyTopicAtTalkStart;
@@ -848,41 +848,75 @@ namespace HarveyStressMeter.Services
             _data.Darkness.DarknessTherapyTodayCompleted = false;
             _data.Darkness.LastSafeDarknessDate = today;
             ResetStep1HudFlags();
-            _monitor.Log("[DarknessStep1] Новый игровой день — сброс прогресса «сегодня»", LogLevel.Debug);
+            _monitor.Log("[DarknessStep1] Новый игровой день — сброс secondsToday и DarknessEveningCountedToday", LogLevel.Debug);
 
             if (refreshJournalOnDayChange)
+            {
                 RefreshTherapyQuestJournal(1);
+                _monitor.Log("[DarknessStep1] Quest journal refreshed after day change", LogLevel.Debug);
+            }
         }
 
         private void IncrementStep1ProgressSecond()
         {
-            if (IsStep1TodayCredited() || IsStep1TimerComplete())
+            if (IsStep1TodayCredited())
                 return;
+
+            if (IsStep1TimerComplete())
+            {
+                CompleteDarknessTherapyEvening();
+                return;
+            }
 
             int after = _data.Darkness.SafeDarknessProgressToday + 1;
             _data.Darkness.SafeDarknessProgressToday = after;
 
-            int displayMinute = Math.Min(
-                DarknessLegacyHelper.Step1MinutesPerEvening,
-                after / 60);
+            _monitor.Log(
+                $"[DarknessStep1] timer +1 → {after}/{DarknessLegacyHelper.Step1SecondsPerEvening} sec",
+                LogLevel.Trace);
 
-            if (displayMinute != _step1LastHudMinuteDisplayed)
+            RefreshTherapyQuestJournal(1);
+
+            int displaySeconds = GetStep1DisplaySecondsToday();
+            if (displaySeconds != _step1LastHudSecondsDisplayed)
             {
-                _step1LastHudMinuteDisplayed = displayMinute;
-                RefreshTherapyQuestJournal(1);
-                if (displayMinute > 0 && displayMinute % 15 == 0)
+                _step1LastHudSecondsDisplayed = displaySeconds;
+                if (displaySeconds > 0 && displaySeconds % 900 == 0)
                     ShowStep1TimerHud(atHome: true);
             }
 
             if (after >= DarknessLegacyHelper.Step1SecondsPerEvening)
-                CreditStep1EveningSegment();
+            {
+                _monitor.Log(
+                    $"[DarknessStep1] daily timer reached {after}/{DarknessLegacyHelper.Step1SecondsPerEvening} sec — crediting evening",
+                    LogLevel.Info);
+                CompleteDarknessTherapyEvening();
+            }
         }
 
-        private void CreditStep1EveningSegment()
+        /// <summary>
+        /// Зачесть один вечер терапии (не более одного раза за игровой день).
+        /// </summary>
+        private void CompleteDarknessTherapyEvening()
         {
             int todayDay = SDate.Now().DaysSinceStart;
-            if (_data.Darkness.DarknessTherapyLastCompletedDay == todayDay)
+            if (IsStep1TodayCredited())
+            {
+                _monitor.Log(
+                    $"[DarknessStep1] Повторный зачёт вечера заблокирован — DarknessEveningCountedToday=true (day={todayDay})",
+                    LogLevel.Debug);
+                RefreshTherapyQuestJournal(1);
                 return;
+            }
+
+            if (_data.Darkness.DarknessTherapyLastCompletedDay == todayDay)
+            {
+                _monitor.Log(
+                    $"[DarknessStep1] Повторный зачёт вечера заблокирован — DarknessLastCountedDay={todayDay}",
+                    LogLevel.Debug);
+                RefreshTherapyQuestJournal(1);
+                return;
+            }
 
             _data.Darkness.DarknessTherapyTodayCompleted = true;
             _data.Darkness.DarknessTherapyLastCompletedDay = todayDay;
@@ -894,9 +928,14 @@ namespace HarveyStressMeter.Services
             RefreshTherapyQuestJournal(1);
             LogStep1ProgressChange(force: true);
 
+            _monitor.Log(
+                $"[DarknessStep1] ✅ Вечер зачтён: evenings={evenings}/{Step1EveningsRequired}, day={todayDay}",
+                LogLevel.Info);
+
             if (!_step1EveningCreditedHudShown)
             {
                 _step1EveningCreditedHudShown = true;
+                Game1.playSound("newArtifact");
                 Game1.addHUDMessage(new HUDMessage(
                     DarknessTherapyCopy.EveningCreditedHud(evenings, Step1EveningsRequired),
                     HUDMessage.achievement_type));
@@ -913,9 +952,14 @@ namespace HarveyStressMeter.Services
 
             RefreshTherapyQuestJournal(1);
 
+            _monitor.Log(
+                $"[DarknessStep1] Терапия готова к разговору с Харви — evenings={_data.Darkness.SafeDarknessEveningsCompleted}/{Step1EveningsRequired}, topic={DarknessLegacyHelper.Step1ReadyForHarveyTopic}",
+                LogLevel.Info);
+
             if (!_step1AllEveningsHudShown)
             {
                 _step1AllEveningsHudShown = true;
+                Game1.playSound("questcomplete");
                 Game1.addHUDMessage(new HUDMessage(
                     DarknessTherapyCopy.AllEveningsCreditedHud(Step1EveningsRequired),
                     HUDMessage.achievement_type));
@@ -952,14 +996,14 @@ namespace HarveyStressMeter.Services
 
         private void ShowStep1TimerHud(bool atHome)
         {
-            int minutes = GetStep1DisplayMinutesToday();
+            int seconds = GetStep1DisplaySecondsToday();
             string line = atHome
-                ? DarknessTherapyCopy.TimerHudAtHome(minutes)
-                : DarknessTherapyCopy.TimerHudAwayFromHome(minutes);
+                ? DarknessTherapyCopy.TimerHudAtHome(seconds)
+                : DarknessTherapyCopy.TimerHudAwayFromHome(seconds);
 
             Game1.addHUDMessage(new HUDMessage(line, HUDMessage.newQuest_type));
 
-            if (atHome && minutes == 0 && !_step1WasProgressing)
+            if (atHome && seconds == 0 && !_step1WasProgressing)
             {
                 Game1.addHUDMessage(new HUDMessage(
                     DarknessTherapyCopy.TimerHintAtHome(),
@@ -969,24 +1013,24 @@ namespace HarveyStressMeter.Services
 
         private void TryRefreshStep1TimerHudPeriodic(bool atHome)
         {
-            int minutes = GetStep1DisplayMinutesToday();
-            if (minutes <= 0 || minutes == _step1LastHudMinuteDisplayed)
+            int seconds = GetStep1DisplaySecondsToday();
+            if (seconds <= 0 || seconds == _step1LastHudSecondsDisplayed)
                 return;
 
-            if (minutes % 10 != 0)
+            if (seconds % 600 != 0)
                 return;
 
-            _step1LastHudMinuteDisplayed = minutes;
+            _step1LastHudSecondsDisplayed = seconds;
             ShowStep1TimerHud(atHome);
         }
 
-        private int GetStep1DisplayMinutesToday()
-        {
-            int seconds = Math.Min(
+        private int GetStep1DisplaySecondsToday()
+            => Math.Min(
                 _data.Darkness.SafeDarknessProgressToday,
                 DarknessLegacyHelper.Step1SecondsPerEvening);
-            return seconds / 60;
-        }
+
+        private int GetStep1DisplayMinutesToday()
+            => GetStep1DisplaySecondsToday() / 60;
 
         private void LogStep1ProgressChange(bool force = false)
         {
@@ -1003,7 +1047,7 @@ namespace HarveyStressMeter.Services
 
         private void ResetStep1HudFlags()
         {
-            _step1LastHudMinuteDisplayed = -1;
+            _step1LastHudSecondsDisplayed = -1;
             _step1EveningCreditedHudShown = false;
             _step1AllEveningsHudShown = false;
             _step1WasAwayFromHome = false;
@@ -1372,15 +1416,20 @@ namespace HarveyStressMeter.Services
 
             var questId = GetStepQuestId(stage);
 
-            if (!string.IsNullOrEmpty(questId))
-                _questService.UpdateQuest(questId, objective: objective);
+            if (string.IsNullOrEmpty(questId))
+                return;
+
+            _questService.UpdateQuest(questId, objective: objective);
+            _monitor.Log(
+                $"[DarknessStep1] Quest journal updated: questId={questId}, objective=\"{objective.Replace('\n', '|')}\"",
+                LogLevel.Trace);
         }
 
         private string BuildStep1ObjectiveForInstance()
         {
             var d = _data.Darkness;
             int evenings = d.SafeDarknessEveningsCompleted;
-            int minToday = GetStep1DisplayMinutesToday();
+            int secondsToday = GetStep1DisplaySecondsToday();
 
             int required = Step1EveningsRequired;
 
@@ -1390,7 +1439,7 @@ namespace HarveyStressMeter.Services
             if (IsStep1TodayCredited())
                 return DarknessTherapyCopy.Step1QuestObjectiveTodayCredited(evenings, required);
 
-            return DarknessTherapyCopy.Step1QuestObjectiveInProgress(evenings, required, minToday);
+            return DarknessTherapyCopy.Step1QuestObjectiveInProgress(evenings, required, secondsToday);
         }
 
         private string BuildStep2ObjectiveForInstance()
@@ -1492,11 +1541,18 @@ namespace HarveyStressMeter.Services
         public string BuildStep1DebugStatusLine()
         {
             var d = _data.Darkness;
+            bool awaitingHarvey = IsStep1AwaitingHarveyTalk();
+            var questId = QuestIds.DarknessStep1;
+            var objective = DarknessLegacyHelper.GetStepQuestCurrentObjective(1)?.Replace('\n', '|') ?? "(n/a)";
+
             return
-                $"active={d.IsTherapyActive} stage={d.TherapyStage} evenings={d.SafeDarknessEveningsCompleted}/{DarknessLegacyHelper.Step1EveningsRequired} " +
-                $"todaySec={d.SafeDarknessProgressToday} todayMin={GetStep1DisplayMinutesToday()}/{DarknessLegacyHelper.Step1MinutesPerEvening} " +
-                $"todayCompleted={d.DarknessTherapyTodayCompleted} lastCompletedDay={d.DarknessTherapyLastCompletedDay} " +
-                $"objective={DarknessLegacyHelper.GetStepQuestCurrentObjective(1) ?? "(n/a)"}";
+                $"questId={questId} activeEpisode={(d.IsTherapyActive ? "DarknessStep1" : "(none)")} " +
+                $"active={d.IsTherapyActive} stage={d.TherapyStage} " +
+                $"secondsToday={GetStep1DisplaySecondsToday()}/{DarknessLegacyHelper.Step1SecondsPerEvening} " +
+                $"completedEvenings={d.SafeDarknessEveningsCompleted}/{Step1EveningsRequired} " +
+                $"eveningCountedToday={IsStep1TodayCredited()} lastCountedDay={d.DarknessTherapyLastCompletedDay} " +
+                $"awaitingHarveyReview={awaitingHarvey} topicReady={ConversationHelper.HasTopic(DarknessLegacyHelper.Step1ReadyForHarveyTopic)} " +
+                $"objective={objective}";
         }
 
         public bool ApplyDebugAddStep1Minutes(int minutes)
@@ -1528,7 +1584,7 @@ namespace HarveyStressMeter.Services
             if (_data.Darkness.SafeDarknessProgressToday >= DarknessLegacyHelper.Step1SecondsPerEvening
                 && !IsStep1TodayCredited()
                 && CanCreditAnotherEveningToday())
-                CreditStep1EveningSegment();
+                CompleteDarknessTherapyEvening();
 
             var after = BuildStep1DebugStatusLine();
             _monitor.Log($"[DarknessService] add_minutes +{minutes}: before [{before}] after [{after}]", LogLevel.Info);
@@ -1545,7 +1601,7 @@ namespace HarveyStressMeter.Services
                 return false;
 
             _data.Darkness.SafeDarknessProgressToday = DarknessLegacyHelper.Step1SecondsPerEvening;
-            CreditStep1EveningSegment();
+            CompleteDarknessTherapyEvening();
             var after = BuildStep1DebugStatusLine();
             _monitor.Log($"[DarknessService] complete_evening: before [{before}] after [{after}]", LogLevel.Info);
             return true;

@@ -76,10 +76,31 @@ namespace HarveyStressMeter.Models
             set => SafeDarknessEveningsCompleted = value;
         }
 
+        /// <summary>Секунды текущего вечера (alias для SaveData / debug).</summary>
+        public int DarknessSafeSecondsToday
+        {
+            get => SafeDarknessProgressToday;
+            set => SafeDarknessProgressToday = value;
+        }
+
         public int DarknessTherapyTodaySeconds
         {
             get => SafeDarknessProgressToday;
             set => SafeDarknessProgressToday = value;
+        }
+
+        /// <summary>Сегодняшний вечер уже зачтён (alias).</summary>
+        public bool DarknessEveningCountedToday
+        {
+            get => DarknessTherapyTodayCompleted;
+            set => DarknessTherapyTodayCompleted = value;
+        }
+
+        /// <summary>DaysSinceStart последнего зачтённого вечера (alias).</summary>
+        public int DarknessLastCountedDay
+        {
+            get => DarknessTherapyLastCompletedDay;
+            set => DarknessTherapyLastCompletedDay = value;
         }
         
         /// <summary>

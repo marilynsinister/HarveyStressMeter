@@ -48,6 +48,8 @@ namespace HarveyStressMeter.Testing
         private readonly DarknessService _darknessService;
         private readonly DarknessRemissionService _darknessRemissionService;
         private readonly SocialExposureService _socialExposureService;
+        private readonly ThunderFlashbackService _thunderFlashbackService;
+        private readonly SocialAnxietyTherapyService? _socialAnxietyTherapyService;
 
         public StressMcpToolHandler(
             IMonitor monitor,
@@ -67,7 +69,9 @@ namespace HarveyStressMeter.Testing
             GameLogicHandler gameLogicHandler,
             DarknessService darknessService,
             DarknessRemissionService darknessRemissionService,
-            SocialExposureService socialExposureService)
+            SocialExposureService socialExposureService,
+            ThunderFlashbackService thunderFlashbackService,
+            SocialAnxietyTherapyService? socialAnxietyTherapyService = null)
         {
             _monitor = monitor;
             _data = data;
@@ -87,6 +91,8 @@ namespace HarveyStressMeter.Testing
             _darknessService = darknessService;
             _darknessRemissionService = darknessRemissionService;
             _socialExposureService = socialExposureService;
+            _thunderFlashbackService = thunderFlashbackService;
+            _socialAnxietyTherapyService = socialAnxietyTherapyService;
         }
 
         public string Execute(string toolName, JsonElement? arguments)
@@ -137,6 +143,10 @@ namespace HarveyStressMeter.Testing
                 "stress_rescue_evaluate" => McpRescueTools.RescueEvaluate(_harveyFlashbackRescueService, arguments),
                 "stress_rescue_force" => McpRescueTools.RescueForce(_harveyFlashbackRescueService, arguments),
                 "stress_rescue_clear" => McpRescueTools.RescueClear(_harveyFlashbackRescueService),
+                "stress_thunder_debug" => McpThunderTools.ThunderDebug(_thunderFlashbackService, _stressLoadService),
+                "stress_thunder_force_relapse" => McpThunderTools.ThunderForceRelapse(_thunderFlashbackService, arguments),
+                "stress_thunder_stabilize_harvey" => McpThunderTools.ThunderStabilizeHarvey(_thunderFlashbackService, arguments),
+                "stress_thunder_clear" => McpThunderTools.ThunderClear(_thunderFlashbackService),
                 "stress_safe_aura_status" => McpSafeAuraTools.SafeAuraStatus(_harveySafePersonAuraService),
                 "stress_safe_aura_force_tick" => McpSafeAuraTools.SafeAuraForceTick(_harveySafePersonAuraService),
                 "stress_hud_snapshot" => McpHudTools.HudSnapshot(_stressMeterHudService),
@@ -171,6 +181,25 @@ namespace HarveyStressMeter.Testing
                 "stress_social_set" => McpSocialExposureTools.SocialSet(_socialExposureService, arguments),
                 "stress_social_add" => McpSocialExposureTools.SocialAdd(_socialExposureService, arguments),
                 "stress_social_reset" => McpSocialExposureTools.SocialReset(_socialExposureService),
+                "harvey_stress_social_start" => _socialAnxietyTherapyService == null
+                    ? "Error: SocialAnxietyTherapyService unavailable."
+                    : McpSocialAnxietyTools.SocialStart(
+                        _socialAnxietyTherapyService, _treatmentService, _stateService),
+                "harvey_stress_social_set_timer" => _socialAnxietyTherapyService == null
+                    ? "Error: SocialAnxietyTherapyService unavailable."
+                    : McpSocialAnxietyTools.SocialSetTimer(_socialAnxietyTherapyService, arguments),
+                "harvey_stress_social_ready" => _socialAnxietyTherapyService == null
+                    ? "Error: SocialAnxietyTherapyService unavailable."
+                    : McpSocialAnxietyTools.SocialReady(_socialAnxietyTherapyService),
+                "harvey_stress_social_complete" => _socialAnxietyTherapyService == null
+                    ? "Error: SocialAnxietyTherapyService unavailable."
+                    : McpSocialAnxietyTools.SocialComplete(_socialAnxietyTherapyService),
+                "harvey_stress_social_reset" => _socialAnxietyTherapyService == null
+                    ? "Error: SocialAnxietyTherapyService unavailable."
+                    : McpSocialAnxietyTools.SocialReset(_socialAnxietyTherapyService),
+                "harvey_stress_debug_state" => _socialAnxietyTherapyService == null
+                    ? "Error: SocialAnxietyTherapyService unavailable."
+                    : McpSocialAnxietyTools.SocialDebugState(_socialAnxietyTherapyService),
                 "mcp_event_snapshot" => McpEventTools.EventSnapshot(),
                 "mcp_start_event" => McpEventTools.StartEvent(_monitor, arguments),
                 "mcp_end_event" => McpEventTools.EndEvent(arguments),
@@ -205,6 +234,7 @@ namespace HarveyStressMeter.Testing
             SafeAuraService = _harveySafePersonAuraService,
             EpisodeService = _treatmentEpisodeService,
             GameLogicHandler = _gameLogicHandler,
+            ThunderFlashbackService = _thunderFlashbackService,
         };
 
         private string? EventBlockMessage(string operation)

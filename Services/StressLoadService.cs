@@ -502,6 +502,10 @@ namespace HarveyStressMeter.Services
 
             if (active.Any(c => c.CauseId == StressCauses.Thunder) && Game1.isLightning)
                 load += 15;
+            else if (active.Any(c => c.CauseId == StressCauses.ThunderRelapse) && Game1.isLightning)
+                load += 8;
+            else if (active.Any(c => c.CauseId == StressCauses.ThunderSensitivity) && Game1.isLightning)
+                load += 5;
 
             return load;
         }

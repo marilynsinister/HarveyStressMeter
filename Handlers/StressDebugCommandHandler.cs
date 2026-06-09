@@ -41,6 +41,7 @@ namespace HarveyStressMeter.Handlers
         private readonly DarknessService _darknessService;
         private readonly DarknessRemissionService _darknessRemissionService;
         private readonly SocialExposureService _socialExposureService;
+        private readonly SocialAnxietyTherapyService? _socialAnxietyTherapyService;
 
         private bool _pendingTalkHarveyWarp = true;
 
@@ -78,7 +79,8 @@ namespace HarveyStressMeter.Handlers
             StressGameplayEffectService stressGameplayEffectService,
             DarknessService darknessService,
             DarknessRemissionService darknessRemissionService,
-            SocialExposureService socialExposureService)
+            SocialExposureService socialExposureService,
+            SocialAnxietyTherapyService? socialAnxietyTherapyService = null)
         {
             _monitor = monitor;
             _helper = helper;
@@ -101,6 +103,7 @@ namespace HarveyStressMeter.Handlers
             _darknessService = darknessService;
             _darknessRemissionService = darknessRemissionService;
             _socialExposureService = socialExposureService;
+            _socialAnxietyTherapyService = socialAnxietyTherapyService;
         }
 
         public void RegisterCommands()
@@ -110,6 +113,7 @@ namespace HarveyStressMeter.Handlers
             RegisterStressTreatmentCommands();
             RegisterDarknessDebugCommands();
             RegisterSocialExposureDebugCommands();
+            RegisterSocialAnxietyDebugCommands();
 
             _helper.ConsoleCommands.Add(
                 "hs.test.add-stress",
@@ -244,6 +248,22 @@ namespace HarveyStressMeter.Handlers
                 "DEV/TEST: reset thunder flashback state.",
                 (_, __) => ForceFlashbackReset());
             _helper.ConsoleCommands.Add(
+                "stress_thunder_debug",
+                "DEV/TEST: thunder stabilization / relapse snapshot.",
+                (_, __) => StressThunderDebug());
+            _helper.ConsoleCommands.Add(
+                "stress_thunder_force_relapse",
+                "DEV/TEST: force TryRollThunderRelapse(ignoreChance: true).",
+                (_, __) => StressThunderForceRelapse());
+            _helper.ConsoleCommands.Add(
+                "stress_thunder_stabilize_harvey",
+                "DEV/TEST: apply StabilizeWithHarvey. Usage: stress_thunder_stabilize_harvey [decay] [graceMinutes]",
+                StressThunderStabilizeHarvey);
+            _helper.ConsoleCommands.Add(
+                "stress_thunder_clear",
+                "DEV/TEST: reset thunder/relapse/sensitivity state.",
+                (_, __) => StressThunderClear());
+            _helper.ConsoleCommands.Add(
                 "stress_rescue_check",
                 "DEV/TEST: evaluate Harvey forest rescue conditions.",
                 (_, __) => StressRescueCheck());
@@ -283,6 +303,102 @@ namespace HarveyStressMeter.Handlers
                 "stress_force_remove_quest",
                 "DEV/TEST: remove treatment quest from journal (state kept). Usage: stress_force_remove_quest <buffId>",
                 StressForceRemoveQuest);
+        }
+
+        private void RegisterSocialAnxietyDebugCommands()
+        {
+            _helper.ConsoleCommands.Add(
+                "harvey_stress_social_start",
+                "DEV/TEST: start Social anxiety treatment + therapy state.",
+                (_, __) => HarveyStressSocialStart());
+            _helper.ConsoleCommands.Add(
+                "harvey_stress_social_set_timer",
+                "DEV/TEST: set Harvey timer seconds. Usage: harvey_stress_social_set_timer <seconds>",
+                HarveyStressSocialSetTimer);
+            _helper.ConsoleCommands.Add(
+                "harvey_stress_social_ready",
+                "DEV/TEST: force ReadyToComplete for Social anxiety quest.",
+                (_, __) => HarveyStressSocialReady());
+            _helper.ConsoleCommands.Add(
+                "harvey_stress_social_complete",
+                "DEV/TEST: force complete Social anxiety treatment.",
+                (_, __) => HarveyStressSocialComplete());
+            _helper.ConsoleCommands.Add(
+                "harvey_stress_social_reset",
+                "DEV/TEST: reset Social anxiety therapy save state.",
+                (_, __) => HarveyStressSocialReset());
+            _helper.ConsoleCommands.Add(
+                "harvey_stress_debug_state",
+                "DEV/TEST: dump Social anxiety therapy debug snapshot.",
+                (_, __) => HarveyStressSocialDebugState());
+        }
+
+        private void HarveyStressSocialStart()
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            if (!_stateService.HasBuffInGame(BuffIds.Social))
+                _treatmentService.ApplyStressBuff(BuffIds.Social, "Социальный дискомфорт");
+
+            _treatmentService.StartTreatment(BuffIds.Social, QuestIds.Social, "Социальный дискомфорт");
+            LogDev(_socialAnxietyTherapyService?.BuildDebugSnapshot() ?? "SocialAnxietyTherapyService unavailable");
+        }
+
+        private void HarveyStressSocialSetTimer(string command, string[] args)
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            if (args.Length < 1 || !int.TryParse(args[0], out var seconds))
+            {
+                LogDevError("Usage: harvey_stress_social_set_timer <seconds>");
+                return;
+            }
+
+            _socialAnxietyTherapyService?.DebugSetTimer(seconds);
+            LogDev(_socialAnxietyTherapyService?.BuildDebugSnapshot() ?? "SocialAnxietyTherapyService unavailable");
+        }
+
+        private void HarveyStressSocialReady()
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            _socialAnxietyTherapyService?.DebugForceReady();
+            LogDev(_socialAnxietyTherapyService?.BuildDebugSnapshot() ?? "SocialAnxietyTherapyService unavailable");
+        }
+
+        private void HarveyStressSocialComplete()
+        {
+            if (!Context.IsWorldReady)
+            {
+                LogDevError("Load a save first.");
+                return;
+            }
+
+            _socialAnxietyTherapyService?.DebugForceComplete();
+            LogDev(_socialAnxietyTherapyService?.BuildDebugSnapshot() ?? "SocialAnxietyTherapyService unavailable");
+        }
+
+        private void HarveyStressSocialReset()
+        {
+            _socialAnxietyTherapyService?.Reset();
+            LogDev(_socialAnxietyTherapyService?.BuildDebugSnapshot() ?? "SocialAnxietyTherapyService unavailable");
+        }
+
+        private void HarveyStressSocialDebugState()
+        {
+            LogDev(_socialAnxietyTherapyService?.BuildDebugSnapshot() ?? "SocialAnxietyTherapyService unavailable");
         }
 
         private void RegisterSocialExposureDebugCommands()
@@ -808,6 +924,45 @@ namespace HarveyStressMeter.Handlers
             RefreshGameplayEffects();
             LogFullState("stress_flashback_reset");
             ShowHudSummary("flashback reset");
+        }
+
+        private void StressThunderDebug()
+        {
+            _monitor.Log($"{DevPrefix} === stress_thunder_debug ===", LogLevel.Info);
+            _monitor.Log($"{DevPrefix} {_thunderFlashbackService.BuildDebugSnapshot()}", LogLevel.Info);
+            _monitor.Log($"{DevPrefix} {_thunderFlashbackService.BuildMcpSnapshot()}", LogLevel.Info);
+            ShowHudSummary("thunder debug");
+        }
+
+        private void StressThunderForceRelapse()
+        {
+            var applied = _thunderFlashbackService.TryRollThunderRelapse(ignoreChance: true);
+            RefreshGameplayEffects();
+            LogFullState("stress_thunder_force_relapse");
+            ShowHudSummary(applied ? "relapse forced" : "relapse blocked");
+        }
+
+        private void StressThunderStabilizeHarvey(string command, string[] args)
+        {
+            var decay = 15;
+            var grace = 120;
+            if (args.Length > 0 && int.TryParse(args[0], out var parsedDecay))
+                decay = parsedDecay;
+            if (args.Length > 1 && int.TryParse(args[1], out var parsedGrace))
+                grace = parsedGrace;
+
+            _thunderFlashbackService.StabilizeWithHarvey(decay, grace, "dev_command");
+            RefreshGameplayEffects();
+            LogFullState("stress_thunder_stabilize_harvey");
+            ShowHudSummary("harvey stabilized");
+        }
+
+        private void StressThunderClear()
+        {
+            _thunderFlashbackService.ResetFlashbackState();
+            RefreshGameplayEffects();
+            LogFullState("stress_thunder_clear");
+            ShowHudSummary("thunder cleared");
         }
 
         private void StressRescueCheck()

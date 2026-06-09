@@ -1,0 +1,116 @@
+{
+  "name": "thunder_relapse",
+  "description": "Thunder stabilization, grace period, light/heavy relapse, episode immunity interaction.",
+  "tests": [
+    {
+      "id": "THR-01",
+      "title": "Storm outdoors force flashback → active debuff/StressLoad",
+      "steps": [
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Town", "x": 50, "y": 50 }, "expect": [] },
+        { "tool": "stress_thunder_clear", "arguments": {}, "expect": ["ok: true"] },
+        { "tool": "stress_thunder_force_relapse", "arguments": { "ignore_chance": true }, "expect": [] },
+        { "tool": "stress_thunder_debug", "arguments": {}, "expect": ["ok: true"] }
+      ],
+      "notes": "Use stress_flashback_trigger via console or extend with dedicated MCP tool if needed."
+    },
+    {
+      "id": "THR-02",
+      "title": "Force stabilize Harvey → grace + sensitivity, flashback inactive",
+      "steps": [
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "stress_thunder_stabilize_harvey", "arguments": { "stress_decay": 15, "grace_minutes": 120 }, "expect": ["isStabilizedByHarveyToday: true", "thunderSensitivityDays:"] },
+        { "tool": "stress_thunder_debug", "arguments": {}, "expect": ["graceActive: true", "isActive: false"] }
+      ]
+    },
+    {
+      "id": "THR-03",
+      "title": "Near Harvey during grace → relapse chance 0",
+      "steps": [
+        { "tool": "stress_thunder_stabilize_harvey", "arguments": { "grace_minutes": 120 }, "expect": [] },
+        { "tool": "mcp_place_npc", "arguments": { "npc": "Harvey", "location": "Hospital", "x": 10, "y": 10 }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Hospital", "x": 11, "y": 10 }, "expect": [] },
+        { "tool": "stress_trust_set", "arguments": { "points": 120 }, "expect": [] },
+        { "tool": "mcp_set_friendship", "arguments": { "npc": "Harvey", "hearts": 8 }, "expect": [] },
+        { "tool": "stress_safe_aura_status", "arguments": {}, "expect": ["relapseChanceNow: 0"] }
+      ]
+    },
+    {
+      "id": "THR-04",
+      "title": "After grace outdoors → warning then possible light relapse",
+      "steps": [
+        { "tool": "stress_thunder_stabilize_harvey", "arguments": { "grace_minutes": 0 }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Mountain", "x": 20, "y": 20 }, "expect": [] },
+        { "tool": "mcp_set_time", "arguments": { "time": 2100 }, "expect": [] },
+        { "tool": "stress_thunder_force_relapse", "arguments": { "ignore_chance": true }, "expect": [] },
+        { "tool": "stress_thunder_debug", "arguments": {}, "expect": [] }
+      ]
+    },
+    {
+      "id": "THR-05",
+      "title": "Relapse with episode immunity → no new episode start",
+      "steps": [
+        { "tool": "stress_thunder_stabilize_harvey", "arguments": {}, "expect": [] },
+        { "tool": "stress_episode_start", "arguments": { "episode_id": "AnxietySpike" }, "expect": [] },
+        { "tool": "stress_episode_start", "arguments": { "episode_id": "AnxietySpike" }, "expect": [] },
+        { "tool": "stress_thunder_force_relapse", "arguments": { "ignore_chance": true }, "expect": [] },
+        { "tool": "stress_treatment_debug", "arguments": {}, "expect": [] }
+      ],
+      "notes": "Complete episode first to set immunity; verify second episode start blocked while relapse cause may exist."
+    },
+    {
+      "id": "THR-06",
+      "title": "High load + night + storm → heavy relapse at most once/day",
+      "steps": [
+        { "tool": "stress_thunder_clear", "arguments": {}, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "mcp_set_time", "arguments": { "time": 2200 }, "expect": [] },
+        { "tool": "stress_set_load", "arguments": { "value": 80 }, "expect": [] },
+        { "tool": "stress_gotoro_set_active", "arguments": { "active": true }, "expect": [] },
+        { "tool": "stress_thunder_stabilize_harvey", "arguments": { "grace_minutes": 0 }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "BusStop", "x": 10, "y": 10 }, "expect": [] },
+        { "tool": "stress_thunder_force_relapse", "arguments": { "ignore_chance": true }, "expect": [] },
+        { "tool": "stress_thunder_debug", "arguments": {}, "expect": ["wasPrimaryFlashbackToday:"] }
+      ]
+    },
+    {
+      "id": "THR-07",
+      "title": "Forest/Woods suppress relapse (anchor shelter)",
+      "steps": [
+        { "tool": "stress_thunder_stabilize_harvey", "arguments": { "grace_minutes": 0 }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Forest", "x": 30, "y": 30 }, "expect": [] },
+        { "tool": "stress_thunder_debug", "arguments": {}, "expect": ["inAnchorZone: true", "relapseChanceNow: 0"] }
+      ]
+    },
+    {
+      "id": "THR-08",
+      "title": "Clinic/FarmHouse suppress relapse",
+      "steps": [
+        { "tool": "stress_thunder_stabilize_harvey", "arguments": { "grace_minutes": 0 }, "expect": [] },
+        { "tool": "mcp_set_weather", "arguments": { "weather": "storm" }, "expect": [] },
+        { "tool": "mcp_warp", "arguments": { "location": "Hospital", "x": 10, "y": 10 }, "expect": [] },
+        { "tool": "stress_thunder_debug", "arguments": {}, "expect": ["relapseChanceNow: 0"] }
+      ]
+    },
+    {
+      "id": "THR-09",
+      "title": "Rescue cooldown blocks repeat forest rescue",
+      "steps": [
+        { "tool": "stress_rescue_debug", "arguments": {}, "expect": ["ok: true"] },
+        { "tool": "stress_rescue_force", "arguments": { "force": true }, "expect": [] },
+        { "tool": "stress_rescue_debug", "arguments": {}, "expect": [] }
+      ]
+    },
+    {
+      "id": "THR-10",
+      "title": "Next day resets daily flags, ThunderSensitivityDays decrements",
+      "steps": [
+        { "tool": "stress_thunder_stabilize_harvey", "arguments": {}, "expect": ["thunderSensitivityDays:"] },
+        { "tool": "mcp_sleep", "arguments": { "time": 2200 }, "expect": [] },
+        { "tool": "stress_thunder_debug", "arguments": {}, "expect": ["isStabilizedByHarveyToday: false"] }
+      ]
+    }
+  ]
+}

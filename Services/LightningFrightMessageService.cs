@@ -121,6 +121,11 @@ namespace HarveyStressMeter.Services
                 LightningFrightMessagePhase.InForest => pools.InForest,
                 LightningFrightMessagePhase.Stabilized => pools.Stabilized,
                 LightningFrightMessagePhase.ReturnedTooEarly => pools.ReturnedTooEarly,
+                LightningFrightMessagePhase.AfterHarveyStabilized => pools.AfterHarveyStabilized,
+                LightningFrightMessagePhase.LeavingHarveyAnchor => pools.LeavingHarveyAnchor,
+                LightningFrightMessagePhase.RelapseWarning => pools.RelapseWarning,
+                LightningFrightMessagePhase.RelapseTriggered => pools.RelapseTriggered,
+                LightningFrightMessagePhase.RelapseSuppressedNearHarvey => pools.RelapseSuppressedNearHarvey,
                 _ => Array.Empty<string>(),
             };
         }

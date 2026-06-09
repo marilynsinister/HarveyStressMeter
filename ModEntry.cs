@@ -48,6 +48,7 @@ namespace HarveyStressMeter
         private HarveyCareTrustDialogueService _harveyCareTrustDialogueService = null!;
         private StressGameplayEffectService _stressGameplayEffectService = null!;
         private StressMeterHudService _stressMeterHudService = null!;
+        private SocialAnxietyTherapyService? _socialAnxietyTherapyService;
 
         // Handlers (following SRP)
         private Handlers.EventHandler _eventHandler = null!;
@@ -102,7 +103,9 @@ namespace HarveyStressMeter
                 _gameLogicHandler,
                 _darknessService,
                 _darknessRemissionService,
-                _socialExposureService);
+                _socialExposureService,
+                _thunderFlashbackService,
+                _socialAnxietyTherapyService);
 
             if (_config.EnableStressMcp)
             {
@@ -278,6 +281,7 @@ namespace HarveyStressMeter
             Monitor.Log("StressSystemsCoordinator initialized", LogLevel.Info);
 
             _treatmentEpisodeService.SetCoordinator(_stressSystemsCoordinator);
+            _treatmentEpisodeService.SetThunderFlashbackService(_thunderFlashbackService);
             _thunderFlashbackService.SetCoordinator(_stressSystemsCoordinator);
             _harveyFlashbackRescueService.SetCoordinator(_stressSystemsCoordinator);
             Monitor.Log("Treatment episode service wired", LogLevel.Info);
@@ -304,6 +308,19 @@ namespace HarveyStressMeter
                 Monitor);
             _stressDialogueService.SetTrustDialogueService(_harveyCareTrustDialogueService);
             _harveyFlashbackRescueService.SetTrustDialogueService(_harveyCareTrustDialogueService);
+
+            _socialAnxietyTherapyService = new SocialAnxietyTherapyService(
+                Monitor,
+                _data,
+                _stateService,
+                _treatmentService,
+                _questService,
+                _triggerService,
+                _stressDialogueService,
+                _stressTreatmentReviewService);
+            _triggerService.SetSocialAnxietyTherapyService(_socialAnxietyTherapyService);
+            _treatmentService.SetSocialAnxietyTherapyService(_socialAnxietyTherapyService);
+
             _gameDataService = new GameDataService(Monitor, _helper);
 
             // ⭐ НОВОЕ: Загружаем данные из JSON
@@ -331,7 +348,8 @@ namespace HarveyStressMeter
             // Create handlers (high-level modules that depend on services)
             _uiHandler = new UIHandler(Monitor, _data, _helper);
             _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _darknessRemissionService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _socialExposureService, _stressGameplayEffectService, _episodeQuestProgressService);
-            _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _treatmentService, _gameLogicHandler, _uiHandler, _darknessService, _darknessRemissionService, _stressLoadService);
+            _gameLogicHandler.SetSocialAnxietyTherapyService(_socialAnxietyTherapyService!);
+            _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _treatmentService, _gameLogicHandler, _uiHandler, _darknessService, _darknessRemissionService, _stressLoadService, _socialAnxietyTherapyService);
             _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler, _modResetService, _stressDialogueService);
 
             if (_config.EnableDevTestCommands)
@@ -357,7 +375,8 @@ namespace HarveyStressMeter
                     _stressGameplayEffectService,
                     _darknessService,
                     _darknessRemissionService,
-                    _socialExposureService).RegisterCommands();
+                    _socialExposureService,
+                    _socialAnxietyTherapyService).RegisterCommands();
             }
             else
             {
@@ -369,6 +388,8 @@ namespace HarveyStressMeter
             if (_harmony != null)
             {
                 FoodConsumptionPatch.Apply(_harmony);
+                HarveyInteractionPatch.Initialize(_socialAnxietyTherapyService!.TryInterceptHarveyInteraction);
+                HarveyInteractionPatch.Apply(_harmony);
             }
             else
                 Monitor.Log("❌ Harmony не инициализирован — отслеживание еды отключено", LogLevel.Error);

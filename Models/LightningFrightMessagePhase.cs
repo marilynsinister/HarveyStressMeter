@@ -7,5 +7,10 @@ namespace HarveyStressMeter.Models
         InForest,
         Stabilized,
         ReturnedTooEarly,
+        AfterHarveyStabilized,
+        LeavingHarveyAnchor,
+        RelapseWarning,
+        RelapseTriggered,
+        RelapseSuppressedNearHarvey,
     }
 }

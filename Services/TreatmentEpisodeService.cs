@@ -25,6 +25,7 @@ namespace HarveyStressMeter.Services
         private TreatmentService? _treatmentService;
         private HarveyCareTrustService? _trustService;
         private StressSystemsCoordinator? _coordinator;
+        private ThunderFlashbackService? _thunderFlashbackService;
 
         public TreatmentEpisodeService(
             SaveData data,
@@ -50,6 +51,9 @@ namespace HarveyStressMeter.Services
 
         public void SetCoordinator(StressSystemsCoordinator coordinator)
             => _coordinator = coordinator;
+
+        public void SetThunderFlashbackService(ThunderFlashbackService thunderFlashbackService)
+            => _thunderFlashbackService = thunderFlashbackService;
 
         public bool HasActiveTreatmentEpisode()
             => _data.ActiveTreatmentEpisode?.IsActiveEpisode() == true;
@@ -285,6 +289,8 @@ namespace HarveyStressMeter.Services
             _trustService?.OnTimelyReviewCompleted();
             _trustService?.OnTreatmentEpisodeCompleted(episodeId);
 
+            ApplyPostCompletionThunderStabilization(episodeId);
+
             _monitor.Log(
                 $"[CompleteTreatmentEpisode] Fallback завершение episode={episodeId} через quest={definition.QuestId}",
                 LogLevel.Info);
@@ -325,6 +331,8 @@ namespace HarveyStressMeter.Services
 
             _trustService?.OnTimelyReviewCompleted();
             _trustService?.OnTreatmentEpisodeCompleted(episodeId);
+
+            ApplyPostCompletionThunderStabilization(episodeId);
 
             _monitor.Log(
                 $"[CompleteTreatmentEpisode] Episode {episodeId} завершён, load -{reduction}, unrelated causes сохранены",
@@ -558,6 +566,33 @@ namespace HarveyStressMeter.Services
             }
 
             return sb.ToString();
+        }
+
+        private const int PostTreatmentHarveyGraceMinutes = 120;
+
+        private void ApplyPostCompletionThunderStabilization(string episodeId)
+        {
+            if (_thunderFlashbackService == null)
+                return;
+
+            if (episodeId is not (StressEpisodes.GotoroFlashback or StressEpisodes.AnxietySpike))
+                return;
+
+            var hasThunderContext = GameStateHelper.IsStormWeather()
+                                    || _stressLoadService.GetActiveCauses().ContainsKey(StressCauses.Thunder)
+                                    || _stressLoadService.GetActiveCauses().ContainsKey(StressCauses.ThunderRelapse)
+                                    || _stressLoadService.GetActiveCauses().ContainsKey(StressCauses.ThunderSensitivity)
+                                    || _thunderFlashbackService.State.IsActive
+                                    || _thunderFlashbackService.State.ThunderSensitivityDays > 0
+                                    || _data.StressLoad.WarTraumaFlag;
+
+            if (!hasThunderContext)
+                return;
+
+            _thunderFlashbackService.StabilizeWithHarvey(
+                stressDecay: 15,
+                graceMinutes: PostTreatmentHarveyGraceMinutes,
+                reason: $"treatment_complete:{episodeId}");
         }
 
         private bool ShouldUseAmbientOnly(EpisodeEvaluationContext ctx)

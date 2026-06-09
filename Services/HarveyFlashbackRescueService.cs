@@ -314,14 +314,17 @@ namespace HarveyStressMeter.Services
             var shelterBonus = HarveyFriendshipHelper.GetForestShelterBonusForTier(tier);
             var friendshipBonus = HarveyFriendshipHelper.GetFriendshipBonusForTier(tier);
 
-            _stressLoadService.DecayStress(stressReduced);
             _thunderFlashbackService.MarkHarveyHelped(shelterBonus);
 
-            var flashbackStabilized = _thunderFlashbackService.State.ForestShelterSeconds
-                >= _thunderFlashbackService.State.RequiredForestShelterSeconds;
+            var flashbackStabilized = !_thunderFlashbackService.State.IsActive
+                || _thunderFlashbackService.State.ForestShelterSeconds
+                   >= _thunderFlashbackService.State.RequiredForestShelterSeconds;
 
-            if (flashbackStabilized)
-                _thunderFlashbackService.StabilizeFlashback(applyStressDecay: false);
+            _thunderFlashbackService.StabilizeWithHarvey(
+                stressReduced,
+                _config.HarveyStabilizationGraceMinutes,
+                $"forest_rescue:{tier}");
+            flashbackStabilized = true;
 
             var rescueOutcome = _coordinator?.OnRescueCompleted(
                 tier,

@@ -21,5 +21,10 @@ namespace HarveyStressMeter.Models
         public List<string> InForest { get; set; } = new();
         public List<string> Stabilized { get; set; } = new();
         public List<string> ReturnedTooEarly { get; set; } = new();
+        public List<string> AfterHarveyStabilized { get; set; } = new();
+        public List<string> LeavingHarveyAnchor { get; set; } = new();
+        public List<string> RelapseWarning { get; set; } = new();
+        public List<string> RelapseTriggered { get; set; } = new();
+        public List<string> RelapseSuppressedNearHarvey { get; set; } = new();
     }
 }
