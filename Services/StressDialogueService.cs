@@ -1091,13 +1091,12 @@ namespace HarveyStressMeter.Services
                 _ => "StressDialogue"
             };
 
-            HarveyInteractionGuard.MarkConsumed(reason);
             HarveyInteractionLogger.LogTalk(
                 _monitor,
                 "Stress",
                 dialogueKey ?? buffId,
-                action: "(pending $action)",
-                consumed: true);
+                action: reason,
+                consumed: false);
         }
 
 
@@ -1152,80 +1151,37 @@ namespace HarveyStressMeter.Services
             return true;
         }
 
-        /// <summary>Repair/debug fallback если programmatic start закрылся без $action.</summary>
+        /// <summary>
+        /// После закрытия programmatic start-диалога без $action — только очистка pending и warning.
+        /// Старт лечения: HarveyStress_StartTreatment / HarveyStress_SocialAnxiety_Start.
+        /// </summary>
         public void TryFallbackStartTreatmentAfterDialogue()
         {
-            if (string.IsNullOrEmpty(_pendingBuffIdForTreatment) && string.IsNullOrEmpty(_pendingEpisodeIdForTreatment))
+            bool hadPending = !string.IsNullOrEmpty(_pendingBuffIdForTreatment)
+                || !string.IsNullOrEmpty(_pendingEpisodeIdForTreatment);
+
+            if (!hadPending)
             {
                 _isShowingDialogue = false;
                 _activeStressDialogueMode = StressHarveyDialogueMode.None;
-                return;
-            }
-
-            if (HarveyInteractionGuard.IsConsumed(out _))
-            {
-                _monitor.Log(
-                    "[StressDialogue] Fallback auto-start skipped: HarveyStress action consumed this cycle",
-                    LogLevel.Debug);
-                _pendingBuffIdForTreatment = null;
-                _pendingEpisodeIdForTreatment = null;
-                _isShowingDialogue = false;
-                _activeStressDialogueMode = StressHarveyDialogueMode.None;
-                ClearDeferredStressDialogue();
-                return;
-            }
-
-            if (!EnsurePipelineGuard(
-                    nameof(TryFallbackStartTreatmentAfterDialogue),
-                    requireDialogueBox: false,
-                    requireHarveySpeaker: false))
-            {
-                _isShowingDialogue = false;
                 return;
             }
 
             _monitor.Log(
-                "[StressDialogue] ⚠️ Repair fallback: starting treatment without $action (legacy programmatic dialogue)",
+                "[StressDialogue] ⚠️ Programmatic start closed without $action " +
+                $"(expected {HarveyStressActions.StartTreatment} or {HarveyStressActions.SocialAnxietyStart}; " +
+                $"pending buff={_pendingBuffIdForTreatment ?? "(none)"}, " +
+                $"episode={_pendingEpisodeIdForTreatment ?? "(none)"}) — pending cleared, treatment unchanged",
                 LogLevel.Warn);
 
-            var buffId = _pendingBuffIdForTreatment;
-            var episodeId = _pendingEpisodeIdForTreatment;
             _pendingBuffIdForTreatment = null;
             _pendingEpisodeIdForTreatment = null;
             _isShowingDialogue = false;
             _activeStressDialogueMode = StressHarveyDialogueMode.None;
-
-            if (IsTreatmentStartComplete(
-                    DarknessLegacyHelper.ResolveTreatmentBuffId(buffId ?? ""),
-                    episodeId,
-                    out _))
-            {
-                ClearDeferredStressDialogue();
-                return;
-            }
-
-            if (!string.IsNullOrEmpty(episodeId))
-            {
-                _treatmentService.StartTreatmentEpisode(episodeId, suppressPostStartBubble: true);
-                ClearDeferredStressDialogue();
-                return;
-            }
-
-            if (string.IsNullOrEmpty(buffId))
-                return;
-
-            var treatmentBuffId = DarknessLegacyHelper.ResolveTreatmentBuffId(buffId);
-            var dialogueData = _dialoguesData?.Dialogues.FirstOrDefault(d =>
-                d.BuffId == treatmentBuffId || d.BuffId == buffId);
-            var displayName = dialogueData?.DisplayName
-                ?? (DarknessLegacyHelper.IsDarknessLevelBuff(buffId) ? "Страх темноты" : buffId);
-            _treatmentService.StartTreatment(treatmentBuffId, displayName, suppressPostStartBubble: true);
             ClearDeferredStressDialogue();
         }
 
-        /// <summary>
-        /// После закрытия programmatic stress-диалога — только repair fallback (основной путь: $action).
-        /// </summary>
+        /// <summary>Alias для TryFallbackStartTreatmentAfterDialogue (pending cleanup only).</summary>
         public void CheckAndStartTreatmentAfterDialogue()
             => TryFallbackStartTreatmentAfterDialogue();
 

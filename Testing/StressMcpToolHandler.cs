@@ -200,7 +200,6 @@ namespace HarveyStressMeter.Testing
                 "harvey_stress_debug_state" => _socialAnxietyTherapyService == null
                     ? "Error: SocialAnxietyTherapyService unavailable."
                     : McpSocialAnxietyTools.SocialDebugState(_socialAnxietyTherapyService),
-                "harvey_stress_clear_consumed_interaction" => ClearHarveyInteractionConsumed(),
                 "mcp_event_snapshot" => McpEventTools.EventSnapshot(),
                 "mcp_start_event" => McpEventTools.StartEvent(_monitor, arguments),
                 "mcp_end_event" => McpEventTools.EndEvent(arguments),
@@ -667,10 +666,5 @@ namespace HarveyStressMeter.Testing
             return el.TryGetInt32(out value);
         }
 
-        private static string ClearHarveyInteractionConsumed()
-        {
-            HarveyInteractionGuard.ClearConsumed();
-            return "HarveyInteraction consumed flags cleared.";
-        }
     }
 }

@@ -171,29 +171,23 @@ namespace HarveyStressMeter.Services
             return ApplyPendingReviewCompletion(fromAction: true, out error);
         }
 
-        /// <summary>Repair/debug fallback после закрытия programmatic review без $action.</summary>
+        /// <summary>
+        /// После закрытия programmatic review без $action — только очистка pending и warning.
+        /// Завершение: HarveyStress_CompleteReview / HarveyStress_SocialAnxiety_Complete.
+        /// </summary>
         public void TryFallbackCompleteReviewAfterDialogue()
         {
             if (!HasPendingReviewCompletion)
                 return;
 
-            if (HarveyInteractionGuard.IsConsumed(out _))
-            {
-                _monitor.Log(
-                    "[StressTreatmentReview] Fallback complete skipped: HarveyStress action already consumed this cycle",
-                    LogLevel.Debug);
-                ClearPendingReview();
-                return;
-            }
-
-            if (!EnsurePipelineGuard(nameof(TryFallbackCompleteReviewAfterDialogue), requireDialogueBox: false))
-                return;
-
             _monitor.Log(
-                "[StressTreatmentReview] ⚠️ Repair fallback: completing review without $action (legacy save/dialogue)",
+                "[StressTreatmentReview] ⚠️ Programmatic review closed without $action " +
+                $"(expected {HarveyStressActions.CompleteReview} or {HarveyStressActions.SocialAnxietyComplete}; " +
+                $"pending buff={_pendingBuffIdForCompletion ?? "(none)"}, " +
+                $"episode={_pendingEpisodeIdForCompletion ?? "(none)"}) — pending cleared, treatment unchanged",
                 LogLevel.Warn);
 
-            ApplyPendingReviewCompletion(fromAction: false, out _);
+            ClearPendingReview();
         }
 
         private bool ApplyPendingReviewCompletion(bool fromAction, out string error)

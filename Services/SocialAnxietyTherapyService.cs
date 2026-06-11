@@ -150,9 +150,11 @@ namespace HarveyStressMeter.Services
             Reset();
         }
 
+        /// <summary>
+        /// Legacy helper: только из HarveyStress_SocialAnxiety_Complete $action, не после закрытия диалога.
+        /// </summary>
         public void OnQuestCompletedIfTreatmentFinished()
         {
-            // Internal helper — вызывается только из HarveyStress_SocialAnxiety_Complete action / debug.
             if (State.Phase == SocialAnxietyTherapyPhase.None)
                 return;
 
@@ -283,7 +285,7 @@ namespace HarveyStressMeter.Services
                 "Stress",
                 StressDialogueKeys.SocialAnxietyReview,
                 HarveyStressActions.SocialAnxietyComplete,
-                HarveyInteractionGuard.IsConsumed(out _));
+                consumed: false);
             _monitor.Log(
                 "[SocialAnxiety] Harvey interaction intercepted for quest completion (programmatic review dialogue)",
                 LogLevel.Info);

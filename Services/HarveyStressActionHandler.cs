@@ -171,8 +171,7 @@ namespace HarveyStressMeter.Services
 
         private void MarkAndLog(string action, string key, string detail)
         {
-            HarveyInteractionGuard.MarkConsumed(action);
-            HarveyInteractionLogger.LogTalk(_monitor, "Stress", key, action, consumed: true, detail);
+            HarveyInteractionLogger.LogTalk(_monitor, "Stress", key, action, consumed: false, detail);
         }
 
         private static string? ParseBuffId(string[] args, out string error)

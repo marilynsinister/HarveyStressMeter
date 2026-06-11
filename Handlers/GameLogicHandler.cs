@@ -43,8 +43,6 @@ namespace HarveyStressMeter.Handlers
         private bool _harveyStressDialogueCycleHandled;
         /// <summary>topicDarknessTherapyStart уже был до текущего разговора (не CP #$t в этом диалоге).</summary>
         private bool _hadDarknessTherapyTopicAtTalkStart;
-        private int _clearStressConsumedAtTick = -1;
-
         // ⭐ ОПТИМИЗАЦИЯ: Кэширование и интервальные проверки
         private bool _lastHarveyNearby = false;
         private int _harveyCheckCounter = 0;
@@ -217,8 +215,6 @@ namespace HarveyStressMeter.Handlers
         {
             if (!Context.IsWorldReady)
                 return;
-
-            ProcessStressInteractionConsumedClear();
 
             var harveyNearby = _harveySafePersonAuraService.IsHarveyWithinCareAuraRange();
 
@@ -650,7 +646,7 @@ namespace HarveyStressMeter.Handlers
                 return;
             }
 
-            // Основной путь: $action HarveyStress_* в реплике. Ниже — только repair fallback.
+            // Старт лечения только через $action HarveyStress_*; ниже — очистка pending без смены состояния.
             _stressDialogueService.TryFallbackStartTreatmentAfterDialogue();
 
             // CP level 2/3: #$t topicDarknessTherapyStart добавляет топик в конце диалога — старт только тогда.
@@ -665,6 +661,7 @@ namespace HarveyStressMeter.Handlers
 
             _darknessRemissionService.OnHarveyTalkEnded();
 
+            // Завершение review только через $action; ниже — очистка pending без смены состояния.
             _stressTreatmentReviewService.TryFallbackCompleteReviewAfterDialogue();
 
             _harveyCareTrustService.TryAwardSupportiveTalk();
@@ -677,23 +674,6 @@ namespace HarveyStressMeter.Handlers
             {
                 ConversationHelper.AddTopic(TopicIds.SpokeToday, 1);
             }
-
-            ScheduleClearStressInteractionConsumed();
-        }
-
-        private void ScheduleClearStressInteractionConsumed()
-        {
-            _clearStressConsumedAtTick = Game1.ticks + 90;
-        }
-
-        public void ProcessStressInteractionConsumedClear()
-        {
-            if (_clearStressConsumedAtTick < 0 || Game1.ticks < _clearStressConsumedAtTick)
-                return;
-
-            HarveyInteractionGuard.ClearConsumed();
-            _clearStressConsumedAtTick = -1;
-            _monitor.Log("[HarveyInteraction] Stress consumed flag cleared (dialogue cycle ended)", LogLevel.Debug);
         }
 
         private void HandleDialogueEnd()
@@ -1299,7 +1279,7 @@ namespace HarveyStressMeter.Handlers
 
         /// <summary>
         /// CP: терапия стартует только если topicDarknessTherapyStart добавлен #$t в этом разговоре.
-        /// Programmatic level 1 идёт через CheckAndStartTreatmentAfterDialogue.
+        /// Programmatic level 1 — через $action HarveyStress_StartTreatment (pending cleanup on dialogue end).
         /// </summary>
         private void TryStartDarknessTherapyFromCpDialogue()
         {

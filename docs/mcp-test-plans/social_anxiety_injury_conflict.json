@@ -6,7 +6,6 @@
       "id": "SOC-INJ-A",
       "title": "Social review complete + untreated DeepCuts (yesterday) — single Harvey talk",
       "steps": [
-        { "tool": "harvey_stress_clear_consumed_interaction", "arguments": {}, "expect": ["cleared"] },
         { "tool": "harvey_stress_social_reset", "arguments": {}, "expect": [] },
         { "tool": "harvey_stress_social_start", "arguments": {}, "expect": [] },
         { "tool": "harvey_stress_social_ready", "arguments": {}, "expect": ["ReadyToComplete"] },

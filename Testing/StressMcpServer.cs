@@ -399,7 +399,6 @@ namespace HarveyStressMeter.Testing
             Tool("harvey_stress_social_complete", "Debug: force complete Social anxiety treatment."),
             Tool("harvey_stress_social_reset", "Debug: reset Social anxiety therapy save state."),
             Tool("harvey_stress_debug_state", "Debug: dump Social anxiety therapy snapshot."),
-            Tool("harvey_stress_clear_consumed_interaction", "Debug: clear HarveyStressMeter/HarveyInteractionConsumed* modData flags."),
             Tool("mcp_event_snapshot", "Read-only CP/vanilla event context snapshot."),
             Tool("mcp_start_event", "Debug: warp (optional) and start CP event by id.",
                 Prop("event_id", "string", "Event id, e.g. HarveyStress_GotoroForestRescue_HighTrust"),
