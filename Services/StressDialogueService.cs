@@ -924,6 +924,12 @@ namespace HarveyStressMeter.Services
             if (string.IsNullOrEmpty(buffId) || string.IsNullOrEmpty(dialogueText))
                 return false;
 
+            var reviewEpisode = _reviewService.PendingEpisodeIdForCompletion
+                ?? (_reviewService.TryFindAnyTreatmentAwaitingReview(out var ep, out _, repairStuck: false) ? ep : null);
+
+            if (string.Equals(reviewEpisode, StressEpisodes.AnxietySpike, StringComparison.Ordinal))
+                _monitor.Log("[HarveyStress] Showing review dialogue for AnxietySpike.", LogLevel.Info);
+
             _monitor.Log($"[HarveyStress] Pending review found: {buffId}.", LogLevel.Info);
 
             if (string.Equals(buffId, BuffIds.Social, StringComparison.Ordinal))
@@ -1053,7 +1059,18 @@ namespace HarveyStressMeter.Services
 
         private string AppendDialogueAction(string dialogueText, string buffId, string? episodeId)
         {
-            string? action = _activeStressDialogueMode switch
+            string? action = ResolveExpectedDialogueAction(buffId);
+            if (string.IsNullOrEmpty(action))
+                return dialogueText;
+
+            if (ContainsExpectedAction(dialogueText, action))
+                return dialogueText;
+
+            return $"{dialogueText}#$action {action}";
+        }
+
+        private string? ResolveExpectedDialogueAction(string buffId)
+            => _activeStressDialogueMode switch
             {
                 StressHarveyDialogueMode.Start when string.Equals(buffId, BuffIds.Social, StringComparison.Ordinal)
                     => HarveyStressActions.SocialAnxietyStart,
@@ -1066,13 +1083,10 @@ namespace HarveyStressMeter.Services
                 _ => null
             };
 
-            if (string.IsNullOrEmpty(action))
-                return dialogueText;
-
-            if (dialogueText.Contains("$action", StringComparison.OrdinalIgnoreCase))
-                return dialogueText;
-
-            return $"{dialogueText}#$action {action}";
+        private static bool ContainsExpectedAction(string dialogueText, string action)
+        {
+            return dialogueText.Contains($"$action {action}", StringComparison.OrdinalIgnoreCase)
+                || dialogueText.Contains($"#$action {action}", StringComparison.OrdinalIgnoreCase);
         }
 
         private void MarkStressDialogueCycle(string buffId, string? dialogueKey)

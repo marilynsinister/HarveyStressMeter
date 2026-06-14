@@ -267,6 +267,15 @@ namespace HarveyStressMeter.Services
 
             progress.AnxietySafeSeconds++;
 
+            if (progress.AnxietySafeSeconds is 30 or 60 or EpisodeQuestRules.AnxietySafeSecondsRequired)
+            {
+                _monitor.Log(
+                    $"[AnxietySpike] Safe seconds: {progress.AnxietySafeSeconds}/" +
+                    $"{EpisodeQuestRules.AnxietySafeSecondsRequired}, " +
+                    $"location={Game1.currentLocation?.Name ?? "(null)"}, safe=true",
+                    LogLevel.Info);
+            }
+
             if (progress.AnxietySafeSeconds is 30 or 60)
             {
                 Game1.addHUDMessage(new HUDMessage(
@@ -313,6 +322,7 @@ namespace HarveyStressMeter.Services
             if (episode == null || episode.AwaitingHarveyReview)
                 return;
 
+            _monitor.Log($"[AnxietySpike] Objectives met. Marking episode ready for Harvey review.", LogLevel.Info);
             _monitor.Log($"[EpisodeQuest] Цели выполнены: {episodeId}", LogLevel.Info);
             Game1.playSound("questcomplete");
             Game1.addHUDMessage(new HUDMessage("✅ Назначение выполнено! Поговорите с Харви.", HUDMessage.achievement_type));

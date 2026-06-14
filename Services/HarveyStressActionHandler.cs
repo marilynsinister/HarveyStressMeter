@@ -92,7 +92,12 @@ namespace HarveyStressMeter.Services
 
             string? buffId = ParseBuffId(args, out error);
             if (buffId == null)
+            {
+                _monitor.Log(
+                    $"[HarveyStressAction] {HarveyStressActions.CompleteReview} failed: {error}",
+                    LogLevel.Warn);
                 return false;
+            }
 
             if (string.Equals(buffId, BuffIds.Social, StringComparison.Ordinal))
             {
@@ -104,6 +109,12 @@ namespace HarveyStressMeter.Services
             if (applied)
             {
                 MarkAndLog(HarveyStressActions.CompleteReview, buffId, $"buff={buffId}");
+            }
+            else
+            {
+                _monitor.Log(
+                    $"[HarveyStressAction] {HarveyStressActions.CompleteReview} not applied: {error}",
+                    LogLevel.Warn);
             }
 
             return applied;
@@ -159,7 +170,12 @@ namespace HarveyStressMeter.Services
 
             bool applied = _reviewService.TryCompleteReviewFromAction(BuffIds.Social, out error);
             if (!applied)
+            {
+                _monitor.Log(
+                    $"[HarveyStressAction] {HarveyStressActions.SocialAnxietyComplete} not applied: {error}",
+                    LogLevel.Warn);
                 return false;
+            }
 
             _socialAnxietyTherapyService?.OnQuestCompleted();
             MarkAndLog(

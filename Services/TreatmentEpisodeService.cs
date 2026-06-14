@@ -182,6 +182,15 @@ namespace HarveyStressMeter.Services
             _monitor.Log(
                 $"[MarkTreatmentEpisodeReadyForReview] episode={episodeId}, quest={episode.QuestId}, AwaitingHarveyReview=true",
                 LogLevel.Info);
+
+            if (string.Equals(episodeId, StressEpisodes.AnxietySpike, StringComparison.Ordinal))
+            {
+                var buffId = ResolvePrimaryBuffId(episode);
+                _monitor.Log(
+                    $"[AnxietySpike] AwaitingHarveyReview=true, episode={episodeId}, " +
+                    $"questId={episode.QuestId}, treatmentKey={buffId ?? "(none)"}",
+                    LogLevel.Info);
+            }
         }
 
         /// <summary>Fallback для старых сейвов: episode state потерян, но квест в журнале активен.</summary>

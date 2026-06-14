@@ -4,6 +4,7 @@ using System.Text.Json;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewModdingAPI.Utilities;
+using StardewValley;
 using HarmonyLib;
 using HarveyOverhaul.Core.Api;
 using HarveyStressMeter.Helpers;
@@ -54,6 +55,7 @@ namespace HarveyStressMeter
         private StressMeterHudService _stressMeterHudService = null!;
         private SocialAnxietyTherapyService? _socialAnxietyTherapyService;
         private HarveyStressActionHandler? _harveyStressActionHandler;
+        private HarveyStressInteractionHandler? _harveyStressInteractionHandler;
 
         // Handlers (following SRP)
         private Handlers.EventHandler _eventHandler = null!;
@@ -372,6 +374,11 @@ namespace HarveyStressMeter
             _uiHandler = new UIHandler(Monitor, _helper);
             _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _darknessRemissionService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _socialExposureService, _stressGameplayEffectService, _episodeQuestProgressService);
             _gameLogicHandler.SetSocialAnxietyTherapyService(_socialAnxietyTherapyService!);
+            _harveyStressInteractionHandler = new HarveyStressInteractionHandler(
+                Monitor,
+                _helper,
+                _stressDialogueService,
+                _stressTreatmentReviewService);
             _eventHandler = new Handlers.EventHandler(
                 Monitor,
                 _helper,
@@ -380,7 +387,7 @@ namespace HarveyStressMeter
                 _treatmentService,
                 _gameLogicHandler,
                 _uiHandler,
-                new HarveyStressInteractionHandler(Monitor, _helper, _stressDialogueService),
+                _harveyStressInteractionHandler,
                 _darknessService,
                 _darknessRemissionService,
                 _stressLoadService,
@@ -423,7 +430,7 @@ namespace HarveyStressMeter
             if (_harmony != null)
             {
                 FoodConsumptionPatch.Apply(_harmony);
-                HarveyInteractionPatch.Initialize(_socialAnxietyTherapyService!.TryInterceptHarveyInteraction);
+                HarveyInteractionPatch.Initialize(TryInterceptHarveyInteraction);
                 HarveyInteractionPatch.Apply(_harmony);
             }
             else
@@ -461,6 +468,14 @@ namespace HarveyStressMeter
                     data[mail.Id] = $"{mail.Subject}^^{mail.Text}";
                 }
             });
+        }
+
+        private bool TryInterceptHarveyInteraction(NPC harvey, Farmer who, GameLocation location)
+        {
+            if (_socialAnxietyTherapyService?.TryInterceptHarveyInteraction(harvey, who, location) == true)
+                return true;
+
+            return _harveyStressInteractionHandler?.TryInterceptHarveyInteraction(harvey, who, location) == true;
         }
     }
 }

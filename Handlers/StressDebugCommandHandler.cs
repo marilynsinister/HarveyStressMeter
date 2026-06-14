@@ -240,6 +240,10 @@ namespace HarveyStressMeter.Handlers
                 "DEV/TEST: rescan and restore AwaitingHarveyReview from completed quests.",
                 (_, __) => StressReviewRepair());
             _helper.ConsoleCommands.Add(
+                "stress_episode_debug",
+                "DEV/TEST: snapshot of ActiveTreatmentEpisode, objectives, quest journal.",
+                (_, __) => StressEpisodeDebug());
+            _helper.ConsoleCommands.Add(
                 "stress_reset",
                 "DEV/TEST: alias for stress_reset_all.",
                 (_, __) => StressResetAll());
@@ -1401,8 +1405,17 @@ namespace HarveyStressMeter.Handlers
             if (episode != null)
             {
                 LogDev($"ActiveTreatmentEpisode: {episode.EpisodeId}");
-                LogDev($"  AwaitingHarveyReview={episode.AwaitingHarveyReview}, TreatmentStarted={episode.TreatmentStarted}");
-                LogDev($"  QuestId={episode.QuestId}, PrimaryCause={episode.PrimaryCauseId ?? "(none)"}");
+                LogDev($"  AwaitingHarveyReview={episode.AwaitingHarveyReview}, ObjectivesCompleted={episode.ObjectivesCompleted}");
+                LogDev($"  TreatmentStarted={episode.TreatmentStarted}, QuestId={episode.QuestId}");
+                LogDev($"  PrimaryCause={episode.PrimaryCauseId ?? "(none)"}");
+
+                var episodeTreatment = _data.StressState.GetActiveTreatmentByQuest(episode.QuestId);
+                if (episodeTreatment?.Progress != null && episode.EpisodeId == StressEpisodes.AnxietySpike)
+                {
+                    LogDev(
+                        $"  AnxietySafeSeconds={episodeTreatment.Progress.AnxietySafeSeconds}/" +
+                        $"{EpisodeQuestRules.AnxietySafeSecondsRequired}");
+                }
             }
             else
             {
@@ -1411,18 +1424,26 @@ namespace HarveyStressMeter.Handlers
 
             foreach (var (_, treatment) in _data.StressState.ActiveTreatments)
             {
+                var questInJournal = false;
                 var questCompleted = false;
+                string? currentObjective = null;
+
                 if (!string.IsNullOrEmpty(treatment.QuestId))
                 {
                     var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == treatment.QuestId);
+                    questInJournal = quest != null;
                     questCompleted = quest?.completed.Value == true;
+                    currentObjective = quest?.questDescription;
                 }
 
                 LogDev(
                     $"Treatment buff={treatment.BuffId}, key={treatment.TreatmentKey}, " +
                     $"started={treatment.TreatmentStarted}, awaitingReview={treatment.AwaitingHarveyReview}, " +
-                    $"questId={treatment.QuestId ?? "(empty)"}, questCompleted={questCompleted}, " +
-                    $"debuffActive={_stateService.HasBuffInGame(treatment.BuffId)}");
+                    $"objectivesCompleted={treatment.ObjectivesCompleted}, " +
+                    $"questId={treatment.QuestId ?? "(empty)"}, questInJournal={questInJournal}, " +
+                    $"questCompleted={questCompleted}, debuffActive={_stateService.HasBuffInGame(treatment.BuffId)}");
+                if (!string.IsNullOrEmpty(currentObjective))
+                    LogDev($"  questObjective: {currentObjective.Replace('\n', ' ')}");
             }
 
             _stressTreatmentReviewService.TryFindAnyTreatmentAwaitingReview(
@@ -1435,6 +1456,35 @@ namespace HarveyStressMeter.Handlers
                 $"ReviewService pending: buff={_stressTreatmentReviewService.PendingBuffIdForCompletion ?? "(none)"}, " +
                 $"episode={_stressTreatmentReviewService.PendingEpisodeIdForCompletion ?? "(none)"}, " +
                 $"hasPending={_stressTreatmentReviewService.HasPendingReviewCompletion}");
+        }
+
+        private void StressEpisodeDebug()
+        {
+            LogDev("=== stress_episode_debug ===");
+            StressReviewList();
+
+            var episode = _data.ActiveTreatmentEpisode;
+            if (episode == null)
+            {
+                LogDev("No ActiveTreatmentEpisode.");
+                return;
+            }
+
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(episode.QuestId);
+            if (treatment?.Progress == null)
+            {
+                LogDev($"No treatment progress for quest {episode.QuestId}.");
+                return;
+            }
+
+            LogDev($"EpisodeId={episode.EpisodeId}");
+            LogDev($"Objectives text: {EpisodeQuestProgressService.BuildObjectiveText(
+                episode.EpisodeId,
+                treatment.Progress,
+                episode,
+                _data.OverworkBreaksToday).Replace('\n', ' ')}");
+            LogDev($"IsAnxietySafeLocation={GameStateHelper.IsAnxietySafeLocation()}");
+            LogDev($"Current location={Game1.currentLocation?.Name ?? "(null)"}");
         }
 
         private void StressReviewForce(string command, string[] args)
@@ -1456,11 +1506,26 @@ namespace HarveyStressMeter.Handlers
                 return;
             }
 
+            episodeId ??= id;
+
+            if (string.Equals(episodeId, StressEpisodes.AnxietySpike, StringComparison.Ordinal))
+            {
+                var episode = _data.ActiveTreatmentEpisode;
+                if (episode?.EpisodeId == StressEpisodes.AnxietySpike && !episode.AwaitingHarveyReview)
+                {
+                    _treatmentEpisodeService.MarkTreatmentEpisodeReadyForReview(
+                        StressEpisodes.AnxietySpike,
+                        $"{DevPrefix} stress_review_force — awaiting Harvey review.");
+                    LogDev("AnxietySpike marked AwaitingHarveyReview for forced review.");
+                }
+            }
+
             var harvey = HarveyHelper.FindHarveyInLocation(Game1.currentLocation)
                 ?? Game1.getCharacterFromName("Harvey");
             if (harvey == null)
             {
                 LogDevError("Harvey not found in world.");
+                StressReviewList();
                 return;
             }
 

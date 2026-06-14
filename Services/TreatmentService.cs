@@ -170,6 +170,9 @@ namespace HarveyStressMeter.Services
             return _episodeService.StartTreatmentEpisode(episodeId, suppressPostStartBubble);
         }
 
+        public TreatmentState? GetTreatmentByQuest(string questId)
+            => _data.StressState.GetActiveTreatmentByQuest(questId);
+
         /// <summary>
         /// Legacy: начинает программу лечения по одному buffId.
         /// Episode mode использует <see cref="StartTreatmentEpisode"/>.

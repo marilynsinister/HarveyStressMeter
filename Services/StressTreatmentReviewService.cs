@@ -89,18 +89,50 @@ namespace HarveyStressMeter.Services
         /// </summary>
         public int RepairStuckReviewStates()
         {
+            int anxietyRepaired = RepairStuckAnxietySpikeReview();
+
             var before = StressDebuffSelector.GetTreatmentsAwaitingReview(_stateService).Count;
             _treatmentService.SyncQuestsAndBuffs();
             var after = StressDebuffSelector.GetTreatmentsAwaitingReview(_stateService).Count;
 
-            if (after > before)
+            var repaired = after - before + anxietyRepaired;
+
+            if (repaired > 0)
             {
                 _monitor.Log(
-                    $"[StressTreatmentReview] Repaired stuck review states: {before} → {after} awaiting review",
+                    $"[StressTreatmentReview] Repaired stuck review states: {before} → {after} awaiting review " +
+                    $"(AnxietySpike fixes={anxietyRepaired})",
                     LogLevel.Info);
             }
 
-            return after - before;
+            return repaired;
+        }
+
+        private int RepairStuckAnxietySpikeReview()
+        {
+            var episode = _episodeService.GetActiveTreatmentEpisode();
+            if (episode == null
+                || !string.Equals(episode.EpisodeId, StressEpisodes.AnxietySpike, StringComparison.Ordinal)
+                || !episode.IsActiveEpisode()
+                || episode.AwaitingHarveyReview)
+            {
+                return 0;
+            }
+
+            var treatment = !string.IsNullOrEmpty(episode.QuestId)
+                ? _treatmentService.GetTreatmentByQuest(episode.QuestId)
+                : null;
+            if (treatment?.Progress == null
+                || treatment.Progress.AnxietySafeSeconds < EpisodeQuestRules.AnxietySafeSecondsRequired)
+            {
+                return 0;
+            }
+
+            _monitor.Log(
+                "[AnxietySpike] Objectives met but AwaitingHarveyReview=false — repairing review state.",
+                LogLevel.Warn);
+            _treatmentService.MarkTreatmentReadyForReviewByEpisode(StressEpisodes.AnxietySpike);
+            return 1;
         }
 
         /// <summary>Programmatic review-реплика для episode или legacy treatment, ожидающего review.</summary>
@@ -189,8 +221,16 @@ namespace HarveyStressMeter.Services
             if (string.IsNullOrWhiteSpace(buffId))
             {
                 error = "buffId missing";
+                _monitor.Log(
+                    $"[HarveyStress] CompleteReview action received without buffId: {error}",
+                    LogLevel.Warn);
                 return false;
             }
+
+            _monitor.Log(
+                $"[HarveyStress] CompleteReview action received: action={HarveyStressActions.CompleteReview}, " +
+                $"buff={buffId}, episode={_pendingEpisodeIdForCompletion ?? "(pending)"}",
+                LogLevel.Info);
 
             if (!HasPendingReviewCompletion)
             {
@@ -213,7 +253,7 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// После закрытия programmatic review без $action — только очистка pending и warning.
+        /// После закрытия programmatic review без $action — pending сохраняется, HUD-подсказка.
         /// Завершение: HarveyStress_CompleteReview / HarveyStress_SocialAnxiety_Complete.
         /// </summary>
         public void TryFallbackCompleteReviewAfterDialogue()
@@ -225,10 +265,20 @@ namespace HarveyStressMeter.Services
                 "[StressTreatmentReview] ⚠️ Programmatic review closed without $action " +
                 $"(expected {HarveyStressActions.CompleteReview} or {HarveyStressActions.SocialAnxietyComplete}; " +
                 $"pending buff={_pendingBuffIdForCompletion ?? "(none)"}, " +
-                $"episode={_pendingEpisodeIdForCompletion ?? "(none)"}) — pending cleared, treatment unchanged",
+                $"episode={_pendingEpisodeIdForCompletion ?? "(none)"}) — pending preserved, treatment unchanged",
                 LogLevel.Warn);
 
-            ClearPendingReview();
+            if (!string.IsNullOrEmpty(_pendingEpisodeIdForCompletion)
+                && string.Equals(_pendingEpisodeIdForCompletion, StressEpisodes.AnxietySpike, StringComparison.Ordinal))
+            {
+                _monitor.Log(
+                    "[HarveyStress] AnxietySpike stuck: review dialogue closed without completion action.",
+                    LogLevel.Warn);
+            }
+
+            Game1.addHUDMessage(new HUDMessage(
+                "Харви ждёт завершить осмотр. Поговорите с ним ещё раз.",
+                HUDMessage.error_type));
         }
 
         private bool ApplyPendingReviewCompletion(bool fromAction, out string error)

@@ -56,10 +56,15 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
         var planSections = BuildPlanSections(assignment);
         var trustSections = BuildTrustSections();
 
+        bool awaitingReview = HasPendingTreatmentReview()
+            || assignment.AwaitingHarveyReview
+            || _data.ActiveTreatmentEpisode?.AwaitingHarveyReview == true;
+
         return new HarveyPanelContribution
         {
             ProviderId = ProviderId,
-            HasPendingHarveyReview = HasPendingTreatmentReview(),
+            HasPendingHarveyReview = awaitingReview,
+            HasPriorityAppointment = awaitingReview,
             HasActiveRecoveryPlan = HasActiveStressAssignment(),
             OverviewFields = overview,
             OverviewSections = overviewSections,
