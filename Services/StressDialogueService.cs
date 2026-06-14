@@ -1073,7 +1073,7 @@ namespace HarveyStressMeter.Services
             if (dialogueText.Contains("$action", StringComparison.OrdinalIgnoreCase))
                 return dialogueText;
 
-            return $"{dialogueText}$action {action}";
+            return $"{dialogueText}#$action {action}";
         }
 
         private void MarkStressDialogueCycle(string buffId, string? dialogueKey)

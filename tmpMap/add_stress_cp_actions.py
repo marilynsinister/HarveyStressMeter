@@ -10,7 +10,7 @@ def append_action(text: str, key: str, action: str) -> str:
         body = m.group(1)
         if "HarveyStress_" in body:
             return m.group(0)
-        return body + f"$action {action}" + m.group(2)
+        return body + f"#$action {action}" + m.group(2)
     return re.sub(pattern, repl, text)
 
 
