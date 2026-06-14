@@ -19,6 +19,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\HarveyOverhaulCore\HarveyOverhaulCore.csproj">
+      <Private>false</Private>
+    </ProjectReference>
     <Reference Include="StardewUI">
       <HintPath>$(GamePath)\Mods\StardewUI\StardewUI.dll</HintPath>
       <Private>false</Private>

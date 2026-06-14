@@ -70,7 +70,6 @@ namespace HarveyStressMeter.Handlers
             _helper.Events.Display.MenuChanged += OnMenuChanged;
             _helper.Events.Display.RenderedActiveMenu += OnRenderedActiveMenu;
             _helper.Events.Input.ButtonPressed += OnButtonPressed;
-            _helper.Events.Input.ButtonsChanged += OnButtonsChanged;
             _helper.Events.Player.Warped += OnWarped;
             _helper.Events.GameLoop.TimeChanged += OnTimeChanged;
         }
@@ -203,11 +202,6 @@ namespace HarveyStressMeter.Handlers
 
             if (_harveyStressInteractionHandler.TryHandleHarveyStressInteraction(e))
                 return;
-        }
-
-        private void OnButtonsChanged(object? s, ButtonsChangedEventArgs e)
-        {
-            _uiHandler.HandleButtonsChanged(e);
         }
 
         private void OnWarped(object? s, WarpedEventArgs e)

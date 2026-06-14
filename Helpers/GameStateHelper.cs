@@ -1,10 +1,13 @@
 using System;
 using System.Linq;
 using Microsoft.Xna.Framework;
+using HarveyOverhaul.Core.Api;
+using StardewModdingAPI;
 using StardewValley;
 using StardewValley.Characters;
 using StardewValley.Monsters;
 using StardewValley.Tools;
+using HarveyStressMeter.UI;
 
 namespace HarveyStressMeter.Helpers
 {
@@ -19,6 +22,40 @@ namespace HarveyStressMeter.Helpers
         /// </summary>
         public static bool IsEventActive()
             => Game1.CurrentEvent != null || Game1.eventUp;
+
+        /// <summary>
+        /// Можно ли считать секундные таймеры лечения (рядом с Харви, в тепле, в безопасном месте и т.д.).
+        /// Не считаем прогресс при меню, паузе, диалоге или event script.
+        /// </summary>
+        public static bool ShouldCountTreatmentTime()
+            => CoreTreatmentTimeGate.ShouldCountTreatmentTime();
+
+        /// <summary>Причина блокировки секундных таймеров лечения (для debug-log).</summary>
+        public static string GetTreatmentTimeBlockReason()
+        {
+            if (!Context.IsWorldReady)
+                return "world not ready";
+
+            if (Game1.activeClickableMenu is { } menu)
+            {
+                var menuName = menu.GetType().Name;
+                if (menuName.Contains("HarveyPanel", StringComparison.OrdinalIgnoreCase))
+                    return "active menu HarveyPanelMenu";
+
+                return $"active menu {menuName}";
+            }
+
+            if (IsEventActive())
+                return "event active";
+
+            if (Game1.dialogueUp)
+                return "dialogue open";
+
+            if (Game1.paused)
+                return "game paused";
+
+            return "unknown";
+        }
 
         /// <summary>ID текущего event script (global или location-bound), если есть.</summary>
         public static string? GetCurrentEventId()

@@ -9,6 +9,11 @@
   "UpdateKeys": [],
   "Dependencies": [
     {
+      "UniqueID": "marilynsinister.HarveyOverhaul.Core",
+      "IsRequired": true,
+      "MinimumVersion": "1.0.0"
+    },
+    {
       "UniqueID": "focustense.StardewUI",
       "IsRequired": false,
       "MinimumVersion": "0.6.1"

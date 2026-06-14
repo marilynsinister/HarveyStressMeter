@@ -243,43 +243,15 @@ namespace HarveyStressMeter.Handlers
             {
                 _progressUpdateCounter = 0;
 
-                // Обновляем прогресс терапии темноты
-                _darknessService.UpdateTherapyProgress();
-
-                // Обновляем прогресс лечений (самый важный процесс)
-                if (_data.StressState.ActiveTreatments.Count > 0)
+                if (GameStateHelper.ShouldCountTreatmentTime())
                 {
-                    _triggerService.UpdateTreatmentProgress(harveyNearby);
-                    _treatmentService.EnsureLockedBuffsPersist();
+                    ProcessTreatmentTimerTick(harveyNearby);
+                    LogTreatmentTimerDebug(harveyNearby, counting: true);
                 }
-
-                _episodeQuestProgressService?.UpdateActiveEpisode(harveyNearby);
-
-                // Manual triggers (Tired/Thunder/Overwork/Social complete paths) — раз в секунду, как в backup
-                if (ShouldRunManualTriggers())
-                    _triggerService.CheckManualTriggers();
-
-                // Thunder calming buff (только если квест активен)
-                if (_stateService.HasActiveQuestState(QuestIds.Thunder))
+                else
                 {
-                    ApplyThunderCalmingBuff(harveyNearby);
+                    LogTreatmentTimerDebug(harveyNearby, counting: false);
                 }
-
-                // Natural buff removal (только если есть активные баффы)
-                if (_data.StressState.ActiveTreatments.Count > 0 || GetHasAnyStressBuff())
-                {
-                    NaturalBuffRemoval(harveyNearby);
-                }
-
-                if (_thunderFlashbackService.State.IsActive)
-                    _thunderFlashbackService.UpdateActiveFlashback(1);
-
-                if (Game1.isLightning)
-                    _thunderFlashbackService.UpdateRelapseMonitoring(Game1.timeOfDay);
-
-                _harveyFlashbackRescueService.Update(1);
-
-                _socialExposureService.UpdateRecovery(harveyNearby);
 
                 _stressGameplayEffectService.UpdateEffects();
             }
@@ -311,6 +283,87 @@ namespace HarveyStressMeter.Handlers
             if (Game1.activeClickableMenu != null)
                 return false;
             return true;
+        }
+
+        /// <summary>Секундные таймеры лечения — только когда игра не на паузе и нет меню/диалога/event.</summary>
+        private void ProcessTreatmentTimerTick(bool harveyNearby)
+        {
+            _darknessService.UpdateTherapyProgress();
+
+            if (_data.StressState.ActiveTreatments.Count > 0)
+            {
+                _triggerService.UpdateTreatmentProgress(harveyNearby);
+                _treatmentService.EnsureLockedBuffsPersist();
+            }
+
+            _episodeQuestProgressService?.UpdateActiveEpisode(harveyNearby);
+
+            if (ShouldRunManualTriggers())
+                _triggerService.CheckManualTriggers();
+
+            if (_stateService.HasActiveQuestState(QuestIds.Thunder))
+                ApplyThunderCalmingBuff(harveyNearby);
+
+            if (_data.StressState.ActiveTreatments.Count > 0 || GetHasAnyStressBuff())
+                NaturalBuffRemoval(harveyNearby);
+
+            if (_thunderFlashbackService.State.IsActive)
+                _thunderFlashbackService.UpdateActiveFlashback(1);
+
+            if (Game1.isLightning)
+                _thunderFlashbackService.UpdateRelapseMonitoring(Game1.timeOfDay);
+
+            _harveyFlashbackRescueService.Update(1);
+
+            _socialExposureService.UpdateRecovery(harveyNearby);
+        }
+
+        private int _timerDebugLogCooldown;
+
+        private void LogTreatmentTimerDebug(bool harveyNearby, bool counting)
+        {
+            _timerDebugLogCooldown--;
+            if (_timerDebugLogCooldown > 0)
+                return;
+
+            _timerDebugLogCooldown = 8;
+
+            if (!counting)
+            {
+                _monitor.Log(
+                    $"[StressTimer] Timer blocked: {GameStateHelper.GetTreatmentTimeBlockReason()}.",
+                    LogLevel.Debug);
+                return;
+            }
+
+            if (_stateService.HasActiveQuestState(QuestIds.Social))
+            {
+                var treatment = _data.StressState.GetActiveTreatment(BuffIds.Social);
+                var seconds = treatment?.Progress?.SecondsNearHarvey ?? 0;
+                _monitor.Log(
+                    $"[StressTimer] Timer ticking: Social SecondsNearHarvey {seconds}/60.",
+                    LogLevel.Debug);
+                return;
+            }
+
+            if (_stateService.HasActiveQuestState(QuestIds.SocialShutdown) && harveyNearby)
+            {
+                var treatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.SocialShutdown);
+                var seconds = treatment?.Progress?.SecondsNearHarvey ?? 0;
+                _monitor.Log(
+                    $"[StressTimer] Timer ticking: SocialShutdown SecondsNearHarvey {seconds}/60.",
+                    LogLevel.Debug);
+                return;
+            }
+
+            if (_stateService.HasActiveQuestState(QuestIds.Thunder) && harveyNearby)
+            {
+                var treatment = _data.StressState.GetActiveTreatment(BuffIds.Thunder);
+                var seconds = treatment?.Progress?.SecondsNearHarvey ?? 0;
+                _monitor.Log(
+                    $"[StressTimer] Timer ticking: Thunder SecondsNearHarvey {seconds}/120.",
+                    LogLevel.Debug);
+            }
         }
 
         /// <summary>

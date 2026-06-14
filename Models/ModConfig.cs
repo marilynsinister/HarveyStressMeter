@@ -6,7 +6,8 @@ namespace HarveyStressMeter.Models
 
     public sealed class ModConfig
     {
-        public KeybindList OpenHandbook { get; set; } = KeybindList.Parse("H");
+        /// <summary>Устарело: hotkey H перенесён в HarveyOverhaul.Core (OpenHarveyPanel).</summary>
+        public KeybindList OpenHandbook { get; set; } = new();
         public HandbookTab ButtonOn { get; set; } = HandbookTab.Inventory;
 
         /// <summary>

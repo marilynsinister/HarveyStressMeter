@@ -5,12 +5,13 @@ using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewModdingAPI.Utilities;
 using HarmonyLib;
+using HarveyOverhaul.Core.Api;
+using HarveyStressMeter.Helpers;
 using HarveyStressMeter.Api;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Services;
 using HarveyStressMeter.UI;
 using HarveyStressMeter.Handlers;
-using HarveyStressMeter.Helpers;
 using HarveyStressMeter.Patches;
 using HarveyStressMeter.Testing;
 using Microsoft.Xna.Framework.Graphics;
@@ -59,10 +60,8 @@ namespace HarveyStressMeter
         private GameLogicHandler _gameLogicHandler = null!;
         private ConsoleCommandHandler _consoleCommandHandler = null!;
         private UIHandler _uiHandler = null!;
-        private HarveyPanelMenu _harveyPanelMenu = null!;
-        private HarveyPanelService _harveyPanelService = null!;
-        private HarveyPanelHostApi _harveyPanelHostApi = null!;
         private HandbookManager _handbookManager = null!;
+        private StressPanelProvider _stressPanelProvider = null!;
         private IModHelper _helper = null!;
         private Harmony? _harmony;
         private StressMcpServer? _stressMcpServer;
@@ -84,6 +83,7 @@ namespace HarveyStressMeter
 
             // Initialize handlers (following SRP - each handles one responsibility)
             InitializeHandlers();
+            Helper.Events.GameLoop.GameLaunched += OnGameLaunchedRegisterPanelProvider;
 
             // Subscribe to events through EventHandler
             _eventHandler.SubscribeToEvents();
@@ -363,23 +363,13 @@ namespace HarveyStressMeter
         {
             Texture2D iconsTex = _helper.ModContent.Load<Texture2D>("assets/sprites/stressIcons.png");
             _handbookManager = new HandbookManager(iconsTex);
-            _harveyPanelMenu = new HarveyPanelMenu(Monitor);
-            _harveyPanelService = new HarveyPanelService(
+            _stressPanelProvider = new StressPanelProvider(
                 _data,
                 _handbookManager,
                 _stressLoadService,
-                _harveyCareTrustService,
-                _helper);
+                _harveyCareTrustService);
 
-            // Create handlers (high-level modules that depend on services)
-            _uiHandler = new UIHandler(
-                Monitor,
-                _data,
-                _helper,
-                _config,
-                _harveyPanelMenu,
-                _harveyPanelService);
-            _harveyPanelHostApi = new HarveyPanelHostApi(_harveyPanelMenu, _harveyPanelService, Monitor);
+            _uiHandler = new UIHandler(Monitor, _helper);
             _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _darknessRemissionService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _socialExposureService, _stressGameplayEffectService, _episodeQuestProgressService);
             _gameLogicHandler.SetSocialAnxietyTherapyService(_socialAnxietyTherapyService!);
             _eventHandler = new Handlers.EventHandler(
@@ -440,6 +430,21 @@ namespace HarveyStressMeter
                 Monitor.Log("❌ Harmony не инициализирован — отслеживание еды отключено", LogLevel.Error);
         }
 
+        private void OnGameLaunchedRegisterPanelProvider(object? sender, GameLaunchedEventArgs e)
+        {
+            CoreTreatmentTimeGate.Bind(Helper);
+
+            var coreApi = Helper.ModRegistry.GetApi<IHarveyCoreApi>("marilynsinister.HarveyOverhaul.Core");
+            if (coreApi == null)
+            {
+                Monitor.Log("[HarveyStressMeter] HarveyOverhaul.Core API not found — stress panel provider not registered.", LogLevel.Error);
+                return;
+            }
+
+            coreApi.RegisterPanelProvider(_stressPanelProvider);
+            Monitor.Log("[HarveyStressMeter] Stress panel provider registered with HarveyOverhaul.Core.", LogLevel.Debug);
+        }
+
         private void OnAssetRequested(object? sender, AssetRequestedEventArgs e)
         {
             if (!e.NameWithoutLocale.IsEquivalentTo("Data/Mail"))
@@ -456,11 +461,6 @@ namespace HarveyStressMeter
                     data[mail.Id] = $"{mail.Subject}^^{mail.Text}";
                 }
             });
-        }
-
-        public override object? GetApi()
-        {
-            return _harveyPanelHostApi;
         }
     }
 }
