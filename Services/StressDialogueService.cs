@@ -836,87 +836,54 @@ namespace HarveyStressMeter.Services
 
 
         /// <summary>
-
         /// Показывает стартовую реплику лечения стресса (без #$y-вопроса).
-
         /// </summary>
-
         public void ShowStressDialogue(string buffId, string dialogueText)
-
         {
-
-            if (_activeStressDialogueMode == StressHarveyDialogueMode.Start
-
-                && CannotOfferStartDialogueAgain(buffId, _selectedEpisodeIdForDialogue, out var blockReason))
-
-            {
-
-                _monitor.Log(
-
-                    $"[StressDialogue] ShowStressDialogue blocked (buff={buffId}): {blockReason}",
-
-                    LogLevel.Debug);
-
-                _selectedEpisodeIdForDialogue = null;
-
-                _activeStressDialogueMode = StressHarveyDialogueMode.None;
-
-                return;
-
-            }
-
             var harvey = Game1.getCharacterFromName("Harvey");
-
             if (harvey == null)
-
             {
-
                 _monitor.Log("[StressDialogueService] Harvey не найден!", LogLevel.Error);
-
                 return;
-
             }
 
+            ShowStressDialogue(harvey, buffId, dialogueText);
+        }
 
+        /// <summary>
+        /// Показывает programmatic stress-диалог конкретному экземпляру Harvey (клик по тайлу).
+        /// </summary>
+        public void ShowStressDialogue(NPC harvey, string buffId, string dialogueText)
+        {
+            if (_activeStressDialogueMode == StressHarveyDialogueMode.Start
+                && CannotOfferStartDialogueAgain(buffId, _selectedEpisodeIdForDialogue, out var blockReason))
+            {
+                _monitor.Log(
+                    $"[StressDialogue] ShowStressDialogue blocked (buff={buffId}): {blockReason}",
+                    LogLevel.Debug);
+                _selectedEpisodeIdForDialogue = null;
+                _activeStressDialogueMode = StressHarveyDialogueMode.None;
+                return;
+            }
 
             if (!EnsurePipelineGuard(nameof(ShowStressDialogue), requireDialogueBox: false, knownHarveyNpc: harvey))
-
                 return;
-
-
 
             if (Game1.activeClickableMenu is DialogueBox)
-
             {
-
-                // HandleHarveyDialogue вызывается уже при открытом DialogueBox — заменяем, не откладываем.
-
                 if (Game1.currentSpeaker is NPC { Name: "Harvey" })
-
                 {
-
                     DisplayStressDialogue(harvey, buffId, dialogueText, _selectedEpisodeIdForDialogue);
-
                     _selectedEpisodeIdForDialogue = null;
-
                     return;
-
                 }
 
-
-
                 ScheduleDeferredStressDialogue(buffId, dialogueText);
-
                 return;
-
             }
 
-
-
             DisplayStressDialogue(harvey, buffId, dialogueText, _selectedEpisodeIdForDialogue);
-
             _selectedEpisodeIdForDialogue = null;
-
         }
 
 
@@ -924,29 +891,40 @@ namespace HarveyStressMeter.Services
         /// <summary>
         /// Programmatic review-диалог (Social Anxiety и др.) — не зависит от CP topic / daily dialogue limit.
         /// </summary>
-        public bool TryShowProgrammaticReviewDialogue(string? preferredBuffId = null)
+        public bool TryShowProgrammaticReviewDialogue(NPC harvey, string? preferredBuffId = null)
         {
             string? buffId;
             string? dialogueText;
 
-            if (_reviewService.TryPrepareEpisodeReviewDialogue(out buffId, out dialogueText))
+            if (_reviewService.TryPrepareEpisodeReviewDialogue(out buffId, out dialogueText, repairStuck: true))
             {
                 if (!string.IsNullOrEmpty(preferredBuffId))
                     buffId = preferredBuffId;
             }
-            else if (_reviewService.HasPendingReviewCompletion)
+            else if (_reviewService.TryFindAnyTreatmentAwaitingReview(out _, out buffId, repairStuck: true))
             {
-                buffId = _reviewService.PendingBuffIdForCompletion
-                    ?? _reviewService.PendingEpisodeIdForCompletion
-                    ?? preferredBuffId
-                    ?? BuffIds.Social;
-                dialogueText = GetDialogueByKey(StressDialogueKeys.SocialAnxietyReview)
-                    ?? StressQuestCopy.ReviewDialogue;
+                if (_reviewService.HasPendingReviewCompletion)
+                {
+                    buffId = _reviewService.PendingBuffIdForCompletion
+                        ?? preferredBuffId
+                        ?? buffId;
+                    dialogueText = GetDialogueByKey(StressDialogueKeys.SocialAnxietyReview)
+                        ?? StressQuestCopy.ReviewDialogue;
+                }
+                else
+                {
+                    return false;
+                }
             }
             else
             {
                 return false;
             }
+
+            if (string.IsNullOrEmpty(buffId) || string.IsNullOrEmpty(dialogueText))
+                return false;
+
+            _monitor.Log($"[HarveyStress] Pending review found: {buffId}.", LogLevel.Info);
 
             if (string.Equals(buffId, BuffIds.Social, StringComparison.Ordinal))
             {
@@ -956,7 +934,28 @@ namespace HarveyStressMeter.Services
 
             _activeStressDialogueMode = StressHarveyDialogueMode.Review;
             _autoStartTreatmentAfterClose = false;
-            ShowStressDialogue(buffId!, dialogueText!);
+            ShowStressDialogue(harvey, buffId, dialogueText);
+            return true;
+        }
+
+        /// <summary>
+        /// Programmatic review без NPC (legacy/debug). Предпочтительно передавать harvey из клика.
+        /// </summary>
+        public bool TryShowProgrammaticReviewDialogue(string? preferredBuffId = null)
+        {
+            var harvey = Game1.getCharacterFromName("Harvey");
+            return harvey != null && TryShowProgrammaticReviewDialogue(harvey, preferredBuffId);
+        }
+
+        /// <summary>
+        /// Старт или продолжение лечения (без review) — для перехвата клика до vanilla dialogue.
+        /// </summary>
+        public bool TryShowTreatmentStartOrProgressDialogue(NPC harvey)
+        {
+            if (!ShouldShowStressDialogue(out var buffId, out var dialogueText, harvey, requireDialogueBox: false, skipReview: true))
+                return false;
+
+            ShowStressDialogue(harvey, buffId!, dialogueText!);
             return true;
         }
 
@@ -1233,18 +1232,21 @@ namespace HarveyStressMeter.Services
 
         /// </summary>
 
-        public bool ShouldShowStressDialogue(out string? buffId, out string? dialogueText)
-
+        public bool ShouldShowStressDialogue(
+            out string? buffId,
+            out string? dialogueText,
+            NPC? knownHarvey = null,
+            bool requireDialogueBox = true,
+            bool skipReview = false)
         {
-
             buffId = null;
-
             dialogueText = null;
 
-
-
-            if (!EnsurePipelineGuard(nameof(ShouldShowStressDialogue)))
-
+            if (!EnsurePipelineGuard(
+                    nameof(ShouldShowStressDialogue),
+                    requireDialogueBox,
+                    requireHarveySpeaker: knownHarvey == null,
+                    knownHarveyNpc: knownHarvey))
                 return false;
 
 
@@ -1308,23 +1310,14 @@ namespace HarveyStressMeter.Services
 
 
             // 1. review — цель квеста выполнена, завершение через разговор
-
-            if (TrySelectReviewDialogue(out buffId, out dialogueText))
-
+            if (!skipReview && TrySelectReviewDialogue(out buffId, out dialogueText))
             {
-
                 _activeStressDialogueMode = StressHarveyDialogueMode.Review;
-
                 _autoStartTreatmentAfterClose = false;
-
                 _monitor.Log(
-
                     $"[StressDialogueService] Mode=review (buff={buffId})",
-
                     LogLevel.Debug);
-
                 return true;
-
             }
 
 

@@ -47,6 +47,6 @@
         "TalkPerUniqueNpc": -3.0,
         "TalkDailyLimit": -9.0
     },
-    "OpenHandbook": "LeftShift + H, RightShift + H",
+    "OpenHandbook": "H",
     "ButtonOn": "Inventory"
 }

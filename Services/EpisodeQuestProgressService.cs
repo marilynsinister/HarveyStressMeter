@@ -375,6 +375,56 @@ namespace HarveyStressMeter.Services
             };
         }
 
+        /// <summary>Короткая строка прогресса для HUD и окна «План Харви» (те же данные, что у journal objective).</summary>
+        public static string BuildCompactProgressLine(
+            string episodeId,
+            TreatmentProgress progress,
+            int overworkBreaksToday = 0,
+            TreatmentEpisodeState? episode = null)
+        {
+            return episodeId switch
+            {
+                StressEpisodes.PhysicalExhaustion =>
+                    BuildPhysicalCompactProgress(progress, episode, overworkBreaksToday),
+
+                StressEpisodes.Burnout =>
+                    progress.BurnoutAvoidedMinesToday
+                        ? "без шахт сегодня"
+                        : "нужен день без шахт",
+
+                StressEpisodes.AnxietySpike =>
+                    $"{Math.Min(progress.AnxietySafeSeconds, EpisodeQuestRules.AnxietySafeSecondsRequired)}/{EpisodeQuestRules.AnxietySafeSecondsRequired} сек",
+
+                StressEpisodes.GotoroFlashback =>
+                    $"{progress.SecondsNearHarvey} сек укрытия",
+
+                _ => "",
+            };
+        }
+
+        private static string BuildPhysicalCompactProgress(
+            TreatmentProgress progress,
+            TreatmentEpisodeState? episode,
+            int overworkBreaksToday)
+        {
+            int completed = progress.EpisodeCausesCompleted.Count;
+            int total = episode?.RelatedCauseIds.Count ?? Math.Max(completed, 1);
+
+            if (completed > 0)
+                return $"{completed}/{total} симптомов";
+
+            if (overworkBreaksToday > 0)
+                return $"перерывы {overworkBreaksToday}/{EpisodeQuestRules.PhysicalOverworkBreaksRequired}";
+
+            if (progress.WarmSeconds > 0)
+                return $"тепло {Math.Min(progress.WarmSeconds, EpisodeQuestRules.PhysicalWarmSecondsRequired)}/{EpisodeQuestRules.PhysicalWarmSecondsRequired} сек";
+
+            if (progress.TiredRestSeconds > 0)
+                return $"отдых {Math.Min(progress.TiredRestSeconds, EpisodeQuestRules.PhysicalTiredRestSecondsRequired)}/{EpisodeQuestRules.PhysicalTiredRestSecondsRequired} сек";
+
+            return "симптомы в работе";
+        }
+
         private static string BuildPhysicalExhaustionObjective(
             TreatmentProgress progress,
             TreatmentEpisodeState? episode,

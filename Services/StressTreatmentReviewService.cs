@@ -52,27 +52,26 @@ namespace HarveyStressMeter.Services
         public void SetDialogueService(StressDialogueService dialogueService)
             => _dialogueService = dialogueService;
 
-        /// <summary>Programmatic review-реплика для episode или legacy treatment, ожидающего review.</summary>
-        public bool TryPrepareEpisodeReviewDialogue(out string? buffId, out string? dialogueText)
+        /// <summary>
+        /// Ищет одно лечение, ожидающее review (по приоритету StressDebuffSelector).
+        /// При repairStuck восстанавливает AwaitingHarveyReview из completed quest / objectives.
+        /// </summary>
+        public bool TryFindAnyTreatmentAwaitingReview(
+            out string? episodeId,
+            out string? buffId,
+            bool repairStuck = false)
         {
+            episodeId = null;
             buffId = null;
-            dialogueText = null;
 
-            if (HasPendingReviewCompletion)
-                return false;
+            if (repairStuck)
+                RepairStuckReviewStates();
 
             var episode = _episodeService.GetTreatmentAwaitingReview();
             if (episode != null)
             {
+                episodeId = episode.EpisodeId;
                 buffId = ResolvePrimaryBuffId(episode);
-                dialogueText = _dialogueService?.GetReviewDialogueForEpisode(episode.EpisodeId)
-                    ?? StressQuestCopy.ReviewDialogue;
-                _pendingEpisodeIdForCompletion = episode.EpisodeId;
-
-                _monitor.Log(
-                    $"[StressTreatmentReview] Prepared episode review dialogue (episode={episode.EpisodeId})",
-                    LogLevel.Info);
-
                 return true;
             }
 
@@ -81,21 +80,63 @@ namespace HarveyStressMeter.Services
                 return false;
 
             buffId = treatment.BuffId;
-            var episodeId = TreatmentEpisodeDefinitions.ResolveEpisodeIdForQuest(treatment.QuestId);
+            episodeId = TreatmentEpisodeDefinitions.ResolveEpisodeIdForQuest(treatment.QuestId);
+            return true;
+        }
+
+        /// <summary>
+        /// Пересканирует активные лечения и восстанавливает флаг awaiting review, если квест уже выполнен.
+        /// </summary>
+        public int RepairStuckReviewStates()
+        {
+            var before = StressDebuffSelector.GetTreatmentsAwaitingReview(_stateService).Count;
+            _treatmentService.SyncQuestsAndBuffs();
+            var after = StressDebuffSelector.GetTreatmentsAwaitingReview(_stateService).Count;
+
+            if (after > before)
+            {
+                _monitor.Log(
+                    $"[StressTreatmentReview] Repaired stuck review states: {before} → {after} awaiting review",
+                    LogLevel.Info);
+            }
+
+            return after - before;
+        }
+
+        /// <summary>Programmatic review-реплика для episode или legacy treatment, ожидающего review.</summary>
+        public bool TryPrepareEpisodeReviewDialogue(out string? buffId, out string? dialogueText, bool repairStuck = false)
+        {
+            buffId = null;
+            dialogueText = null;
+
+            if (HasPendingReviewCompletion)
+                return false;
+
+            if (!TryFindAnyTreatmentAwaitingReview(out var episodeId, out buffId, repairStuck))
+                return false;
+
             if (!string.IsNullOrEmpty(episodeId))
             {
                 dialogueText = _dialogueService?.GetReviewDialogueForEpisode(episodeId)
                     ?? StressQuestCopy.ReviewDialogue;
                 _pendingEpisodeIdForCompletion = episodeId;
-            }
-            else
-            {
-                dialogueText = StressQuestCopy.ReviewDialogue;
                 _pendingBuffIdForCompletion = buffId;
+
+                _monitor.Log(
+                    $"[StressTreatmentReview] Prepared episode review dialogue (episode={episodeId}, buff={buffId})",
+                    LogLevel.Info);
+
+                return true;
             }
 
+            if (string.IsNullOrEmpty(buffId))
+                return false;
+
+            dialogueText = StressQuestCopy.ReviewDialogue;
+            _pendingBuffIdForCompletion = buffId;
+
             _monitor.Log(
-                $"[StressTreatmentReview] Prepared legacy review dialogue (buff={buffId}, episode={episodeId ?? "(none)"})",
+                $"[StressTreatmentReview] Prepared legacy review dialogue (buff={buffId})",
                 LogLevel.Info);
 
             return true;
@@ -204,6 +245,7 @@ namespace HarveyStressMeter.Services
                 _monitor.Log(
                     $"[StressTreatmentReview] Complete review episode={episodeId} fromAction={fromAction}",
                     LogLevel.Info);
+                _monitor.Log($"[HarveyStress] Review completed: {episodeId}.", LogLevel.Info);
 
                 if (!_episodeService.CompleteTreatmentEpisode(episodeId)
                     && !string.IsNullOrEmpty(fallbackBuffId))
@@ -226,6 +268,7 @@ namespace HarveyStressMeter.Services
             _monitor.Log(
                 $"[StressTreatmentReview] Complete legacy review buff={buffId} fromAction={fromAction}",
                 LogLevel.Info);
+            _monitor.Log($"[HarveyStress] Review completed: {buffId}.", LogLevel.Info);
             _treatmentService.CompleteTreatment(buffId, "Лечение завершено.");
             return true;
         }

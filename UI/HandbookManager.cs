@@ -98,13 +98,13 @@ namespace HarveyStressMeter.UI
 
                 if (activeBuffIds.Contains(state.Id))
                 {
-                    row.StatusText = "Есть сейчас";
+                    row.StatusText = "Сейчас";
                     row.StatusColor = "#7f6139";
                     vm.ActiveStates.Add(row);
                 }
                 else
                 {
-                    row.StatusText = "Не активен";
+                    row.StatusText = "Не беспокоит";
                     row.StatusColor = "#6b6b6b";
                 }
                 
@@ -142,81 +142,81 @@ namespace HarveyStressMeter.UI
             {
                 Id = BuffIds.Thunder,
                 Title = "Пугающая гроза",
-                EffectsText = "Эффекты: -1 защита.",
-                CauseText = "Причина: гроза на улице.",
-                CureText = "Лечение: 120 сек рядом с Харви."
+                EffectsText = "Защита слабее, чем обычно.",
+                CauseText = "Гроза на улице.",
+                CureText = "Харви просит побудьте рядом с ним или укройтесь в безопасном месте."
             };
 
             yield return new StateInfo
             {
                 Id = BuffIds.Darkness,
-                Title = "Боязнь темноты",
-                EffectsText = "Эффекты: -1 защита.",
-                CauseText = "Причина: ночь на улице, нарастающий страх.",
-                CureText = "Лечение: 3 вечера × 60 мин дома при свете (после 20:00), затем разговор с Харви."
+                Title = "Вечерний страх",
+                EffectsText = "Защита слабее, чем обычно.",
+                CauseText = "Ночь на улице, нарастающий страх.",
+                CureText = "Останьтесь дома при свете. Харви просил не проверять себя на прочность."
             };
 
             yield return new StateInfo
             {
                 Id = BuffIds.Lonely,
                 Title = "Одиночество",
-                EffectsText = "Эффекты: -1 защита.",
-                CauseText = "Причина: целый день ни с кем не говорили.",
-                CureText = "Лечение: поговорите с 3 жителями."
+                EffectsText = "Защита слабее, чем обычно.",
+                CauseText = "Целый день ни с кем не говорили.",
+                CureText = "Поговорите с жителями. Не обязательно долго — просто дайте миру напомнить, что вы не одна."
             };
 
             yield return new StateInfo
             {
                 Id = BuffIds.Hunger,
                 Title = "Слабость от голода",
-                EffectsText = "Эффекты: -20 макс. выносливости.",
-                CauseText = "Причина: низкая выносливость.",
-                CureText = "Лечение: съешьте любую еду."
+                EffectsText = "Выносливость заметно ниже.",
+                CauseText = "Вы долго не ели.",
+                CureText = "Съешьте что-нибудь. Харви заметит, если вы снова пропустите еду."
             };
 
             yield return new StateInfo
             {
                 Id = BuffIds.Overwork,
                 Title = "Переутомление",
-                EffectsText = "Эффекты: -34 макс. выносливости.",
-                CauseText = "Причина: тяжелая работа без перерыва.",
-                CureText = "Лечение: 3 перерыва по 30 сек."
+                EffectsText = "Выносливость заметно ниже.",
+                CauseText = "Тяжёлая работа без перерыва.",
+                CureText = "Сделайте перерыв. Не «ещё один ряд грядок», а настоящий перерыв."
             };
 
             yield return new StateInfo
             {
                 Id = BuffIds.NoSleep,
                 Title = "Недосып",
-                EffectsText = "Эффекты: -1 ко всем защитным реакциям.",
-                CauseText = "Причина: поздний отбой.",
-                CureText = "Лечение: лягте спать до полуночи."
+                EffectsText = "Реакции и защита слабее.",
+                CauseText = "Поздний отбой.",
+                CureText = "Лечь до полуночи. Харви просил не проверять себя на прочность."
             };
 
             yield return new StateInfo
             {
                 Id = BuffIds.TooCold,
                 Title = "Переохлаждение",
-                EffectsText = "Эффекты: -1 защита.",
-                CauseText = "Причина: зима/непогода на улице.",
-                CureText = "Лечение: 120 сек в тепле."
+                EffectsText = "Защита слабее, чем обычно.",
+                CauseText = "Холод или непогода на улице.",
+                CureText = "Согрейтесь в тёплом месте."
             };
 
             yield return new StateInfo
             {
                 Id = BuffIds.Tired,
                 Title = "Усталость",
-                EffectsText = "Эффекты: легкая вялость.",
-                CauseText = "Причина: обычная нагрузка.",
-                CureText = "Лечение: короткий отдых дома."
+                EffectsText = "Лёгкая вялость.",
+                CauseText = "Обычная нагрузка без отдыха.",
+                CureText = "Короткий отдых дома."
             };
 
             yield return new StateInfo
             {
                 Id = BuffIds.Social,
-                Title = "Социальный дискомфорт",
-                EffectsText = "Эффекты: -1 защита.",
-                CauseText = "Причина: слишком много разговоров с малознакомыми за день.",
-                CureText = "Лечение: 3 разговора + 60 сек с Харви или 5 разговоров."
+                Title = "Социальное напряжение",
+                EffectsText = "Защита слабее, чем обычно.",
+                CauseText = "Слишком много разговоров с малознакомыми за день.",
+                CureText = "Харви просит снизить нагрузку и восстановиться."
             };
         }
 

@@ -6,7 +6,7 @@ namespace HarveyStressMeter.Models
 
     public sealed class ModConfig
     {
-        public KeybindList OpenHandbook { get; set; } = KeybindList.Parse("LeftShift + H");
+        public KeybindList OpenHandbook { get; set; } = KeybindList.Parse("H");
         public HandbookTab ButtonOn { get; set; } = HandbookTab.Inventory;
 
         /// <summary>

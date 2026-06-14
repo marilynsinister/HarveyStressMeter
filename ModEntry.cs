@@ -5,12 +5,15 @@ using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewModdingAPI.Utilities;
 using HarmonyLib;
+using HarveyStressMeter.Api;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Services;
+using HarveyStressMeter.UI;
 using HarveyStressMeter.Handlers;
 using HarveyStressMeter.Helpers;
 using HarveyStressMeter.Patches;
 using HarveyStressMeter.Testing;
+using Microsoft.Xna.Framework.Graphics;
 
 namespace HarveyStressMeter
 {
@@ -56,6 +59,10 @@ namespace HarveyStressMeter
         private GameLogicHandler _gameLogicHandler = null!;
         private ConsoleCommandHandler _consoleCommandHandler = null!;
         private UIHandler _uiHandler = null!;
+        private HarveyPanelMenu _harveyPanelMenu = null!;
+        private HarveyPanelService _harveyPanelService = null!;
+        private HarveyPanelHostApi _harveyPanelHostApi = null!;
+        private HandbookManager _handbookManager = null!;
         private IModHelper _helper = null!;
         private Harmony? _harmony;
         private StressMcpServer? _stressMcpServer;
@@ -354,11 +361,40 @@ namespace HarveyStressMeter
 
         private void InitializeHandlers()
         {
+            Texture2D iconsTex = _helper.ModContent.Load<Texture2D>("assets/sprites/stressIcons.png");
+            _handbookManager = new HandbookManager(iconsTex);
+            _harveyPanelMenu = new HarveyPanelMenu(Monitor);
+            _harveyPanelService = new HarveyPanelService(
+                _data,
+                _handbookManager,
+                _stressLoadService,
+                _harveyCareTrustService,
+                _helper);
+
             // Create handlers (high-level modules that depend on services)
-            _uiHandler = new UIHandler(Monitor, _data, _helper);
+            _uiHandler = new UIHandler(
+                Monitor,
+                _data,
+                _helper,
+                _config,
+                _harveyPanelMenu,
+                _harveyPanelService);
+            _harveyPanelHostApi = new HarveyPanelHostApi(_harveyPanelMenu, _harveyPanelService, Monitor);
             _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _darknessRemissionService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _socialExposureService, _stressGameplayEffectService, _episodeQuestProgressService);
             _gameLogicHandler.SetSocialAnxietyTherapyService(_socialAnxietyTherapyService!);
-            _eventHandler = new Handlers.EventHandler(Monitor, _helper, _data, _stateService, _treatmentService, _gameLogicHandler, _uiHandler, _darknessService, _darknessRemissionService, _stressLoadService, _socialAnxietyTherapyService);
+            _eventHandler = new Handlers.EventHandler(
+                Monitor,
+                _helper,
+                _data,
+                _stateService,
+                _treatmentService,
+                _gameLogicHandler,
+                _uiHandler,
+                new HarveyStressInteractionHandler(Monitor, _helper, _stressDialogueService),
+                _darknessService,
+                _darknessRemissionService,
+                _stressLoadService,
+                _socialAnxietyTherapyService);
             _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler, _modResetService, _stressDialogueService);
 
             if (_config.EnableDevTestCommands)
@@ -420,6 +456,11 @@ namespace HarveyStressMeter
                     data[mail.Id] = $"{mail.Subject}^^{mail.Text}";
                 }
             });
+        }
+
+        public override object? GetApi()
+        {
+            return _harveyPanelHostApi;
         }
     }
 }

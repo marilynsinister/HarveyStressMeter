@@ -228,6 +228,18 @@ namespace HarveyStressMeter.Handlers
                 "DEV/TEST: CompleteTreatment (debug only). Usage: stress_force_complete <buffId>",
                 StressForceComplete);
             _helper.ConsoleCommands.Add(
+                "stress_review_list",
+                "DEV/TEST: list treatments awaiting Harvey review (progress, quest, debuff, pending).",
+                (_, __) => StressReviewList());
+            _helper.ConsoleCommands.Add(
+                "stress_review_force",
+                "DEV/TEST: force programmatic review dialogue. Usage: stress_review_force <episodeId|buffId>",
+                StressReviewForce);
+            _helper.ConsoleCommands.Add(
+                "stress_review_repair",
+                "DEV/TEST: rescan and restore AwaitingHarveyReview from completed quests.",
+                (_, __) => StressReviewRepair());
+            _helper.ConsoleCommands.Add(
                 "stress_reset",
                 "DEV/TEST: alias for stress_reset_all.",
                 (_, __) => StressResetAll());
@@ -1379,6 +1391,95 @@ namespace HarveyStressMeter.Handlers
             TreatmentDebugReporter.LogTreatmentDetail(_monitor, _stateService, buffId);
             WriteStressDialogueSummary();
             TreatmentDebugReporter.ShowHud($"treatment completed: {buffId}");
+        }
+
+        private void StressReviewList()
+        {
+            LogDev("=== stress_review_list ===");
+
+            var episode = _data.ActiveTreatmentEpisode;
+            if (episode != null)
+            {
+                LogDev($"ActiveTreatmentEpisode: {episode.EpisodeId}");
+                LogDev($"  AwaitingHarveyReview={episode.AwaitingHarveyReview}, TreatmentStarted={episode.TreatmentStarted}");
+                LogDev($"  QuestId={episode.QuestId}, PrimaryCause={episode.PrimaryCauseId ?? "(none)"}");
+            }
+            else
+            {
+                LogDev("ActiveTreatmentEpisode: (none)");
+            }
+
+            foreach (var (_, treatment) in _data.StressState.ActiveTreatments)
+            {
+                var questCompleted = false;
+                if (!string.IsNullOrEmpty(treatment.QuestId))
+                {
+                    var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == treatment.QuestId);
+                    questCompleted = quest?.completed.Value == true;
+                }
+
+                LogDev(
+                    $"Treatment buff={treatment.BuffId}, key={treatment.TreatmentKey}, " +
+                    $"started={treatment.TreatmentStarted}, awaitingReview={treatment.AwaitingHarveyReview}, " +
+                    $"questId={treatment.QuestId ?? "(empty)"}, questCompleted={questCompleted}, " +
+                    $"debuffActive={_stateService.HasBuffInGame(treatment.BuffId)}");
+            }
+
+            _stressTreatmentReviewService.TryFindAnyTreatmentAwaitingReview(
+                out var pendingEpisode,
+                out var pendingBuff,
+                repairStuck: false);
+            LogDev(
+                $"Pending review (priority): episode={pendingEpisode ?? "(none)"}, buff={pendingBuff ?? "(none)"}");
+            LogDev(
+                $"ReviewService pending: buff={_stressTreatmentReviewService.PendingBuffIdForCompletion ?? "(none)"}, " +
+                $"episode={_stressTreatmentReviewService.PendingEpisodeIdForCompletion ?? "(none)"}, " +
+                $"hasPending={_stressTreatmentReviewService.HasPendingReviewCompletion}");
+        }
+
+        private void StressReviewForce(string command, string[] args)
+        {
+            if (args.Length == 0)
+            {
+                LogDevError("Usage: stress_review_force <episodeId|buffId>");
+                return;
+            }
+
+            var id = args[0];
+            string? buffId = TreatmentTopics.IsImplementedBuff(id) ? id : null;
+            string? episodeId = buffId == null ? id : TreatmentEpisodeDefinitions.ResolveEpisodeIdForQuest(
+                _stateService.GetActiveTreatment(buffId)?.QuestId ?? "");
+
+            if (buffId == null && !TreatmentEpisodeDefinitions.TryGet(id, out _))
+            {
+                LogDevError($"Unknown episodeId/buffId: {id}");
+                return;
+            }
+
+            var harvey = HarveyHelper.FindHarveyInLocation(Game1.currentLocation)
+                ?? Game1.getCharacterFromName("Harvey");
+            if (harvey == null)
+            {
+                LogDevError("Harvey not found in world.");
+                return;
+            }
+
+            _stressTreatmentReviewService.RepairStuckReviewStates();
+            if (!_stressDialogueService.TryShowProgrammaticReviewDialogue(harvey, buffId))
+            {
+                LogDevError("TryShowProgrammaticReviewDialogue returned false — no treatment awaiting review?");
+                StressReviewList();
+                return;
+            }
+
+            LogDev($"Forced programmatic review dialogue for {buffId ?? episodeId ?? id}.");
+        }
+
+        private void StressReviewRepair()
+        {
+            var repaired = _stressTreatmentReviewService.RepairStuckReviewStates();
+            LogDev($"stress_review_repair: restored {repaired} treatment(s) to AwaitingHarveyReview.");
+            StressReviewList();
         }
 
         private void StressResetAll()

@@ -25,6 +25,7 @@ namespace HarveyStressMeter.Handlers
         private readonly TreatmentService _treatmentService;
         private readonly GameLogicHandler _gameLogicHandler;
         private readonly UIHandler _uiHandler;
+        private readonly HarveyStressInteractionHandler _harveyStressInteractionHandler;
         private readonly DarknessService _darknessService;
         private readonly DarknessRemissionService _darknessRemissionService;
         private readonly StressLoadService _stressLoadService;
@@ -38,6 +39,7 @@ namespace HarveyStressMeter.Handlers
             TreatmentService treatmentService,
             GameLogicHandler gameLogicHandler,
             UIHandler uiHandler,
+            HarveyStressInteractionHandler harveyStressInteractionHandler,
             DarknessService darknessService,
             DarknessRemissionService darknessRemissionService,
             StressLoadService stressLoadService,
@@ -50,6 +52,7 @@ namespace HarveyStressMeter.Handlers
             _treatmentService = treatmentService;
             _gameLogicHandler = gameLogicHandler;
             _uiHandler = uiHandler;
+            _harveyStressInteractionHandler = harveyStressInteractionHandler;
             _darknessService = darknessService;
             _darknessRemissionService = darknessRemissionService;
             _stressLoadService = stressLoadService;
@@ -192,10 +195,14 @@ namespace HarveyStressMeter.Handlers
 
         private void OnButtonPressed(object? s, ButtonPressedEventArgs e)
         {
-            _uiHandler.HandleButtonPressed(e);
-            
-            // ⭐ УДАЛЕНО: Больше не нужна проверка еды через ButtonPressed
-            // Harmony патч обрабатывает это автоматически
+            if (!Context.IsWorldReady)
+                return;
+
+            if (_uiHandler.HandleButtonPressed(e))
+                return;
+
+            if (_harveyStressInteractionHandler.TryHandleHarveyStressInteraction(e))
+                return;
         }
 
         private void OnButtonsChanged(object? s, ButtonsChangedEventArgs e)

@@ -19,6 +19,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="StardewUI">
+      <HintPath>$(GamePath)\Mods\StardewUI\StardewUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.4.0" />
     <PackageReference Include="Lib.Harmony" Version="2.3.3" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3">
