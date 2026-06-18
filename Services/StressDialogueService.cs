@@ -46,6 +46,7 @@ namespace HarveyStressMeter.Services
 
         private readonly StressTreatmentReviewService _reviewService;
         private HarveyCareTrustDialogueService? _trustDialogueService;
+        private StressMedicalIntentProvider? _medicalIntentProvider;
 
         private StressDialoguesContainer? _dialoguesData;
 
@@ -132,6 +133,9 @@ namespace HarveyStressMeter.Services
             _reviewService = reviewService;
 
         }
+
+        public void SetMedicalIntentProvider(StressMedicalIntentProvider medicalIntentProvider)
+            => _medicalIntentProvider = medicalIntentProvider;
 
         public void SetTrustDialogueService(HarveyCareTrustDialogueService trustDialogueService)
             => _trustDialogueService = trustDialogueService;
@@ -940,6 +944,10 @@ namespace HarveyStressMeter.Services
 
             _activeStressDialogueMode = StressHarveyDialogueMode.Review;
             _autoStartTreatmentAfterClose = false;
+
+            if (!ApproveStressDialogueForCore(buffId))
+                return false;
+
             ShowStressDialogue(harvey, buffId, dialogueText);
             return true;
         }
@@ -1331,7 +1339,7 @@ namespace HarveyStressMeter.Services
                 _monitor.Log(
                     $"[StressDialogueService] Mode=review (buff={buffId})",
                     LogLevel.Debug);
-                return true;
+                return ApproveStressDialogueForCore(buffId);
             }
 
 
@@ -1387,12 +1395,10 @@ namespace HarveyStressMeter.Services
                 _autoStartTreatmentAfterClose = false;
 
                 _monitor.Log(
-
                     $"[StressDialogueService] Mode=start (episode={startEpisodeId ?? "(none)"}, buff={buffId})",
-
                     LogLevel.Debug);
 
-                return true;
+                return ApproveStressDialogueForCore(buffId);
 
             }
 
@@ -1414,7 +1420,7 @@ namespace HarveyStressMeter.Services
 
                     LogLevel.Debug);
 
-                return true;
+                return ApproveStressDialogueForCore(buffId);
 
             }
 
@@ -1436,7 +1442,7 @@ namespace HarveyStressMeter.Services
 
                     LogLevel.Debug);
 
-                return true;
+                return ApproveStressDialogueForCore(buffId);
 
             }
 
@@ -1444,6 +1450,24 @@ namespace HarveyStressMeter.Services
 
             return false;
 
+        }
+
+
+
+        private bool ApproveStressDialogueForCore(string? buffId)
+        {
+            if (string.IsNullOrEmpty(buffId) || _medicalIntentProvider == null)
+                return true;
+
+            if (_medicalIntentProvider.CanShowStressIntent(buffId))
+                return true;
+
+            _monitor.Log(
+                $"[StressDialogueService] Core deferred stress buff={buffId} — higher-priority medical intent active",
+                LogLevel.Info);
+            _activeStressDialogueMode = StressHarveyDialogueMode.None;
+            _selectedEpisodeIdForDialogue = null;
+            return false;
         }
 
 

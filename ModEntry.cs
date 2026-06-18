@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Text.Json;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
@@ -54,8 +55,10 @@ namespace HarveyStressMeter
         private StressGameplayEffectService _stressGameplayEffectService = null!;
         private StressMeterHudService _stressMeterHudService = null!;
         private SocialAnxietyTherapyService? _socialAnxietyTherapyService;
+        private MedicalLetterScheduler? _medicalLetterScheduler;
         private HarveyStressActionHandler? _harveyStressActionHandler;
         private HarveyStressInteractionHandler? _harveyStressInteractionHandler;
+        private StressMedicalIntentProvider? _stressMedicalIntentProvider;
 
         // Handlers (following SRP)
         private Handlers.EventHandler _eventHandler = null!;
@@ -64,6 +67,8 @@ namespace HarveyStressMeter
         private UIHandler _uiHandler = null!;
         private HandbookManager _handbookManager = null!;
         private StressPanelProvider _stressPanelProvider = null!;
+        private StressCareDirectiveProvider _stressCareDirectiveProvider = null!;
+        private RecoveryPlanBridge _recoveryPlanBridge = null!;
         private IModHelper _helper = null!;
         private Harmony? _harmony;
         private StressMcpServer? _stressMcpServer;
@@ -86,14 +91,22 @@ namespace HarveyStressMeter
             // Initialize handlers (following SRP - each handles one responsibility)
             InitializeHandlers();
             Helper.Events.GameLoop.GameLaunched += OnGameLaunchedRegisterPanelProvider;
+            Helper.Events.GameLoop.SaveLoaded += OnSaveLoadedRegisterCoreProviders;
 
             // Subscribe to events through EventHandler
             _eventHandler.SubscribeToEvents();
+            if (_stressMedicalIntentProvider != null)
+                _helper.Events.GameLoop.UpdateTicked += _stressMedicalIntentProvider.OnUpdateTicked;
 
             _helper.Events.Content.AssetRequested += OnAssetRequested;
 
             // Register console commands through ConsoleCommandHandler
             _consoleCommandHandler.RegisterCommands();
+
+            _helper.ConsoleCommands.Add(
+                "stress_panel_dump",
+                "Что Stress-провайдер отдаёт во вкладку «План» Harvey Panel (H).",
+                (_, _) => CmdStressPanelDump());
 
             _stressMcpToolHandler = new StressMcpToolHandler(
                 Monitor,
@@ -209,6 +222,7 @@ namespace HarveyStressMeter
             _buffService = new BuffService(Monitor);
             _questService = new QuestService(Monitor);
             _stateService = new StateService(_data, Monitor, _buffService, _questService);
+            _medicalLetterScheduler = new MedicalLetterScheduler(_config, _data, _stateService, _buffService, Monitor);
             _stressLoadService = new StressLoadService(_data, _buffService, _stateService, _config, Monitor);
 
             _harveyCareTrustService = new HarveyCareTrustService(_data, _config, Monitor);
@@ -231,6 +245,7 @@ namespace HarveyStressMeter
                 _buffService,
                 Monitor);
             _treatmentService = new TreatmentService(_data, _buffService, _questService, _stateService, Monitor);
+            _treatmentService.SetMedicalLetterScheduler(_medicalLetterScheduler);
             _treatmentService.SetStressLoadService(_stressLoadService);
             _treatmentService.SetTreatmentEpisodeService(_treatmentEpisodeService);
             _treatmentEpisodeService.SetTreatmentService(_treatmentService);
@@ -240,10 +255,14 @@ namespace HarveyStressMeter
                 _questService,
                 _treatmentService,
                 Monitor);
+            _recoveryPlanBridge = new RecoveryPlanBridge(Monitor);
+            _episodeQuestProgressService.SetRecoveryPlanBridge(_recoveryPlanBridge);
             _treatmentService.SetEpisodeQuestProgressService(_episodeQuestProgressService);
             _triggerService = new TriggerService(_data, _buffService, _questService, _stateService, _treatmentService, Monitor);
             _triggerService.SetEpisodeQuestProgressService(_episodeQuestProgressService);
+            _triggerService.SetRecoveryPlanBridge(_recoveryPlanBridge);
             _darknessService = new DarknessService(_data, _buffService, _stateService, _questService, Monitor);
+            _darknessService.SetMedicalLetterScheduler(_medicalLetterScheduler);
             _darknessService.SetStressLoadService(_stressLoadService);
             _darknessRemissionService = new DarknessRemissionService(_data, _darknessService, _questService, Monitor);
             _darknessService.SetRemissionService(_darknessRemissionService);
@@ -302,6 +321,12 @@ namespace HarveyStressMeter
                 _stateService,
                 _treatmentService,
                 _treatmentEpisodeService);
+            _stressMedicalIntentProvider = new StressMedicalIntentProvider(
+                Monitor,
+                _stateService,
+                _data,
+                _stressTreatmentReviewService,
+                _treatmentEpisodeService);
             _stressDialogueService = new StressDialogueService(
                 Monitor,
                 _helper,
@@ -311,6 +336,7 @@ namespace HarveyStressMeter
                 _treatmentEpisodeService,
                 _stressTreatmentReviewService);
             _stressTreatmentReviewService.SetDialogueService(_stressDialogueService);
+            _stressDialogueService.SetMedicalIntentProvider(_stressMedicalIntentProvider);
             _harveyCareTrustDialogueService = new HarveyCareTrustDialogueService(
                 _data,
                 _harveyCareTrustService,
@@ -370,6 +396,7 @@ namespace HarveyStressMeter
                 _handbookManager,
                 _stressLoadService,
                 _harveyCareTrustService);
+            _stressCareDirectiveProvider = new StressCareDirectiveProvider(_data, _handbookManager);
 
             _uiHandler = new UIHandler(Monitor, _helper);
             _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _darknessRemissionService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _socialExposureService, _stressGameplayEffectService, _episodeQuestProgressService);
@@ -378,7 +405,8 @@ namespace HarveyStressMeter
                 Monitor,
                 _helper,
                 _stressDialogueService,
-                _stressTreatmentReviewService);
+                _stressTreatmentReviewService,
+                _stressMedicalIntentProvider);
             _eventHandler = new Handlers.EventHandler(
                 Monitor,
                 _helper,
@@ -391,7 +419,8 @@ namespace HarveyStressMeter
                 _darknessService,
                 _darknessRemissionService,
                 _stressLoadService,
-                _socialAnxietyTherapyService);
+                _socialAnxietyTherapyService,
+                _medicalLetterScheduler);
             _consoleCommandHandler = new ConsoleCommandHandler(Monitor, _helper, _data, _treatmentService, _triggerService, _stateService, _uiHandler, _modResetService, _stressDialogueService);
 
             if (_config.EnableDevTestCommands)
@@ -418,7 +447,8 @@ namespace HarveyStressMeter
                     _darknessService,
                     _darknessRemissionService,
                     _socialExposureService,
-                    _socialAnxietyTherapyService).RegisterCommands();
+                    _socialAnxietyTherapyService,
+                    _episodeQuestProgressService).RegisterCommands();
             }
             else
             {
@@ -440,16 +470,34 @@ namespace HarveyStressMeter
         private void OnGameLaunchedRegisterPanelProvider(object? sender, GameLaunchedEventArgs e)
         {
             CoreTreatmentTimeGate.Bind(Helper);
+            RegisterCoreProviders("GameLaunched");
+        }
 
+        private void OnSaveLoadedRegisterCoreProviders(object? sender, SaveLoadedEventArgs e)
+            => RegisterCoreProviders("SaveLoaded");
+
+        private void RegisterCoreProviders(string phase)
+        {
             var coreApi = Helper.ModRegistry.GetApi<IHarveyCoreApi>("marilynsinister.HarveyOverhaul.Core");
             if (coreApi == null)
             {
-                Monitor.Log("[HarveyStressMeter] HarveyOverhaul.Core API not found — stress panel provider not registered.", LogLevel.Error);
+                Monitor.Log(
+                    $"[HarveyStressMeter] ({phase}) HarveyOverhaul.Core API not found — panel/care providers not registered.",
+                    LogLevel.Error);
                 return;
             }
 
             coreApi.RegisterPanelProvider(_stressPanelProvider);
-            Monitor.Log("[HarveyStressMeter] Stress panel provider registered with HarveyOverhaul.Core.", LogLevel.Debug);
+            coreApi.RegisterCareDirectiveProvider(_stressCareDirectiveProvider);
+            _recoveryPlanBridge.Bind(Helper);
+            _stressMedicalIntentProvider?.SetCoreApi(coreApi);
+            _harveyStressInteractionHandler?.SetCoreApi(coreApi);
+            _gameLogicHandler?.SetCoreApi(coreApi);
+
+            int directiveCount = _stressCareDirectiveProvider.GetCareDirectives().Count;
+            Monitor.Log(
+                $"[HarveyStressMeter] ({phase}) Stress providers registered with Core. CareDirectives={directiveCount}",
+                LogLevel.Info);
         }
 
         private void OnAssetRequested(object? sender, AssetRequestedEventArgs e)
@@ -476,6 +524,40 @@ namespace HarveyStressMeter
                 return true;
 
             return _harveyStressInteractionHandler?.TryInterceptHarveyInteraction(harvey, who, location) == true;
+        }
+
+        private void CmdStressPanelDump()
+        {
+            if (!Context.IsWorldReady)
+            {
+                Monitor.Log("Сначала загрузите сохранение.", LogLevel.Warn);
+                return;
+            }
+
+            var contribution = _stressPanelProvider.GetPanelContribution();
+            var directives = _stressCareDirectiveProvider.GetCareDirectives();
+            Monitor.Log("=== Stress → Harvey Panel (flags) + Care Directives ===", LogLevel.Info);
+            Monitor.Log($"HasActiveRecoveryPlan={contribution.HasActiveRecoveryPlan}", LogLevel.Info);
+            Monitor.Log($"CareDirectives={directives.Count} (Plan tab renders in Core)", LogLevel.Info);
+            foreach (var directive in directives)
+            {
+                Monitor.Log(
+                    $"  id={directive.Id} type={directive.Type} pri={directive.Priority} title={directive.Title}",
+                    LogLevel.Info);
+            }
+
+            Monitor.Log("Open journal quests (HarveyMod_*):", LogLevel.Info);
+            foreach (var quest in Game1.player.questLog)
+            {
+                if (quest == null || quest.completed.Value)
+                    continue;
+
+                string questId = quest.id.Value;
+                if (string.IsNullOrWhiteSpace(questId) || !questId.StartsWith("HarveyMod_", StringComparison.Ordinal))
+                    continue;
+
+                Monitor.Log($"  quest={questId}", LogLevel.Info);
+            }
         }
     }
 }

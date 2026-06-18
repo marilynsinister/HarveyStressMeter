@@ -284,51 +284,14 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
-            // ⭐ НОВОЕ: Убеждаемся, что Progress инициализирован
+            // Убеждаемся, что Progress инициализирован
             if (treatment.Progress == null)
             {
                 treatment.Progress = new TreatmentProgress();
                 _monitor.Log($"[StateService.UpdateProgress] ⚠️ Progress был null для квеста '{questId}', инициализирован", LogLevel.Warn);
             }
 
-            // ⭐ НОВОЕ: Логируем состояние ПЕРЕД обновлением
-            _monitor.Log($"[StateService.UpdateProgress] ═══ ОБНОВЛЕНИЕ ПРОГРЕССА '{questId}' ═══", LogLevel.Debug);
-            LogProgressState(questId, treatment.Progress, "ПЕРЕД обновлением");
-
-            // Вызываем делегат для обновления
             updateAction(treatment.Progress);
-
-            // ⭐ НОВОЕ: Логируем состояние ПОСЛЕ обновления
-            LogProgressState(questId, treatment.Progress, "ПОСЛЕ обновления");
-
-            _monitor.Log($"[StateService.UpdateProgress] ✅ Прогресс квеста '{questId}' обновлен", LogLevel.Debug);
-        }
-
-        /// <summary>
-        /// ⭐ НОВОЕ: Логирует состояние прогресса квеста
-        /// </summary>
-        private void LogProgressState(string questId, TreatmentProgress progress, string stage)
-        {
-            if (progress == null)
-            {
-                _monitor.Log($"[StateService.UpdateProgress] Progress == null на этапе {stage}", LogLevel.Warn);
-                return;
-            }
-
-            _monitor.Log($"[StateService.UpdateProgress] ─── Состояние {stage} ───", LogLevel.Debug);
-            
-            // Общие поля
-            _monitor.Log($"[StateService.UpdateProgress]   SecondsNearHarvey: {progress.SecondsNearHarvey}", LogLevel.Debug);
-            _monitor.Log($"[StateService.UpdateProgress]   EveningInLightSeconds: {progress.EveningInLightSeconds}", LogLevel.Debug);
-            _monitor.Log($"[StateService.UpdateProgress]   TalkedUniqueToday: {progress.TalkedUniqueToday}", LogLevel.Debug);
-            
-            // Поля для Social квеста
-            _monitor.Log($"[StateService.UpdateProgress]   SocialTalksAfterQuest: {progress.SocialTalksAfterQuest}", LogLevel.Debug);
-            
-            // Другие поля
-            _monitor.Log($"[StateService.UpdateProgress]   AteAnyFood: {progress.AteAnyFood}", LogLevel.Debug);
-            _monitor.Log($"[StateService.UpdateProgress]   WarmSeconds: {progress.WarmSeconds}", LogLevel.Debug);
-            _monitor.Log($"[StateService.UpdateProgress]   EarlySleepStreak: {progress.EarlySleepStreak}", LogLevel.Debug);
         }
 
         /// <summary>

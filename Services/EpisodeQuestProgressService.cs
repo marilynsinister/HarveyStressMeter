@@ -16,6 +16,11 @@ namespace HarveyStressMeter.Services
         private readonly QuestService _questService;
         private readonly TreatmentService _treatmentService;
         private readonly IMonitor _monitor;
+        private RecoveryPlanBridge? _recoveryPlanBridge;
+
+        private bool? _anxietyLastSafe;
+        private int _anxietyLastJournalSeconds = -1;
+        private int _anxietyLastLoggedSeconds = -1;
 
         public EpisodeQuestProgressService(
             SaveData data,
@@ -29,10 +34,14 @@ namespace HarveyStressMeter.Services
             _monitor = monitor;
         }
 
+        public void SetRecoveryPlanBridge(RecoveryPlanBridge bridge)
+            => _recoveryPlanBridge = bridge;
+
         public void InitializeEpisodeQuest(string episodeId, TreatmentProgress progress)
         {
             progress.EpisodeCausesCompleted.Clear();
             progress.AnxietySafeSeconds = 0;
+            progress.AnxietySpikeCompletionAnnounced = false;
             progress.BurnoutAvoidedMinesToday = true;
             progress.WarmSeconds = 0;
             progress.TiredRestSeconds = 0;
@@ -49,10 +58,21 @@ namespace HarveyStressMeter.Services
             }
 
             UpdateQuestJournal(episodeId, progress);
+            ResetAnxietyTracking();
+            _recoveryPlanBridge?.StartEpisodePlan(episodeId);
+            if (TreatmentEpisodeDefinitions.TryGet(episodeId, out var definition))
+            {
+                _questService.UpdateQuest(
+                    definition.QuestId,
+                    description: "План Харви активен. Подробности — клавиша H.");
+            }
         }
 
         public void UpdateActiveEpisode(bool harveyNearby)
         {
+            // AnxietySpike может идти параллельно другому episode (например SocialShutdown).
+            UpdateAnxietySpikeProgress();
+
             var episode = _data.ActiveTreatmentEpisode;
             if (episode == null || !episode.IsActiveEpisode() || episode.AwaitingHarveyReview)
                 return;
@@ -71,9 +91,6 @@ namespace HarveyStressMeter.Services
                 case StressEpisodes.Burnout:
                     UpdateQuestJournal(StressEpisodes.Burnout, progress);
                     break;
-                case StressEpisodes.AnxietySpike:
-                    TickAnxietySpike(progress);
-                    break;
                 case StressEpisodes.GotoroFlashback:
                     TickGotoroFlashback(progress);
                     break;
@@ -82,6 +99,9 @@ namespace HarveyStressMeter.Services
 
         public void OnPlayerWarped(string? locationName)
         {
+            if (_data.StressState.GetActiveTreatmentByQuest(QuestIds.AnxietySpike)?.IsTreatmentActive() == true)
+                UpdateAnxietySpikeProgress(allowIncrement: false);
+
             var episode = _data.ActiveTreatmentEpisode;
             if (episode == null || !episode.IsActiveEpisode() || episode.AwaitingHarveyReview)
                 return;
@@ -175,6 +195,13 @@ namespace HarveyStressMeter.Services
 
         public void OnFlashbackShelterUpdated(int shelterSeconds, string episodeId)
         {
+            if (string.Equals(episodeId, StressEpisodes.AnxietySpike, StringComparison.Ordinal))
+            {
+                if (TryGetActiveAnxietySpikeTreatment() != null)
+                    SetAnxietySafeSeconds(shelterSeconds);
+                return;
+            }
+
             var episode = _data.ActiveTreatmentEpisode;
             if (episode == null
                 || !string.Equals(episode.EpisodeId, episodeId, StringComparison.Ordinal)
@@ -187,17 +214,7 @@ namespace HarveyStressMeter.Services
             if (treatment?.Progress == null)
                 return;
 
-            if (episodeId == StressEpisodes.AnxietySpike)
-            {
-                treatment.Progress.AnxietySafeSeconds = Math.Max(
-                    treatment.Progress.AnxietySafeSeconds,
-                    shelterSeconds);
-                UpdateQuestJournal(StressEpisodes.AnxietySpike, treatment.Progress);
-
-                if (treatment.Progress.AnxietySafeSeconds >= EpisodeQuestRules.AnxietySafeSecondsRequired)
-                    TryCompleteEpisode(StressEpisodes.AnxietySpike, treatment.Progress);
-            }
-            else if (episodeId == StressEpisodes.GotoroFlashback)
+            if (episodeId == StressEpisodes.GotoroFlashback)
             {
                 treatment.Progress.SecondsNearHarvey = Math.Max(
                     treatment.Progress.SecondsNearHarvey,
@@ -260,41 +277,253 @@ namespace HarveyStressMeter.Services
             _ => false,
         };
 
-        private void TickAnxietySpike(TreatmentProgress progress)
+        /// <summary>
+        /// Единый тик прогресса AnxietySpike: счётчик, journal, HUD и ready-for-review.
+        /// Источник правды — <see cref="TreatmentProgress.AnxietySafeSeconds"/>.
+        /// Работает и при параллельном другом ActiveTreatmentEpisode (например SocialShutdown).
+        /// </summary>
+        public void UpdateAnxietySpikeProgress(bool allowIncrement = true)
         {
-            if (Game1.CurrentEvent != null || !GameStateHelper.IsAnxietySafeLocation())
+            var treatment = TryGetActiveAnxietySpikeTreatment();
+            if (treatment?.Progress == null)
                 return;
 
-            progress.AnxietySafeSeconds++;
+            var progress = treatment.Progress;
+            if (!progress.CanEvaluateQuestObjectives() || Game1.CurrentEvent != null)
+                return;
 
-            if (progress.AnxietySafeSeconds is 30 or 60 or EpisodeQuestRules.AnxietySafeSecondsRequired)
+            var location = Game1.currentLocation?.Name ?? "(null)";
+            var isSafe = GameStateHelper.IsAnxietySafeLocation();
+
+            if (allowIncrement && isSafe)
+                progress.AnxietySafeSeconds++;
+
+            _recoveryPlanBridge?.SyncProgress(
+                StressEpisodes.AnxietySpike,
+                progress.AnxietySafeSeconds,
+                EpisodeQuestRules.AnxietySafeSecondsRequired);
+
+            LogAnxietySpikeLocation(location, isSafe, progress.AnxietySafeSeconds);
+
+            if (ShouldUpdateAnxietyJournal(progress, isSafe))
             {
-                _monitor.Log(
-                    $"[AnxietySpike] Safe seconds: {progress.AnxietySafeSeconds}/" +
-                    $"{EpisodeQuestRules.AnxietySafeSecondsRequired}, " +
-                    $"location={Game1.currentLocation?.Name ?? "(null)"}, safe=true",
-                    LogLevel.Info);
+                _anxietyLastSafe = isSafe;
+                _anxietyLastJournalSeconds = progress.AnxietySafeSeconds;
+                UpdateQuestJournal(StressEpisodes.AnxietySpike, progress);
             }
 
-            if (progress.AnxietySafeSeconds is 30 or 60)
+            if (allowIncrement && isSafe)
+                ShowAnxietyHudMilestones(progress);
+
+            TryCompleteAnxietySpike(treatment, progress);
+        }
+
+        private TreatmentState? TryGetActiveAnxietySpikeTreatment()
+        {
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.AnxietySpike);
+            if (treatment?.Progress == null || !treatment.IsTreatmentActive())
+                return null;
+
+            if (treatment.IsCompleted || treatment.IsCured || treatment.AwaitingHarveyReview)
+                return null;
+
+            return treatment;
+        }
+
+        /// <summary>Синхронизирует секунды укрытия (flashback) с единым прогрессом AnxietySpike.</summary>
+        public void SetAnxietySafeSeconds(int seconds)
+        {
+            var treatment = TryGetActiveAnxietySpikeTreatment();
+            if (treatment?.Progress == null)
+                return;
+
+            var progress = treatment.Progress;
+            var previous = progress.AnxietySafeSeconds;
+            progress.AnxietySafeSeconds = Math.Max(previous, seconds);
+            if (progress.AnxietySafeSeconds == previous)
+                return;
+
+            _monitor.Log(
+                $"[AnxietySpike] Shelter sync: {previous} → {progress.AnxietySafeSeconds}/" +
+                $"{EpisodeQuestRules.AnxietySafeSecondsRequired}",
+                LogLevel.Info);
+
+            _anxietyLastJournalSeconds = progress.AnxietySafeSeconds;
+            UpdateQuestJournal(StressEpisodes.AnxietySpike, progress);
+            ShowAnxietyHudMilestones(progress, includeSkipped: true);
+            TryCompleteAnxietySpike(treatment, progress);
+        }
+
+        /// <summary>Восстанавливает зависший AnxietySpike: objectives выполнены, но review не выставлен.</summary>
+        public bool RepairStuckAnxietySpike(string? hudMessage = null)
+        {
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.AnxietySpike);
+            if (treatment?.Progress == null || !treatment.IsTreatmentActive())
+                return false;
+
+            RestoreAnxietyEpisodeStateIfMissing(treatment);
+
+            if (treatment.AwaitingHarveyReview)
+                return false;
+
+            if (treatment.Progress.AnxietySafeSeconds < EpisodeQuestRules.AnxietySafeSecondsRequired)
+                return false;
+
+            treatment.Progress.AnxietySpikeCompletionAnnounced = true;
+            _anxietyLastJournalSeconds = treatment.Progress.AnxietySafeSeconds;
+            UpdateQuestJournal(StressEpisodes.AnxietySpike, treatment.Progress);
+
+            _treatmentService.MarkTreatmentReadyForReviewByEpisode(
+                StressEpisodes.AnxietySpike,
+                hudMessage ?? "Назначение восстановлено: поговорите с Харви.");
+
+            _recoveryPlanBridge?.CompleteEpisodeAssignment(StressEpisodes.AnxietySpike);
+
+            _monitor.Log("[AnxietySpike] Repaired stuck state → AwaitingHarveyReview.", LogLevel.Warn);
+            return true;
+        }
+
+        private void RestoreAnxietyEpisodeStateIfMissing(TreatmentState treatment)
+        {
+            var episode = _data.ActiveTreatmentEpisode;
+            if (episode != null
+                && episode.IsActiveEpisode()
+                && !string.Equals(episode.EpisodeId, StressEpisodes.AnxietySpike, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (episode != null
+                && string.Equals(episode.EpisodeId, StressEpisodes.AnxietySpike, StringComparison.Ordinal)
+                && episode.IsActiveEpisode())
+            {
+                return;
+            }
+
+            if (!TreatmentEpisodeDefinitions.TryGet(StressEpisodes.AnxietySpike, out var definition))
+                return;
+
+            _data.ActiveTreatmentEpisode = new TreatmentEpisodeState
+            {
+                EpisodeId = StressEpisodes.AnxietySpike,
+                QuestId = QuestIds.AnxietySpike,
+                TreatmentStarted = true,
+                AwaitingHarveyReview = treatment.AwaitingHarveyReview,
+                ObjectivesCompleted = treatment.ObjectivesCompleted
+                    || treatment.Progress.AnxietySafeSeconds >= EpisodeQuestRules.AnxietySafeSecondsRequired,
+                RelatedCauseIds = definition.RelatedCauses.ToList(),
+            };
+
+            _monitor.Log(
+                "[AnxietySpike] Restored missing ActiveTreatmentEpisode from active AnxietySpike quest.",
+                LogLevel.Warn);
+        }
+
+        public void ResetAnxietyTracking()
+        {
+            _anxietyLastSafe = null;
+            _anxietyLastJournalSeconds = -1;
+            _anxietyLastLoggedSeconds = -1;
+        }
+
+        private void LogAnxietySpikeLocation(string location, bool isSafe, int seconds)
+        {
+            bool milestone = seconds is 0 or 30 or 60 or EpisodeQuestRules.AnxietySafeSecondsRequired;
+            bool safeChanged = _anxietyLastSafe != isSafe;
+            if (!milestone && !safeChanged && seconds - _anxietyLastLoggedSeconds < 30)
+                return;
+
+            _anxietyLastLoggedSeconds = seconds;
+            _monitor.Log(
+                $"[AnxietySpike] location={location}, safe={isSafe.ToString().ToLowerInvariant()}, seconds={seconds}",
+                LogLevel.Info);
+        }
+
+        private bool ShouldUpdateAnxietyJournal(TreatmentProgress progress, bool isSafe)
+        {
+            var seconds = progress.AnxietySafeSeconds;
+
+            if (_anxietyLastSafe != isSafe)
+                return true;
+
+            if (seconds != _anxietyLastJournalSeconds)
+            {
+                if (seconds is 0 or 30 or 60 or EpisodeQuestRules.AnxietySafeSecondsRequired)
+                    return true;
+
+                if (_anxietyLastJournalSeconds < 0)
+                    return true;
+
+                if (seconds - _anxietyLastJournalSeconds >= 5)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private void ShowAnxietyHudMilestones(TreatmentProgress progress, bool includeSkipped = false)
+        {
+            var seconds = progress.AnxietySafeSeconds;
+            var required = EpisodeQuestRules.AnxietySafeSecondsRequired;
+
+            if (includeSkipped)
+            {
+                if (seconds >= required)
+                {
+                    // Completion HUD handled by TryCompleteAnxietySpike.
+                    return;
+                }
+
+                if (seconds >= 60)
+                {
+                    Game1.addHUDMessage(new HUDMessage(
+                        $"Безопасное место: {Math.Min(seconds, required)}/{required} сек",
+                        HUDMessage.newQuest_type));
+                }
+                else if (seconds >= 30)
+                {
+                    Game1.addHUDMessage(new HUDMessage(
+                        $"Безопасное место: {seconds}/{required} сек",
+                        HUDMessage.newQuest_type));
+                }
+
+                return;
+            }
+
+            if (seconds is 30 or 60)
             {
                 Game1.addHUDMessage(new HUDMessage(
-                    $"Безопасное место: {progress.AnxietySafeSeconds}/{EpisodeQuestRules.AnxietySafeSecondsRequired} сек",
+                    $"Безопасное место: {seconds}/{required} сек",
                     HUDMessage.newQuest_type));
             }
-            else if (progress.AnxietySafeSeconds == EpisodeQuestRules.AnxietySafeSecondsRequired)
-            {
-                Game1.addHUDMessage(new HUDMessage(
-                    HarveyFriendshipHelper.IsDatingHarvey() || HarveyFriendshipHelper.IsMarriedToHarvey()
-                        ? "✅ Ты пережила пик тревоги в безопасном месте"
-                        : "✅ Вы пережили пик тревоги в безопасном месте",
-                    HUDMessage.achievement_type));
-            }
+        }
+
+        private void TryCompleteAnxietySpike(TreatmentState treatment, TreatmentProgress progress)
+        {
+            if (progress.AnxietySafeSeconds < EpisodeQuestRules.AnxietySafeSecondsRequired)
+                return;
+
+            if (progress.AnxietySpikeCompletionAnnounced || treatment.AwaitingHarveyReview)
+                return;
+
+            progress.AnxietySpikeCompletionAnnounced = true;
+            _anxietyLastJournalSeconds = progress.AnxietySafeSeconds;
+
+            _monitor.Log(
+                $"[AnxietySpike] Objectives met ({progress.AnxietySafeSeconds}/" +
+                $"{EpisodeQuestRules.AnxietySafeSecondsRequired}). Marking ready for Harvey review " +
+                $"(parallel episode={_data.ActiveTreatmentEpisode?.EpisodeId ?? "(none)"}).",
+                LogLevel.Info);
+
+            Game1.playSound("questcomplete");
+            Game1.addHUDMessage(new HUDMessage(
+                $"✅ Безопасное место: {EpisodeQuestRules.AnxietySafeSecondsRequired}/" +
+                $"{EpisodeQuestRules.AnxietySafeSecondsRequired} сек. Теперь поговорите с Харви.",
+                HUDMessage.achievement_type));
 
             UpdateQuestJournal(StressEpisodes.AnxietySpike, progress);
-
-            if (progress.AnxietySafeSeconds >= EpisodeQuestRules.AnxietySafeSecondsRequired)
-                TryCompleteEpisode(StressEpisodes.AnxietySpike, progress);
+            _treatmentService.MarkTreatmentReadyForReviewByEpisode(StressEpisodes.AnxietySpike);
+            _recoveryPlanBridge?.CompleteEpisodeAssignment(StressEpisodes.AnxietySpike);
         }
 
         private void TickGotoroFlashback(TreatmentProgress progress)
@@ -315,6 +544,14 @@ namespace HarveyStressMeter.Services
 
         private void TryCompleteEpisode(string episodeId, TreatmentProgress progress)
         {
+            if (episodeId == StressEpisodes.AnxietySpike)
+            {
+                var anxietyTreatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.AnxietySpike);
+                if (anxietyTreatment?.Progress != null)
+                    TryCompleteAnxietySpike(anxietyTreatment, anxietyTreatment.Progress);
+                return;
+            }
+
             if (!IsEpisodeObjectivesMet(episodeId, progress))
                 return;
 
@@ -322,7 +559,6 @@ namespace HarveyStressMeter.Services
             if (episode == null || episode.AwaitingHarveyReview)
                 return;
 
-            _monitor.Log($"[AnxietySpike] Objectives met. Marking episode ready for Harvey review.", LogLevel.Info);
             _monitor.Log($"[EpisodeQuest] Цели выполнены: {episodeId}", LogLevel.Info);
             Game1.playSound("questcomplete");
             Game1.addHUDMessage(new HUDMessage("✅ Назначение выполнено! Поговорите с Харви.", HUDMessage.achievement_type));
@@ -508,17 +744,29 @@ namespace HarveyStressMeter.Services
 
         private static string BuildAnxietySpikeObjective(TreatmentProgress progress)
         {
-            var seconds = Math.Min(progress.AnxietySafeSeconds, EpisodeQuestRules.AnxietySafeSecondsRequired);
-            var line = progress.AnxietySafeSeconds >= EpisodeQuestRules.AnxietySafeSecondsRequired
-                ? "✅ Безопасное место: задача выполнена"
-                : $"Безопасное место: {seconds}/{EpisodeQuestRules.AnxietySafeSecondsRequired} сек (дом, клиника, лес…)";
+            var required = EpisodeQuestRules.AnxietySafeSecondsRequired;
+            var seconds = Math.Min(progress.AnxietySafeSeconds, required);
+
+            if (progress.AnxietySafeSeconds >= required || progress.AnxietySpikeCompletionAnnounced)
+            {
+                return """
+                    Вы справились с пиком тревоги.
+                    Теперь поговорите с Харви.
+                    """.Trim();
+            }
+
+            if (GameStateHelper.IsAnxietySafeLocation())
+            {
+                return $"""
+                    Останьтесь в безопасном месте.
+                    Прогресс: {seconds}/{required} сек.
+                    """.Trim();
+            }
 
             return $"""
-                Переждите пик тревоги в тихом месте:
-
-                {line}
-
-                Затем поговорите с Харви.
+                Найдите тихое безопасное место.
+                Подойдут: дом, клиника, лес или спокойный угол.
+                Прогресс: {seconds}/{required} сек.
                 """.Trim();
         }
 

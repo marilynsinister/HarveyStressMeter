@@ -30,6 +30,7 @@ namespace HarveyStressMeter.Handlers
         private readonly DarknessRemissionService _darknessRemissionService;
         private readonly StressLoadService _stressLoadService;
         private readonly SocialAnxietyTherapyService? _socialAnxietyTherapyService;
+        private readonly MedicalLetterScheduler? _medicalLetterScheduler;
 
         public EventHandler(
             IMonitor monitor,
@@ -43,7 +44,8 @@ namespace HarveyStressMeter.Handlers
             DarknessService darknessService,
             DarknessRemissionService darknessRemissionService,
             StressLoadService stressLoadService,
-            SocialAnxietyTherapyService? socialAnxietyTherapyService = null)
+            SocialAnxietyTherapyService? socialAnxietyTherapyService = null,
+            MedicalLetterScheduler? medicalLetterScheduler = null)
         {
             _monitor = monitor;
             _helper = helper;
@@ -57,6 +59,7 @@ namespace HarveyStressMeter.Handlers
             _darknessRemissionService = darknessRemissionService;
             _stressLoadService = stressLoadService;
             _socialAnxietyTherapyService = socialAnxietyTherapyService;
+            _medicalLetterScheduler = medicalLetterScheduler;
         }
 
         public void SubscribeToEvents()
@@ -96,6 +99,7 @@ namespace HarveyStressMeter.Handlers
             }
 
             _stateService.MigrateOldData();
+            _data.PendingMedicalLetters ??= new();
             _stateService.SyncWithGame();
             _treatmentService.SyncQuestsAndBuffs();
 
@@ -119,6 +123,9 @@ namespace HarveyStressMeter.Handlers
         private void OnDayStarted(object? s, DayStartedEventArgs e)
         {
             _monitor.Log("[OnDayStarted] Starting new day", LogLevel.Debug);
+
+            _medicalLetterScheduler?.ScrubStaleMailForTomorrow();
+            _medicalLetterScheduler?.RemoveStalePendingLetters();
             
             _gameLogicHandler.ResetDailyData();
             
@@ -151,6 +158,7 @@ namespace HarveyStressMeter.Handlers
             _darknessRemissionService.OnDayEnding();
             _gameLogicHandler.CheckDayEndingQuestCompletion();
             _gameLogicHandler.CheckLateSleepPattern();  // ⭐ НОВОЕ: Отслеживание позднего сна
+            _medicalLetterScheduler?.FlushValidLettersForTomorrow();
             _stressLoadService.SyncFromGameState();
             _stressLoadService.DecayStress(GetEndOfDayStressDecay());
             _stressLoadService.NormalizeRecoveryOffsetAtDayEnd();

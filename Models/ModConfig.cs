@@ -183,6 +183,17 @@ namespace HarveyStressMeter.Models
             StressGameplayMode.StoryFocus => 0f,
             _ => 1f,
         };
+
+        /// <summary>Устарело: используйте <see cref="MedicalLetters"/>.</summary>
+        public bool SendLetters
+        {
+            get => MedicalLetters != MedicalLetterMode.Off;
+            set => MedicalLetters = value ? MedicalLetterMode.All : MedicalLetterMode.Off;
+        }
+
+        public bool SendStoryLetters { get; set; } = true;
+        public bool SendRomanticCareLetters { get; set; } = true;
+        public MedicalLetterMode MedicalLetters { get; set; } = MedicalLetterMode.CriticalOnly;
     }
 }
 

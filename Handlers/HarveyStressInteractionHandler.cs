@@ -1,3 +1,5 @@
+using HarveyOverhaul.Core.Api;
+using HarveyOverhaul.Core.Services;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Helpers;
 using HarveyStressMeter.Services;
@@ -18,18 +20,24 @@ namespace HarveyStressMeter.Handlers
         private readonly IModHelper _helper;
         private readonly StressDialogueService _stressDialogueService;
         private readonly StressTreatmentReviewService _reviewService;
+        private readonly StressMedicalIntentProvider _medicalIntentProvider;
+        private IHarveyCoreApi? _coreApi;
 
         public HarveyStressInteractionHandler(
             IMonitor monitor,
             IModHelper helper,
             StressDialogueService stressDialogueService,
-            StressTreatmentReviewService reviewService)
+            StressTreatmentReviewService reviewService,
+            StressMedicalIntentProvider medicalIntentProvider)
         {
             _monitor = monitor;
             _helper = helper;
             _stressDialogueService = stressDialogueService;
             _reviewService = reviewService;
+            _medicalIntentProvider = medicalIntentProvider;
         }
+
+        public void SetCoreApi(IHarveyCoreApi? coreApi) => _coreApi = coreApi;
 
         public bool TryHandleHarveyStressInteraction(ButtonPressedEventArgs e)
         {
@@ -61,12 +69,17 @@ namespace HarveyStressMeter.Handlers
 
             LogHarveyClicked(pendingReview, pendingEpisode, pendingBuff);
 
+            if (ShouldDeferToHigherPriorityMedicalIntent(pendingBuff))
+                return false;
+
             if (TryShowProgrammaticDialogue(harvey, pendingReview))
             {
                 SuppressHarveyClickButtons(e);
                 return true;
             }
 
+            _coreApi?.SetHarveyClickGate(false, "StressHandler: no programmatic dialogue");
+            _coreApi?.LogHarveyClickDiagnostics("stress-fallback");
             _monitor.Log(
                 "[HarveyStress] Harvey clicked, no pending review. Falling back to vanilla dialogue.",
                 LogLevel.Debug);
@@ -90,25 +103,75 @@ namespace HarveyStressMeter.Handlers
             if (harvey.currentLocation != location || who.currentLocation != location)
                 return false;
 
-            if (!_reviewService.TryFindAnyTreatmentAwaitingReview(
+            if (_reviewService.TryFindAnyTreatmentAwaitingReview(
                     out var pendingEpisode,
                     out var pendingBuff,
                     repairStuck: true))
             {
+                LogHarveyClicked(pendingReview: true, pendingEpisode, pendingBuff);
+
+                if (ShouldDeferToHigherPriorityMedicalIntent(pendingBuff))
+                    return false;
+
+                if (_stressDialogueService.TryShowProgrammaticReviewDialogue(harvey))
+                {
+                    _coreApi?.SetHarveyClickGate(false, "StressHandler: checkAction review shown");
+                    _coreApi?.LogHarveyClickDiagnostics("stress-checkAction-review");
+                    _monitor.Log(
+                        "[HarveyStress] checkAction intercepted — programmatic review before vanilla dialogue.",
+                        LogLevel.Info);
+                    return true;
+                }
+
+                LogAnxietySpikeStuckStates();
                 return false;
             }
 
-            LogHarveyClicked(pendingReview: true, pendingEpisode, pendingBuff);
+            if (ShouldDeferToHigherPriorityMedicalIntent(null))
+                return false;
 
-            if (_stressDialogueService.TryShowProgrammaticReviewDialogue(harvey))
+            if (_stressDialogueService.TryShowTreatmentStartOrProgressDialogue(harvey))
             {
+                _coreApi?.SetHarveyClickGate(false, "StressHandler: checkAction treatment start shown");
+                _coreApi?.LogHarveyClickDiagnostics("stress-checkAction-start");
                 _monitor.Log(
-                    "[HarveyStress] checkAction intercepted — programmatic review before vanilla dialogue.",
+                    "[HarveyStress] checkAction intercepted — programmatic treatment start before spouse dialogue.",
                     LogLevel.Info);
                 return true;
             }
 
-            LogAnxietySpikeStuckStates();
+            return false;
+        }
+
+        private bool ShouldDeferToHigherPriorityMedicalIntent(string? stressBuffId)
+        {
+            if (_coreApi == null)
+                return false;
+
+            var resolution = _coreApi.PrepareHarveyMedicalClick(logDetails: true);
+            var selected = resolution.Selected;
+            if (selected == null)
+                return false;
+
+            if (!string.Equals(selected.ProviderId, HarveyProviderRegistry.StressProviderId, StringComparison.Ordinal))
+            {
+                _coreApi.SetHarveyClickGate(
+                    true,
+                    $"StressHandler deferred: Core selected {selected.ProviderId}/{selected.StateId}");
+                _coreApi.LogHarveyClickDiagnostics("stress-suppressed");
+                return true;
+            }
+
+            if (!string.IsNullOrEmpty(stressBuffId)
+                && !_medicalIntentProvider.CanShowStressIntent(stressBuffId))
+            {
+                _coreApi.SetHarveyClickGate(
+                    true,
+                    $"StressHandler deferred: Core selected stress/{selected.StateId}");
+                _coreApi.LogHarveyClickDiagnostics("stress-suppressed");
+                return true;
+            }
+
             return false;
         }
 
@@ -116,6 +179,8 @@ namespace HarveyStressMeter.Handlers
         {
             if (_stressDialogueService.TryShowProgrammaticReviewDialogue(harvey))
             {
+                _coreApi?.SetHarveyClickGate(false, "StressHandler: programmatic review shown");
+                _coreApi?.LogHarveyClickDiagnostics("stress-review");
                 _monitor.Log(
                     "[HarveyStress] Showing programmatic review before vanilla dialogue.",
                     LogLevel.Info);
@@ -127,6 +192,8 @@ namespace HarveyStressMeter.Handlers
 
             if (_stressDialogueService.TryShowTreatmentStartOrProgressDialogue(harvey))
             {
+                _coreApi?.SetHarveyClickGate(false, "StressHandler: programmatic treatment shown");
+                _coreApi?.LogHarveyClickDiagnostics("stress-treatment");
                 _monitor.Log(
                     "[HarveyStress] Showing programmatic treatment dialogue before vanilla dialogue.",
                     LogLevel.Info);

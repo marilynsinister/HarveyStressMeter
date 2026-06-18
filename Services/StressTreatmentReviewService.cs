@@ -110,23 +110,16 @@ namespace HarveyStressMeter.Services
 
         private int RepairStuckAnxietySpikeReview()
         {
-            var episode = _episodeService.GetActiveTreatmentEpisode();
-            if (episode == null
-                || !string.Equals(episode.EpisodeId, StressEpisodes.AnxietySpike, StringComparison.Ordinal)
-                || !episode.IsActiveEpisode()
-                || episode.AwaitingHarveyReview)
-            {
-                return 0;
-            }
-
-            var treatment = !string.IsNullOrEmpty(episode.QuestId)
-                ? _treatmentService.GetTreatmentByQuest(episode.QuestId)
-                : null;
+            var treatment = _treatmentService.GetTreatmentByQuest(QuestIds.AnxietySpike);
             if (treatment?.Progress == null
+                || !treatment.IsTreatmentActive()
+                || treatment.AwaitingHarveyReview
                 || treatment.Progress.AnxietySafeSeconds < EpisodeQuestRules.AnxietySafeSecondsRequired)
             {
                 return 0;
             }
+
+            treatment.Progress.AnxietySpikeCompletionAnnounced = true;
 
             _monitor.Log(
                 "[AnxietySpike] Objectives met but AwaitingHarveyReview=false — repairing review state.",

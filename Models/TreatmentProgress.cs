@@ -84,6 +84,9 @@ namespace HarveyStressMeter.Models
         /// <summary>AnxietySpike: секунды в безопасной локации.</summary>
         public int AnxietySafeSeconds { get; set; }
 
+        /// <summary>AnxietySpike: HUD/journal completion уже объявлены (защита от пропуска при скачке счётчика).</summary>
+        public bool AnxietySpikeCompletionAnnounced { get; set; }
+
 
         // ===== Голод (Hunger) =====
         /// <summary>

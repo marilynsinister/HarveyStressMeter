@@ -42,6 +42,7 @@ namespace HarveyStressMeter.Handlers
         private readonly DarknessRemissionService _darknessRemissionService;
         private readonly SocialExposureService _socialExposureService;
         private readonly SocialAnxietyTherapyService? _socialAnxietyTherapyService;
+        private readonly EpisodeQuestProgressService? _episodeQuestProgressService;
 
         private bool _pendingTalkHarveyWarp = true;
 
@@ -80,7 +81,8 @@ namespace HarveyStressMeter.Handlers
             DarknessService darknessService,
             DarknessRemissionService darknessRemissionService,
             SocialExposureService socialExposureService,
-            SocialAnxietyTherapyService? socialAnxietyTherapyService = null)
+            SocialAnxietyTherapyService? socialAnxietyTherapyService = null,
+            EpisodeQuestProgressService? episodeQuestProgressService = null)
         {
             _monitor = monitor;
             _helper = helper;
@@ -104,6 +106,7 @@ namespace HarveyStressMeter.Handlers
             _darknessRemissionService = darknessRemissionService;
             _socialExposureService = socialExposureService;
             _socialAnxietyTherapyService = socialAnxietyTherapyService;
+            _episodeQuestProgressService = episodeQuestProgressService;
         }
 
         public void RegisterCommands()
@@ -243,6 +246,14 @@ namespace HarveyStressMeter.Handlers
                 "stress_episode_debug",
                 "DEV/TEST: snapshot of ActiveTreatmentEpisode, objectives, quest journal.",
                 (_, __) => StressEpisodeDebug());
+            _helper.ConsoleCommands.Add(
+                "stress_anxiety_debug",
+                "DEV/TEST: AnxietySpike progress, location, journal objective snapshot.",
+                (_, __) => StressAnxietyDebug());
+            _helper.ConsoleCommands.Add(
+                "stress_anxiety_repair",
+                "DEV/TEST: repair stuck AnxietySpike (objectives met, no review).",
+                (_, __) => StressAnxietyRepair());
             _helper.ConsoleCommands.Add(
                 "stress_reset",
                 "DEV/TEST: alias for stress_reset_all.",
@@ -1485,6 +1496,73 @@ namespace HarveyStressMeter.Handlers
                 _data.OverworkBreaksToday).Replace('\n', ' ')}");
             LogDev($"IsAnxietySafeLocation={GameStateHelper.IsAnxietySafeLocation()}");
             LogDev($"Current location={Game1.currentLocation?.Name ?? "(null)"}");
+        }
+
+        private void StressAnxietyDebug()
+        {
+            LogDev("=== stress_anxiety_debug ===");
+
+            var episode = _data.ActiveTreatmentEpisode;
+            LogDev($"ActiveTreatmentEpisode={(episode != null ? episode.EpisodeId : "(none)")}");
+            if (episode == null)
+                return;
+
+            LogDev($"EpisodeId={episode.EpisodeId}");
+            LogDev($"QuestId={episode.QuestId ?? "(null)"}");
+            LogDev($"AwaitingHarveyReview={episode.AwaitingHarveyReview}");
+
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(episode.QuestId);
+            if (treatment?.Progress == null)
+            {
+                LogDev("No treatment progress.");
+                return;
+            }
+
+            var progress = treatment.Progress;
+            LogDev($"AnxietySafeSeconds={progress.AnxietySafeSeconds}");
+            LogDev($"RequiredSeconds={EpisodeQuestRules.AnxietySafeSecondsRequired}");
+            LogDev($"AnxietySpikeCompletionAnnounced={progress.AnxietySpikeCompletionAnnounced}");
+            LogDev($"IsAnxietySafeLocation={GameStateHelper.IsAnxietySafeLocation()}");
+            LogDev($"currentLocation={Game1.currentLocation?.Name ?? "(null)"}");
+            LogDev($"treatmentKey={treatment.BuffId ?? "(none)"}");
+
+            var questId = episode.QuestId ?? QuestIds.AnxietySpike;
+            LogDev($"questExistsInJournal={_questService.HasQuest(questId)}");
+
+            if (_questService.HasQuest(questId))
+            {
+                var quest = Game1.player.questLog.FirstOrDefault(q => q.id.Value == questId);
+                var objective = quest?.currentObjective?.Replace('\n', ' ') ?? "(null)";
+                LogDev($"currentObjective={objective}");
+            }
+
+            LogDev($"journalBuilder={EpisodeQuestProgressService.BuildObjectiveText(
+                StressEpisodes.AnxietySpike,
+                progress,
+                episode,
+                _data.OverworkBreaksToday).Replace('\n', ' ')}");
+        }
+
+        private void StressAnxietyRepair()
+        {
+            LogDev("=== stress_anxiety_repair ===");
+
+            if (_episodeQuestProgressService == null)
+            {
+                LogDevError("EpisodeQuestProgressService not available.");
+                return;
+            }
+
+            var repaired = _episodeQuestProgressService.RepairStuckAnxietySpike();
+            if (repaired)
+            {
+                LogDev("AnxietySpike repaired: AwaitingHarveyReview set, journal updated.");
+                StressAnxietyDebug();
+                return;
+            }
+
+            LogDev("Nothing to repair (no active AnxietySpike or objectives not met).");
+            StressAnxietyDebug();
         }
 
         private void StressReviewForce(string command, string[] args)

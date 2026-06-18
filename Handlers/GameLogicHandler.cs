@@ -6,6 +6,8 @@ using StardewValley;
 using StardewValley.Menus;
 using HarveyStressMeter.Services;
 using HarveyStressMeter.Models;
+using HarveyOverhaul.Core.Api;
+using HarveyOverhaul.Core.Services;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Helpers;
 using StardewModdingAPI.Utilities;
@@ -37,6 +39,7 @@ namespace HarveyStressMeter.Handlers
         private readonly StressGameplayEffectService _stressGameplayEffectService;
         private readonly EpisodeQuestProgressService? _episodeQuestProgressService;
         private SocialAnxietyTherapyService? _socialAnxietyTherapyService;
+        private IHarveyCoreApi? _coreApi;
 
         private string? _lastDialogueNpc;
         /// <summary>Один stress debuff за MenuChanged/DialogueBox cycle с Харви.</summary>
@@ -131,6 +134,8 @@ namespace HarveyStressMeter.Handlers
 
         public void SetSocialAnxietyTherapyService(SocialAnxietyTherapyService socialAnxietyTherapyService)
             => _socialAnxietyTherapyService = socialAnxietyTherapyService;
+
+        public void SetCoreApi(IHarveyCoreApi? coreApi) => _coreApi = coreApi;
 
         public void RepairStuckSocialTreatments()
             => _triggerService.RepairStuckSocialTreatments();
@@ -244,14 +249,7 @@ namespace HarveyStressMeter.Handlers
                 _progressUpdateCounter = 0;
 
                 if (GameStateHelper.ShouldCountTreatmentTime())
-                {
                     ProcessTreatmentTimerTick(harveyNearby);
-                    LogTreatmentTimerDebug(harveyNearby, counting: true);
-                }
-                else
-                {
-                    LogTreatmentTimerDebug(harveyNearby, counting: false);
-                }
 
                 _stressGameplayEffectService.UpdateEffects();
             }
@@ -316,54 +314,6 @@ namespace HarveyStressMeter.Handlers
             _harveyFlashbackRescueService.Update(1);
 
             _socialExposureService.UpdateRecovery(harveyNearby);
-        }
-
-        private int _timerDebugLogCooldown;
-
-        private void LogTreatmentTimerDebug(bool harveyNearby, bool counting)
-        {
-            _timerDebugLogCooldown--;
-            if (_timerDebugLogCooldown > 0)
-                return;
-
-            _timerDebugLogCooldown = 8;
-
-            if (!counting)
-            {
-                _monitor.Log(
-                    $"[StressTimer] Timer blocked: {GameStateHelper.GetTreatmentTimeBlockReason()}.",
-                    LogLevel.Debug);
-                return;
-            }
-
-            if (_stateService.HasActiveQuestState(QuestIds.Social))
-            {
-                var treatment = _data.StressState.GetActiveTreatment(BuffIds.Social);
-                var seconds = treatment?.Progress?.SecondsNearHarvey ?? 0;
-                _monitor.Log(
-                    $"[StressTimer] Timer ticking: Social SecondsNearHarvey {seconds}/60.",
-                    LogLevel.Debug);
-                return;
-            }
-
-            if (_stateService.HasActiveQuestState(QuestIds.SocialShutdown) && harveyNearby)
-            {
-                var treatment = _data.StressState.GetActiveTreatmentByQuest(QuestIds.SocialShutdown);
-                var seconds = treatment?.Progress?.SecondsNearHarvey ?? 0;
-                _monitor.Log(
-                    $"[StressTimer] Timer ticking: SocialShutdown SecondsNearHarvey {seconds}/60.",
-                    LogLevel.Debug);
-                return;
-            }
-
-            if (_stateService.HasActiveQuestState(QuestIds.Thunder) && harveyNearby)
-            {
-                var treatment = _data.StressState.GetActiveTreatment(BuffIds.Thunder);
-                var seconds = treatment?.Progress?.SecondsNearHarvey ?? 0;
-                _monitor.Log(
-                    $"[StressTimer] Timer ticking: Thunder SecondsNearHarvey {seconds}/120.",
-                    LogLevel.Debug);
-            }
         }
 
         /// <summary>
@@ -594,6 +544,9 @@ namespace HarveyStressMeter.Handlers
             if (!CanRunStressDialoguePipeline(harveyNpc))
                 return;
 
+            if (ShouldSkipStressDialogueForHigherPriorityIntent())
+                return;
+
             if (_stressDialogueService.IsShowingStressDialogue
                 || _stressDialogueService.HasDeferredStressDialogue)
             {
@@ -684,6 +637,32 @@ namespace HarveyStressMeter.Handlers
                 return;
 
             _treatmentService.AddTopicForBuff(primary);
+        }
+
+        private bool ShouldSkipStressDialogueForHigherPriorityIntent()
+        {
+            if (_coreApi == null)
+                return false;
+
+            var resolution = _coreApi.GetLastHarveyMedicalIntentResolution()
+                ?? _coreApi.PrepareHarveyMedicalClick(logDetails: false);
+
+            var selected = resolution.Selected;
+            if (selected == null)
+                return false;
+
+            if (string.Equals(selected.ProviderId, HarveyProviderRegistry.StressProviderId, StringComparison.Ordinal))
+                return false;
+
+            _coreApi.SetHarveyClickGate(
+                true,
+                $"GameLogicHandler: injury intent {selected.ProviderId}/{selected.StateId}");
+            _coreApi.LogHarveyClickDiagnostics("stress-dialogue-skipped");
+            _monitor.Log(
+                $"[HandleHarveyDialogue] Skipped stress replace: Core selected {selected.ProviderId}/{selected.StateId} " +
+                $"(topic={selected.TopicKey})",
+                LogLevel.Info);
+            return true;
         }
 
         private void HandleHarveyDialogueEnd()
@@ -1252,6 +1231,8 @@ namespace HarveyStressMeter.Handlers
                     break;
                 case StressEpisodes.AnxietySpike:
                     treatment.Progress.AnxietySafeSeconds = 0;
+                    treatment.Progress.AnxietySpikeCompletionAnnounced = false;
+                    _episodeQuestProgressService?.ResetAnxietyTracking();
                     break;
             }
 

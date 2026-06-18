@@ -21,6 +21,7 @@ namespace HarveyStressMeter.Services
         private readonly QuestService _questService;
         private StressLoadService? _stressLoadService;
         private DarknessRemissionService? _remissionService;
+        private MedicalLetterScheduler? _medicalLetterScheduler;
         private readonly IMonitor _monitor;
 
         private bool _worryLetterSent;
@@ -55,6 +56,9 @@ namespace HarveyStressMeter.Services
 
         public void SetRemissionService(DarknessRemissionService remissionService)
             => _remissionService = remissionService;
+
+        public void SetMedicalLetterScheduler(MedicalLetterScheduler scheduler)
+            => _medicalLetterScheduler = scheduler;
 
         /// <summary>
         /// Проверить и применить дебафф темноты при входе в локацию
@@ -1395,7 +1399,12 @@ namespace HarveyStressMeter.Services
             if (_worryLetterSent || ConversationHelper.HasTopic("topicHarveyDarknessWorryLetterSent"))
                 return;
 
-            _questService.AddMailForTomorrow(MailIds.DarknessWorry);
+            _medicalLetterScheduler?.QueueMedicalLetter(
+                MailIds.DarknessWorry,
+                MedicalLetterReasons.DarknessWorry,
+                BuffIds.Darkness,
+                critical: false,
+                MailIds.DarknessWorry);
             ConversationHelper.AddTopic("topicHarveyDarknessWorryLetterSent", 14);
             _worryLetterSent = true;
             _monitor.Log("[DarknessService] Письмо от Харви о беспокойстве (фobия) запланировано на завтра", LogLevel.Info);

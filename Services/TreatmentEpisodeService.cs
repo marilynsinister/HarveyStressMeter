@@ -149,48 +149,41 @@ namespace HarveyStressMeter.Services
         public void MarkTreatmentEpisodeReadyForReview(string episodeId, string? optionalMessage = null)
         {
             var episode = GetActiveTreatmentEpisode();
-            if (episode == null || !string.Equals(episode.EpisodeId, episodeId, StringComparison.Ordinal))
+            if (episode != null
+                && string.Equals(episode.EpisodeId, episodeId, StringComparison.Ordinal))
             {
-                if (TryMarkEpisodeReadyForReviewWithoutEpisodeState(episodeId, optionalMessage))
+                if (episode.AwaitingHarveyReview || episode.IsCompleted)
                     return;
 
+                episode.ObjectivesCompleted = true;
+                episode.AwaitingHarveyReview = true;
+                episode.ReadyForReviewTime = Game1.timeOfDay;
+
+                _questService.UpdateQuest(episode.QuestId, objective: StressQuestCopy.ReadyForReviewObjective);
+
+                SyncLegacyTreatmentReviewFlags(episode);
+                AddReadyForReviewTopic(episode);
+
+                _stressLoadService.Recalculate();
+
+                ShowHudMessage(optionalMessage ?? StressQuestCopy.ReadyForReviewHud);
+
+                _trustService?.OnTreatmentMarkedReadyForReview(episodeId);
+
                 _monitor.Log(
-                    $"[MarkTreatmentEpisodeReadyForReview] Active episode mismatch: expected {episodeId}, " +
-                    $"got {episode?.EpisodeId ?? "(none)"}",
-                    LogLevel.Warn);
+                    $"[MarkTreatmentEpisodeReadyForReview] episode={episodeId}, quest={episode.QuestId}, AwaitingHarveyReview=true",
+                    LogLevel.Info);
+
                 return;
             }
 
-            if (episode.AwaitingHarveyReview || episode.IsCompleted)
+            if (TryMarkEpisodeReadyForReviewWithoutEpisodeState(episodeId, optionalMessage))
                 return;
-
-            episode.ObjectivesCompleted = true;
-            episode.AwaitingHarveyReview = true;
-            episode.ReadyForReviewTime = Game1.timeOfDay;
-
-            _questService.UpdateQuest(episode.QuestId, objective: StressQuestCopy.ReadyForReviewObjective);
-
-            SyncLegacyTreatmentReviewFlags(episode);
-            AddReadyForReviewTopic(episode);
-
-            _stressLoadService.Recalculate();
-
-            ShowHudMessage(optionalMessage ?? StressQuestCopy.ReadyForReviewHud);
-
-            _trustService?.OnTreatmentMarkedReadyForReview(episodeId);
 
             _monitor.Log(
-                $"[MarkTreatmentEpisodeReadyForReview] episode={episodeId}, quest={episode.QuestId}, AwaitingHarveyReview=true",
-                LogLevel.Info);
-
-            if (string.Equals(episodeId, StressEpisodes.AnxietySpike, StringComparison.Ordinal))
-            {
-                var buffId = ResolvePrimaryBuffId(episode);
-                _monitor.Log(
-                    $"[AnxietySpike] AwaitingHarveyReview=true, episode={episodeId}, " +
-                    $"questId={episode.QuestId}, treatmentKey={buffId ?? "(none)"}",
-                    LogLevel.Info);
-            }
+                $"[MarkTreatmentEpisodeReadyForReview] Could not mark review for {episodeId} " +
+                $"(active={episode?.EpisodeId ?? "(none)"})",
+                LogLevel.Warn);
         }
 
         /// <summary>Fallback для старых сейвов: episode state потерян, но квест в журнале активен.</summary>
@@ -292,7 +285,20 @@ namespace HarveyStressMeter.Services
             SetEpisodeImmunity(episodeId, DefaultEpisodeImmunityDays);
             _treatmentService?.ApplyCompletionRewards(buffId, message, removeReviewTopic: true);
 
-            _data.ActiveTreatmentEpisode = null;
+            // Не сбрасывать чужой активный episode (например AnxietySpike при завершении SocialShutdown).
+            if (_data.ActiveTreatmentEpisode != null
+                && string.Equals(_data.ActiveTreatmentEpisode.EpisodeId, episodeId, StringComparison.Ordinal))
+            {
+                _data.ActiveTreatmentEpisode = null;
+            }
+            else if (_data.ActiveTreatmentEpisode != null)
+            {
+                _monitor.Log(
+                    $"[CompleteTreatmentEpisode] Fallback: сохранён ActiveTreatmentEpisode=" +
+                    $"{_data.ActiveTreatmentEpisode.EpisodeId} после завершения {episodeId}",
+                    LogLevel.Info);
+            }
+
             _stressLoadService.Recalculate();
 
             _trustService?.OnTimelyReviewCompleted();

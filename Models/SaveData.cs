@@ -75,6 +75,9 @@ namespace HarveyStressMeter.Models
         /// <summary>Кулдаун повторного episode после CompleteTreatmentEpisode.</summary>
         public Dictionary<string, SDate> EpisodeImmunityUntil { get; set; } = new();
 
+        /// <summary>Очередь медицинских писем — валидируется перед отправкой.</summary>
+        public List<PendingMedicalLetter> PendingMedicalLetters { get; set; } = new();
+
         // ============================================
         // УСТАРЕВШИЕ ПОЛЯ (для обратной совместимости)
         // Будут мигрированы в StressState при загрузке

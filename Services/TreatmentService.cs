@@ -27,6 +27,7 @@ namespace HarveyStressMeter.Services
         private EpisodeQuestProgressService? _episodeQuestProgressService;
         private DarknessService? _darknessService;
         private SocialAnxietyTherapyService? _socialAnxietyTherapyService;
+        private MedicalLetterScheduler? _medicalLetterScheduler;
 
         // Карты связей buff -> quest/topic/mail
         private static readonly Dictionary<string, string> BuffToQuest = new()
@@ -109,6 +110,9 @@ namespace HarveyStressMeter.Services
             _darknessService = darknessService;
             _monitor.Log("[TreatmentService] DarknessService установлен", LogLevel.Debug);
         }
+
+        public void SetMedicalLetterScheduler(MedicalLetterScheduler scheduler)
+            => _medicalLetterScheduler = scheduler;
 
         public void SetSocialAnxietyTherapyService(SocialAnxietyTherapyService socialAnxietyTherapyService)
             => _socialAnxietyTherapyService = socialAnxietyTherapyService;
@@ -356,14 +360,19 @@ namespace HarveyStressMeter.Services
                 _stressLoadService.SetActiveTreatmentEpisode(episodeId);
             }
 
-            // ⭐ НОВОЕ: Отправляем письмо о начале лечения
-            if (_gameDataService != null)
+            // ⭐ НОВОЕ: Отправляем письмо о начале лечения (routine — только MedicalLetters=All)
+            if (_gameDataService != null && _medicalLetterScheduler != null)
             {
                 var mailData = _gameDataService.GetMailForBuff(buffId);
                 if (mailData != null)
                 {
-                    _questService.AddMailForTomorrow(mailData.Id);
-                    _monitor.Log($"[StartTreatment] ✅ Письмо '{mailData.Id}' добавлено на завтра", LogLevel.Info);
+                    _medicalLetterScheduler.QueueMedicalLetter(
+                        mailData.Id,
+                        MedicalLetterReasons.StressTreatmentStart,
+                        buffId,
+                        critical: false,
+                        mailData.Id);
+                    _monitor.Log($"[StartTreatment] Письмо '{mailData.Id}' в pending ({buffId})", LogLevel.Info);
                 }
                 else
                 {
@@ -668,6 +677,9 @@ namespace HarveyStressMeter.Services
                     LogLevel.Debug);
             }
 
+            _medicalLetterScheduler?.CancelLettersForState(buffId);
+            _medicalLetterScheduler?.CancelLettersForReason(MedicalLetterReasons.StressTreatmentStart);
+
             if (playSoundAndHud)
             {
                 Game1.playSound("discoverMineral");
@@ -684,7 +696,12 @@ namespace HarveyStressMeter.Services
             if (harvey != null)
                 Game1.player.changeFriendship(100, harvey);
 
-            _questService.AddMailForTomorrow(MailIds.GenericDone);
+            _medicalLetterScheduler?.QueueMedicalLetter(
+                MailIds.GenericDone,
+                MedicalLetterReasons.StressTreatmentDone,
+                "",
+                critical: false,
+                MailIds.GenericDone);
         }
 
         private bool CanStartTreatmentForBuff(string buffId, string? episodeId)

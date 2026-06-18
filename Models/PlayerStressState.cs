@@ -117,6 +117,15 @@ namespace HarveyStressMeter.Models
             return ActiveTreatments.Values.FirstOrDefault(t => t.QuestId == questId && t.IsTreatmentActive());
         }
 
+        /// <summary>Лечение по questId, включая выданный квест без TreatmentStarted.</summary>
+        public TreatmentState? FindOpenTreatmentByQuest(string questId)
+        {
+            return ActiveTreatments.Values.FirstOrDefault(t =>
+                string.Equals(t.QuestId, questId, StringComparison.Ordinal)
+                && !t.IsCured
+                && !t.IsCompleted);
+        }
+
         /// <summary>
         /// Получает количество завершений лечения
         /// </summary>

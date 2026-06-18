@@ -27,6 +27,7 @@ namespace HarveyStressMeter.Services
         private readonly IMonitor _monitor;
         private EpisodeQuestProgressService? _episodeQuestProgressService;
         private SocialAnxietyTherapyService? _socialAnxietyTherapyService;
+        private RecoveryPlanBridge? _recoveryPlanBridge;
 
         public TriggerService(SaveData data, BuffService buffService, QuestService questService, StateService stateService, TreatmentService treatmentService, IMonitor monitor)
         {
@@ -43,6 +44,9 @@ namespace HarveyStressMeter.Services
 
         public void SetSocialAnxietyTherapyService(SocialAnxietyTherapyService socialAnxietyTherapyService)
             => _socialAnxietyTherapyService = socialAnxietyTherapyService;
+
+        public void SetRecoveryPlanBridge(RecoveryPlanBridge bridge)
+            => _recoveryPlanBridge = bridge;
 
         /// <summary>После загрузки: перевести в review, если цели уже выполнены (старые сейвы).</summary>
         public void RepairStuckSocialTreatments()
@@ -171,6 +175,7 @@ namespace HarveyStressMeter.Services
                 LogLevel.Info);
 
             _treatmentService.MarkTreatmentReadyForReviewByEpisode(StressEpisodes.SocialShutdown);
+            _recoveryPlanBridge?.CompleteEpisodeAssignment(StressEpisodes.SocialShutdown);
 
             if (!IsAwaitingHarveyReview(QuestIds.SocialShutdown))
             {
@@ -267,6 +272,7 @@ namespace HarveyStressMeter.Services
                 p.EpisodeCausesCompleted = new HashSet<string>(progress.EpisodeCausesCompleted);
                 p.BurnoutAvoidedMinesToday = progress.BurnoutAvoidedMinesToday;
                 p.AnxietySafeSeconds = progress.AnxietySafeSeconds;
+                p.AnxietySpikeCompletionAnnounced = progress.AnxietySpikeCompletionAnnounced;
                 p.QuestObjectivesEnabledAfterTick = progress.QuestObjectivesEnabledAfterTick;
             });
         }
@@ -338,6 +344,11 @@ namespace HarveyStressMeter.Services
             if (harveyNearby)
             {
                 progress.SecondsNearHarvey++;
+
+                _recoveryPlanBridge?.SyncProgress(
+                    StressEpisodes.SocialShutdown,
+                    progress.SecondsNearHarvey,
+                    SocialShutdownHarveySecondsRequired);
 
                 switch (progress.SecondsNearHarvey)
                 {

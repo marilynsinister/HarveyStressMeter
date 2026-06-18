@@ -8,7 +8,7 @@ using HarveyStressMeter.UI;
 
 namespace HarveyStressMeter.Api;
 
-/// <summary>Отдаёт данные стресса и доверия в общее окно «План Харви» (HarveyOverhaul.Core).</summary>
+/// <summary>Отдаёт данные стресса для вкладок Обзор/Стресс/Доверие. План — через <see cref="StressCareDirectiveProvider"/>.</summary>
 public sealed class StressPanelProvider : IHarveyPanelProvider
 {
     public const string ProviderId = "marilynsinister.HarveyStressMeter";
@@ -50,10 +50,8 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
             _data.OverworkBreaksToday);
 
         var overview = BuildOverviewContent(assignment, handbook);
-        var planFields = BuildStressPlanFields(assignment);
         var overviewSections = BuildOverviewSections(assignment, handbook);
         var stressSections = BuildStressSections(handbook, assignment);
-        var planSections = BuildPlanSections(assignment);
         var trustSections = BuildTrustSections();
 
         bool awaitingReview = HasPendingTreatmentReview()
@@ -65,11 +63,12 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
             ProviderId = ProviderId,
             HasPendingHarveyReview = awaitingReview,
             HasPriorityAppointment = awaitingReview,
-            HasActiveRecoveryPlan = HasActiveStressAssignment(),
+            HasActiveRecoveryPlan = handbook.ActiveStates.Count > 0
+                || assignment.HasAssignment
+                || HasPendingTreatmentReview(),
             OverviewFields = overview,
             OverviewSections = overviewSections,
             StressSections = stressSections,
-            PlanSections = planSections,
             TrustSections = trustSections,
             StressFields = new HarveyPanelStressFields
             {
@@ -80,7 +79,6 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
                 NoAssignmentLine = assignment.HasAssignment ? "" : HarveyPanelTexts.Stress.NoAssignment,
                 Handbook = handbook,
             },
-            PlanFields = planFields,
             TrustFields = new HarveyPanelTrustFields
             {
                 LevelLine = BuildTrustLevelLine(),
@@ -187,35 +185,6 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
                 Body = assignment.ObjectiveText,
                 Status = assignment.ProgressLine,
                 Priority = 0,
-                Severity = HarveyPanelSeverity.Normal,
-            });
-        }
-
-        return sections;
-    }
-
-    private static List<HarveyPanelSectionDto> BuildPlanSections(HarveyPanelAssignmentFormatter.Display assignment)
-    {
-        var sections = new List<HarveyPanelSectionDto>();
-
-        if (assignment.AwaitingHarveyReview)
-        {
-            sections.Add(new HarveyPanelSectionDto
-            {
-                Title = HarveyPanelTexts.Overview.HarveyWaitingHeadline,
-                Body = HarveyPanelTexts.TalkToHarvey(),
-                Priority = 0,
-                Severity = HarveyPanelSeverity.Urgent,
-            });
-        }
-        else if (assignment.HasAssignment)
-        {
-            sections.Add(new HarveyPanelSectionDto
-            {
-                Title = HarveyPanelTexts.Plan.StressAssignmentTitle,
-                Body = assignment.ObjectiveText,
-                Status = assignment.ProgressLine,
-                Priority = 10,
                 Severity = HarveyPanelSeverity.Normal,
             });
         }
@@ -341,18 +310,6 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
             return "";
 
         return $"Стресс: {string.Join(", ", names)}.";
-    }
-
-    private HarveyPanelPlanFields? BuildStressPlanFields(HarveyPanelAssignmentFormatter.Display assignment)
-    {
-        if (!assignment.HasAssignment)
-            return null;
-
-        return new HarveyPanelPlanFields
-        {
-            Title = HarveyPanelTexts.Plan.StressAssignmentTitle,
-            Body = assignment.ObjectiveText,
-        };
     }
 
     private string BuildTrustLevelLine()
