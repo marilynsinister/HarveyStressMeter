@@ -417,6 +417,8 @@ namespace HarveyStressMeter.Handlers
             if (e.NewTime / 100 != e.OldTime / 100)
                 _stressLoadService.ApplyHourlyDecay();
 
+            _socialExposureService.ApplyPassiveRecovery();
+
             // Obmorok from tiredness (at 2:00 am = 2600 in 26-hour time)
             if (e.NewTime == 2600 && Game1.player.Stamina >= 0 && Game1.player.Stamina <= 5)
             {

@@ -43,12 +43,18 @@ namespace HarveyStressMeter.Helpers
             return friendship.Points switch
             {
                 >= 2000 => 0,  // 8+ сердец — близкий человек, не утомляет
-                >= 1250 => 6,  // 5–7 сердец
-                >= 750 => 10,  // 3–4 сердца
-                >= 250 => 15,  // 1–2 сердца
-                _ => 22,
+                >= 1250 => 5,  // 5–7 сердец
+                >= 750 => 9,   // 3–4 сердца
+                >= 250 => 14,  // 1–2 сердца
+                _ => 20,
             };
         }
+
+        /// <summary>
+        /// Естественное восстановление каждые 10 игровых минут (≈12 в час).
+        /// Срыв дают насыщенные часы (5–6 разговоров с малознакомыми подряд), а не обход жителей за весь день.
+        /// </summary>
+        public const int PassiveRecoveryPer10Minutes = 2;
 
         public static float GetAccumulationMultiplier(bool hasOtherStressDebuff)
         {

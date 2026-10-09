@@ -153,6 +153,15 @@ namespace HarveyStressMeter.Services
             }
         }
 
+        /// <summary>Каждые 10 игровых минут усталость понемногу спадает (кроме времени разговора).</summary>
+        public void ApplyPassiveRecovery()
+        {
+            if (Game1.activeClickableMenu is StardewValley.Menus.DialogueBox || Game1.CurrentEvent != null)
+                return;
+
+            ApplyRecovery(-SocialStressHelper.PassiveRecoveryPer10Minutes, "время без разговоров");
+        }
+
         public void SetExposure(int value)
         {
             var previous = State.SocialExposureToday;

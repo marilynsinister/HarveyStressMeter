@@ -77,8 +77,8 @@ namespace HarveyStressMeter.Models
         /// <summary>Max MaxStamina penalty points from consolidated stress (cap).</summary>
         public int MaxStaminaPenalty { get; set; } = 25;
 
-        /// <summary>Max Speed penalty (absolute, e.g. 1 = -1 speed).</summary>
-        public int MaxSpeedPenalty { get; set; } = 1;
+        /// <summary>Max Speed penalty (absolute, e.g. 1 = -1 speed). 0 — стресс не замедляет (замедление раздражало в начале игры).</summary>
+        public int MaxSpeedPenalty { get; set; } = 0;
 
         /// <summary>Tier stamina penalty at Mild (before cap/multiplier).</summary>
         public int MildStaminaPenalty { get; set; } = 6;
@@ -90,7 +90,7 @@ namespace HarveyStressMeter.Models
         public int CriticalStaminaPenalty { get; set; } = 22;
 
         /// <summary>Tier speed penalty at Critical only.</summary>
-        public int CriticalSpeedPenalty { get; set; } = 1;
+        public int CriticalSpeedPenalty { get; set; } = 0;
 
         /// <summary>
         /// When true, cause buffs stay visible but mechanical effects come only from tier buff (capped).
