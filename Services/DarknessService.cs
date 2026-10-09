@@ -1144,7 +1144,7 @@ namespace HarveyStressMeter.Services
                 _data.Darkness.SafeZonesVisited.Add(locationName);
                 
                 string zoneName = locationName == "BusStop" ? "Автобусная остановка" : "Город";
-                Game1.addHUDMessage(new HUDMessage($"✓ Зона посещена: {zoneName} ({_data.Darkness.SafeZonesVisited.Count}/2)", HUDMessage.achievement_type));
+                Game1.addHUDMessage(new HUDMessage($"Зона посещена: {zoneName} ({_data.Darkness.SafeZonesVisited.Count}/2)", HUDMessage.achievement_type));
                 Game1.playSound("coin");
                 
                 _monitor.Log($"[DarknessService] Шаг 2: Посещена зона {locationName} ({_data.Darkness.SafeZonesVisited.Count}/2)", LogLevel.Info);

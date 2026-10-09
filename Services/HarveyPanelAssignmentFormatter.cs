@@ -154,7 +154,7 @@ namespace HarveyStressMeter.Services
             int overworkBreaksToday,
             bool informal)
         {
-            string mark = done ? "✓" : "○";
+            string mark = done ? "+" : "-";
             return causeId switch
             {
                 StressCauses.Hunger => $"{mark} {(informal ? "Съешь что-нибудь" : "Съешьте что-нибудь")}",
@@ -169,7 +169,7 @@ namespace HarveyStressMeter.Services
         private static Display BuildBurnout(TreatmentProgress progress, bool awaiting, bool informal)
         {
             string minesLine = progress.BurnoutAvoidedMinesToday
-                ? (informal ? "✓ Сегодня без шахт" : "✓ Сегодня без шахт")
+                ? "+ Сегодня без шахт"
                 : (informal
                     ? "○ Нужен день без шахт"
                     : "○ Нужен день без шахт");
