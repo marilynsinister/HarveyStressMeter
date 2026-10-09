@@ -30,6 +30,11 @@ namespace HarveyStressMeter.Helpers
             return !string.Equals(npc.Name, "Harvey", System.StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// Базовая прибавка за первый разговор с NPC за день. Раньше при 3+ сердцах было +0 —
+        /// в середине игры почти все жители выше 3 сердец, и шкала фактически не росла.
+        /// Теперь +0 только для близких (8+ сердец), знакомые всё ещё немного утомляют.
+        /// </summary>
         public static int GetBaseExposureGain(string npcName)
         {
             if (!Game1.player.friendshipData.TryGetValue(npcName, out var friendship))
@@ -37,9 +42,10 @@ namespace HarveyStressMeter.Helpers
 
             return friendship.Points switch
             {
-                >= 750 => 0,
-                >= 500 => 8,
-                >= 250 => 14,
+                >= 2000 => 0,  // 8+ сердец — близкий человек, не утомляет
+                >= 1250 => 6,  // 5–7 сердец
+                >= 750 => 10,  // 3–4 сердца
+                >= 250 => 15,  // 1–2 сердца
                 _ => 22,
             };
         }
@@ -90,6 +96,10 @@ namespace HarveyStressMeter.Helpers
             ThresholdOverload => "Ты на грани социальной перегрузки.",
             _ => "",
         };
+
+        /// <summary>HUD, когда шкала дошла до 100, но debuff выдать нельзя (иммунитет/кулдаун).</summary>
+        public const string MaxReachedButProtectedHud =
+            "Общение вымотало, но после лечения у Харви ты справляешься легче.";
 
         public static bool IsHomeRecoveryContext()
             => Game1.timeOfDay >= HomeRecoveryStartTime

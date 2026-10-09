@@ -68,6 +68,7 @@ namespace HarveyStressMeter
         private HandbookManager _handbookManager = null!;
         private StressPanelProvider _stressPanelProvider = null!;
         private StressCareDirectiveProvider _stressCareDirectiveProvider = null!;
+        private StressStateApi? _stressStateApi;
         private RecoveryPlanBridge _recoveryPlanBridge = null!;
         private IModHelper _helper = null!;
         private Harmony? _harmony;
@@ -489,7 +490,9 @@ namespace HarveyStressMeter
 
             coreApi.RegisterPanelProvider(_stressPanelProvider);
             coreApi.RegisterCareDirectiveProvider(_stressCareDirectiveProvider);
-            _recoveryPlanBridge.Bind(Helper);
+            coreApi.RegisterStressStateApi(_stressStateApi ??= new StressStateApi(
+                _data, _stateService, _treatmentService, _stressLoadService, Monitor));
+            _recoveryPlanBridge.Bind(coreApi);
             _stressMedicalIntentProvider?.SetCoreApi(coreApi);
             _harveyStressInteractionHandler?.SetCoreApi(coreApi);
             _gameLogicHandler?.SetCoreApi(coreApi);

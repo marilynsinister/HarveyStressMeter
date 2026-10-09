@@ -1098,8 +1098,8 @@ namespace HarveyStressMeter.Handlers
         /// </summary>
         private void CheckTiredStressTrigger()
         {
-            // Проверяем только раз в минуту (каждые 60 тиков) для оптимизации
-            if (Game1.ticks % 60 != 0) return;
+            // Частоту задаёт ProcessGameTick (раз в TIRED_CHECK_INTERVAL секунд). Прежняя доп. проверка
+            // Game1.ticks % 60 не совпадала по фазе со счётчиком SMAPI и почти никогда не пропускала триггер.
 
             // Базовые проверки
             if (Game1.stats.DaysPlayed < 1) return;
@@ -1153,6 +1153,12 @@ namespace HarveyStressMeter.Handlers
                 _data.DaysWithoutEating++;
                 _monitor.Log($"[DaysCounter] Игрок НЕ ел вчера - счетчик Hunger: {_data.DaysWithoutEating} дней", LogLevel.Info);
             }
+
+            // Топики «сегодня» прочитаны — сбрасываем их. Иначе вчерашний топик (0 дней) доживал до сегодня:
+            // повторный AddTopic пропускался из-за HasTopic, а через день разговор/еда считались пропущенными,
+            // и «ел сегодня» было true ещё до первой еды.
+            ConversationHelper.RemoveTopic(TopicIds.SpokeToday);
+            ConversationHelper.RemoveTopic(TopicIds.AteToday);
         }
 
         private void ResetDailyQuestCounters()

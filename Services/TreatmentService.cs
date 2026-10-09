@@ -141,10 +141,8 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
-            // ⭐ ИСПРАВЛЕНО: Разный кулдаун для разных типов стресса
-            // Социальная тревожность имеет более длинный кулдаун, так как срабатывает чаще
-            int cooldownDays = buffId == BuffIds.Social ? 7 : 1;
-            
+            int cooldownDays = GetIssueCooldownDays(buffId);
+
             // Проверяем через StateService, можно ли выдать бафф
             if (!_stateService.CanIssueBuff(buffId, cooldownDays: cooldownDays))
             {
@@ -159,6 +157,13 @@ namespace HarveyStressMeter.Services
 
             _monitor.Log($"[ApplyStressBuff] ✅ Стресс {displayName} применен. Поговорите с Харви для начала лечения.", LogLevel.Info);
         }
+
+        /// <summary>
+        /// Минимум дней между выдачами одного debuff. Social — 7: шкала общения копится каждый день,
+        /// без длинного кулдауна срыв повторялся бы почти ежедневно.
+        /// </summary>
+        public static int GetIssueCooldownDays(string buffId)
+            => buffId == BuffIds.Social ? 7 : 1;
 
         /// <summary>
         /// Начинает TreatmentEpisode — единое назначение Харви по общему состоянию.

@@ -192,6 +192,13 @@ namespace HarveyStressMeter.Services
                 if (!_buffService.HasBuff(buffId))
                     continue;
 
+                // Уже косметический — не пересоздаём каждую секунду (мигание иконки, сброс тултипа).
+                if (Game1.player.buffs.AppliedBuffs.TryGetValue(buffId, out var applied)
+                    && !applied.effects.HasAnyValue())
+                {
+                    continue;
+                }
+
                 _buffService.ApplyCosmeticBuffFromData(buffId);
             }
         }

@@ -515,6 +515,28 @@ namespace HarveyStressMeter.Services
         /// <summary>
         /// Проверяет, можно ли выдать бафф (с учетом кулдауна и иммунитета)
         /// </summary>
+        /// <summary>Причина, по которой debuff сейчас нельзя выдать (null — можно). Без логирования.</summary>
+        public string? GetIssueBlockReason(string buffId, int cooldownDays)
+        {
+            if (_data.StressState.HasActiveBuff(buffId))
+                return "уже активен";
+
+            if (_data.StressState.HasImmunity(buffId))
+                return $"иммунитет после лечения до {_data.StressState.GetImmunityEndDate(buffId)}";
+
+            if (_buffService.HasBuff(BuffIds.Immunity))
+                return $"защитный бафф {BuffIds.Immunity} до конца дня";
+
+            if (_data.StressState.LastIssuedDay.TryGetValue(buffId, out var lastIssued))
+            {
+                int daysSince = SDate.Now().DaysSinceStart - lastIssued.DaysSinceStart;
+                if (daysSince < cooldownDays)
+                    return $"кулдаун {daysSince}/{cooldownDays} дн. с прошлой выдачи";
+            }
+
+            return null;
+        }
+
         public bool CanIssueBuff(string buffId, int cooldownDays = 7)
         {
             // Есть ли уже активный бафф
@@ -526,6 +548,13 @@ namespace HarveyStressMeter.Services
             {
                 var endDate = _data.StressState.GetImmunityEndDate(buffId);
                 _monitor.Log($"[StateService] Бафф '{buffId}' заблокирован иммунитетом до {endDate}", LogLevel.Debug);
+                return false;
+            }
+
+            // Игровой бафф иммунитета (выдают CP-сцены утешения Харви) — защищает от новых стресс-дебаффов до конца дня.
+            if (_buffService.HasBuff(BuffIds.Immunity))
+            {
+                _monitor.Log($"[StateService] Бафф '{buffId}' заблокирован баффом {BuffIds.Immunity}", LogLevel.Debug);
                 return false;
             }
 

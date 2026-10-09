@@ -1,4 +1,5 @@
 using HarveyOverhaul.Core.Api;
+using HarveyOverhaul.Core.Core;
 using HarveyOverhaul.Core.Models;
 using HarveyOverhaul.Core.Services;
 using HarveyStressMeter.Constants;
@@ -94,7 +95,12 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
 
             if (treatment.Progress == null)
             {
-                directives.Add(BuildAwaitingStartDirective(key));
+                directives.Add(BuildAwaitingStartDirective(
+                    key,
+                    StressLegacyQuestMap.GetDisplayName(treatment.BuffId, treatment.QuestId)));
+                // Бафф этого лечения не показываем отдельным пунктом с прогрессом 0/N: прогресс пойдёт только после разговора.
+                if (!string.IsNullOrWhiteSpace(treatment.BuffId))
+                    handled.Add($"buff.{treatment.BuffId}");
                 continue;
             }
 
@@ -134,6 +140,8 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                     Type = HarveyCareDirectiveType.Appointment,
                     Title = "Поговори с Харви",
                     Text = "Назначение выполнено. Харви ждёт контрольный разговор.",
+                    Reason = "Харви должен убедиться, что после назначения стало легче.",
+                    NextStep = "после разговора назначение закроется, а стресс заметно снизится.",
                     Priority = HarveyCareDirectivePriority.High,
                     State = HarveyCareDirectiveState.Active,
                     HarveyTone = HarveyCareDirectiveTone.Calm,
@@ -169,13 +177,18 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Text = complete
                     ? "Безопасное место найдено. Харви должен проверить, как ты себя чувствуешь."
                     : "Останься там, где спокойно, пока дыхание не выровняется.",
-                Current = current,
-                Goal = goal,
+                Current = complete ? 0 : current,
+                Goal = complete ? 0 : goal,
                 Unit = "сек",
                 Priority = HarveyCareDirectivePriority.High,
-                State = complete ? HarveyCareDirectiveState.Done : HarveyCareDirectiveState.Active,
+                // Место найдено, но разговор с Харви ещё впереди: визит активен, а не «✓ выполнено».
+                State = HarveyCareDirectiveState.Active,
                 CanFailDay = !complete,
                 FailureText = "безопасное место ещё не найдено",
+                Reason = "Накатила волна тревоги — телу нужно время, чтобы успокоиться.",
+                NextStep = complete
+                    ? "после разговора с Харви назначение закроется."
+                    : "дом, клиника или тихое место в лесу. Когда шкала заполнится — поговори с Харви.",
                 HarveyTone = HarveyCareDirectiveTone.Worried,
                 HarveyAdvice = complete
                     ? "Сначала восстанови дыхание. Потом приходи ко мне."
@@ -197,8 +210,13 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Id = "stress.not_alone",
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.ImmediateAction,
-                Title = "Не оставайся одна",
-                Text = "Побудь рядом с Харви или в безопасной зоне.",
+                Title = PlayerGrammar.Gendered("Не оставайся один", "Не оставайся одна"),
+                Text = $"Побудь рядом с Харви {goal} сек или поговори с близким человеком (4+ сердца). "
+                    + $"Малознакомых сегодня — не больше {SocialShutdownQuestHelper.MaxUnfamiliarTalksPerDay}.",
+                Reason = $"Ты {PlayerGrammar.Gendered("закрылся", "закрылась")} от людей, а изоляция только усиливает стресс.",
+                NextStep = complete
+                    ? "поговори с Харви — он закроет назначение."
+                    : "достаточно одного пути: время рядом с Харви или разговор с другом.",
                 Current = current,
                 Goal = goal,
                 Unit = "сек",
@@ -222,6 +240,8 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Type = HarveyCareDirectiveType.ImmediateAction,
                 Title = "Укройся от грозы",
                 Text = "Не стой под открытым небом. Харви просил идти в безопасное место.",
+                Reason = "Гроза вызвала тяжёлые воспоминания — под открытым небом станет только хуже.",
+                NextStep = "зайди в любое здание или найди Харви, пока гроза не кончится.",
                 Current = progress.SecondsNearHarvey,
                 Priority = HarveyCareDirectivePriority.Critical,
                 HarveyTone = HarveyCareDirectiveTone.Worried,
@@ -252,6 +272,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Type = HarveyCareDirectiveType.TodayRule,
                 Title = "Сделай перерыв",
                 Text = "Харви просит настоящий отдых, не «ещё один ряд грядок».",
+                Reason = "Тело на пределе: усталость копится быстрее, чем уходит.",
                 Priority = HarveyCareDirectivePriority.Normal,
             });
         }
@@ -270,6 +291,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Type = HarveyCareDirectiveType.TodayRule,
                 Title = "Лечь спать вовремя",
                 Text = "Харви просил лечь до полуночи, чтобы день восстановления засчитался.",
+                Reason = "Недосып — одна из причин истощения.",
                 Priority = HarveyCareDirectivePriority.Normal,
                 State = done ? HarveyCareDirectiveState.Done : HarveyCareDirectiveState.Active,
                 CanFailDay = true,
@@ -282,6 +304,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Type = HarveyCareDirectiveType.TodayRule,
                 Title = "Сделай перерыв",
                 Text = "Остановись, прежде чем организм снова перегрузится.",
+                Reason = "Переработка — одна из причин истощения.",
                 Priority = HarveyCareDirectivePriority.Normal,
                 State = done ? HarveyCareDirectiveState.Done : HarveyCareDirectiveState.Active,
             },
@@ -300,6 +323,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Type = HarveyCareDirectiveType.TodayRule,
                 Title = "Щадящий режим",
                 Text = "Сегодня без перегруза — Харви просит беречь силы.",
+                Reason = "Это выгорание: несколько причин стресса навалились сразу.",
                 Priority = HarveyCareDirectivePriority.Normal,
             },
             new()
@@ -309,6 +333,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Type = HarveyCareDirectiveType.Avoid,
                 Title = "Не ходи в шахту",
                 Text = "Сегодня лучше обойтись без шахты.",
+                Reason = "При выгорании опасность и темнота шахты бьют сильнее всего.",
                 Priority = HarveyCareDirectivePriority.High,
                 State = progress.BurnoutAvoidedMinesToday
                     ? HarveyCareDirectiveState.Done
@@ -321,10 +346,13 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Id = "stress.rule.burnout_sleep",
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.TodayRule,
-                Title = "Лечь спать вовремя",
+                // Строже, чем «до полуночи» у травм: отдельный заголовок, чтобы Core не склеил правила.
+                Title = "Лечь спать до 22:00",
                 Text = "Харви просил лечь до 22:00.",
+                Reason = "Ранний сон — самый быстрый способ снять выгорание.",
                 Priority = HarveyCareDirectivePriority.Normal,
                 CanFailDay = true,
+                FailureText = "если ляжешь после 22:00",
             },
         };
 
@@ -344,6 +372,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
             Type = HarveyCareDirectiveType.TodayRule,
             Title = "Вечером будь дома при свете",
             Text = "Сегодня лучше не проверять себя темнотой. Сначала стабильность.",
+            Reason = "Идёт терапия страха темноты — срывы откатывают прогресс.",
             Priority = HarveyCareDirectivePriority.Normal,
             HarveyTone = HarveyCareDirectiveTone.Calm,
         });
@@ -358,6 +387,16 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 continue;
 
             var treatment = _data.StressState.GetActiveTreatment(row.BuffId);
+
+            // Лечение ещё не назначено: счётчики задания (0/N сек) не растут до разговора с Харви — показываем визит.
+            // Голод — исключение: «поесть» снимает его и до разговора.
+            if (treatment is { TreatmentStarted: false, AwaitingHarveyReview: false }
+                && !string.Equals(row.BuffId, BuffIds.Hunger, StringComparison.OrdinalIgnoreCase))
+            {
+                directives.Add(BuildAwaitingStartDirective($"buff.{row.BuffId}", row.Title));
+                continue;
+            }
+
             var mapped = MapStressBuffDirective(row.BuffId, row.Title, treatment?.Progress, treatment);
             if (mapped != null)
             {
@@ -411,8 +450,10 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Id = $"stress.review.{buffId}",
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.Appointment,
-                Title = string.IsNullOrWhiteSpace(title) ? "Поговори с Харви" : title,
+                Title = string.IsNullOrWhiteSpace(title) ? "Поговори с Харви" : $"Контрольный разговор: {title}",
                 Text = "Назначение выполнено. Харви ждёт контрольный разговор.",
+                Reason = "Харви должен убедиться, что после назначения стало легче.",
+                NextStep = "после разговора назначение закроется, а дебафф уйдёт.",
                 Priority = HarveyCareDirectivePriority.High,
                 State = HarveyCareDirectiveState.Active,
             };
@@ -430,6 +471,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Text = progress.AteAnyFood
                     ? "Еда принята. Вернись к Харви, если он просил."
                     : "Слабость от голода. Съешь любую еду и дай организму силы.",
+                Reason = $"Ты несколько дней почти не {PlayerGrammar.Gendered("ел", "ела")} — отсюда слабость.",
                 Priority = HarveyCareDirectivePriority.High,
                 State = progress.AteAnyFood ? HarveyCareDirectiveState.Done : HarveyCareDirectiveState.Active,
                 HarveyTone = HarveyCareDirectiveTone.Worried,
@@ -444,8 +486,10 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Id = "stress.no_sleep",
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.TodayRule,
-                Title = "Лечь спать вовремя",
+                Title = "Лечь спать до 22:00",
                 Text = "Недосып копится. Харви просил лечь раньше — сегодня до 22:00.",
+                Reason = "Несколько ночей подряд ты ложишься слишком поздно.",
+                NextStep = "засчитается утром, если ляжешь до 22:00.",
                 Priority = HarveyCareDirectivePriority.Normal,
                 State = progress.EarlySleepStreak > 0
                     ? HarveyCareDirectiveState.Done
@@ -467,7 +511,8 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.ImmediateAction,
                 Title = "Отдохни дома",
-                Text = "Усталость накопилась. Побудь дома без тяжёлой работы.",
+                Text = "Усталость накопилась. Побудь дома без тяжёлой работы (убери кирку, топор и мотыгу из рук).",
+                Reason = "Выносливость упала почти до нуля.",
                 Current = current,
                 Goal = goal,
                 Unit = "сек",
@@ -482,18 +527,24 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
         {
             int goal = SocialAnxietyTherapyService.HarveySecondsRequired;
             int current = Math.Min(progress.SecondsNearHarvey, goal);
+            int talks = progress.SocialTalksAfterQuest;
+            bool complete = progress.IsSocialQuestCompleted();
             return new HarveyCareDirective
             {
                 Id = "stress.social_anxiety",
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.ImmediateAction,
-                Title = "Побудь рядом с Харви",
-                Text = "Останься рядом с ним, пока тревога не спадёт.",
-                Current = current,
-                Goal = goal,
-                Unit = "сек",
+                Title = "Мягкое общение",
+                // Два пути: 3 разговора + время рядом с Харви, или 5 разговоров.
+                // Раньше пункт показывал только таймер и ставил ✓ после 60 сек, хотя разговоров не хватало.
+                Text = $"Путь А: 3 разговора + {goal} сек рядом с Харви. Путь Б: 5 разговоров.\n"
+                    + $"   Сейчас: разговоров {talks}, рядом с Харви {current}/{goal} сек.",
+                Reason = "Общения сегодня было слишком много, и наступил социальный срыв.",
+                NextStep = complete
+                    ? "поговори с Харви — он закроет назначение."
+                    : "разговоры считаются с момента назначения, по одному на человека в день.",
                 Priority = HarveyCareDirectivePriority.High,
-                State = current >= goal ? HarveyCareDirectiveState.Done : HarveyCareDirectiveState.Active,
+                State = complete ? HarveyCareDirectiveState.Done : HarveyCareDirectiveState.Active,
                 HarveyTone = HarveyCareDirectiveTone.Worried,
             };
         }
@@ -508,6 +559,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Type = HarveyCareDirectiveType.TodayRule,
                 Title = "Сделай перерыв",
                 Text = LegacyTreatmentObjectives.OverworkDailyStart,
+                Reason = $"Ты {PlayerGrammar.Gendered("работал", "работала")} до изнеможения — глубокой ночью с пустой выносливостью.",
                 Priority = HarveyCareDirectivePriority.Normal,
                 HarveyTone = HarveyCareDirectiveTone.Worried,
             };
@@ -525,6 +577,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Type = HarveyCareDirectiveType.ImmediateAction,
                 Title = "Согрейся",
                 Text = LegacyTreatmentObjectives.TooColdWarm(progress.WarmSeconds),
+                Reason = $"Ты {PlayerGrammar.Gendered("замёрз", "замёрзла")} вечером на холоде.",
                 Current = current,
                 Goal = goal,
                 Unit = "сек",
@@ -543,6 +596,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Type = HarveyCareDirectiveType.TodayRule,
                 Title = "Мягкий контакт",
                 Text = LegacyTreatmentObjectives.Lonely(progress.TalkedUniqueToday),
+                Reason = $"Несколько дней ты ни с кем не {PlayerGrammar.Gendered("разговаривал", "разговаривала")}.",
                 Priority = HarveyCareDirectivePriority.Normal,
             };
         }
@@ -550,13 +604,15 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
         return null;
     }
 
-    private static HarveyCareDirective BuildAwaitingStartDirective(string key) => new()
+    private static HarveyCareDirective BuildAwaitingStartDirective(string key, string displayName) => new()
     {
         Id = $"stress.await.{key}",
         Source = HarveyCareDirectiveSource.Stress,
         Type = HarveyCareDirectiveType.Appointment,
-        Title = "Поговори с Харви",
+        Title = string.IsNullOrWhiteSpace(displayName) ? "Поговори с Харви" : $"Поговори с Харви: {displayName}",
         Text = "Харви видит признаки перегруза. Поговори с ним, чтобы начать лечение.",
+        Reason = string.IsNullOrWhiteSpace(displayName) ? "" : $"Появилось состояние «{displayName}».",
+        NextStep = "Харви предложит назначение — согласись, и в плане появятся конкретные шаги.",
         Priority = HarveyCareDirectivePriority.Normal,
         HarveyTone = HarveyCareDirectiveTone.Calm,
     };

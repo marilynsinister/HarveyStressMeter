@@ -18,6 +18,9 @@ namespace HarveyStressMeter.Services
         private int _harveyRecoverySeconds;
         private int _homeRecoverySeconds;
 
+        /// <summary>NPC, с которыми разговор уже учтён сегодня (сейв только в конце дня — хранить не нужно).</summary>
+        private readonly HashSet<string> _npcsCountedToday = new(System.StringComparer.Ordinal);
+
         public SocialExposureService(
             SaveData data,
             StateService stateService,
@@ -38,6 +41,7 @@ namespace HarveyStressMeter.Services
         {
             State.SocialExposureToday = 0;
             State.ThresholdsShownToday = 0;
+            _npcsCountedToday.Clear();
             _harveyRecoverySeconds = 0;
             _homeRecoverySeconds = 0;
         }
@@ -64,24 +68,39 @@ namespace HarveyStressMeter.Services
             if (Game1.CurrentEvent != null)
                 return;
 
-            if (Game1.stats.DaysPlayed < 5)
-                return;
-
             if (!SocialStressHelper.IsQualifyingNpc(npc))
                 return;
 
-            if (IsSocialDebuffBlockingAccumulation())
+            // Подарок, повторный клик или второй DialogueBox того же NPC — не новый разговор.
+            if (!_npcsCountedToday.Add(npc.Name))
                 return;
 
-            if (_stateService.HasImmunity(BuffIds.Social))
+            if (Game1.stats.DaysPlayed < 5)
+            {
+                LogSkip(npc, $"первые дни игры (день {Game1.stats.DaysPlayed}/5)");
                 return;
+            }
+
+            if (IsSocialDebuffBlockingAccumulation())
+            {
+                LogSkip(npc, "debuff Social уже активен");
+                return;
+            }
+
+            var blockReason = _stateService.GetIssueBlockReason(
+                BuffIds.Social,
+                TreatmentService.GetIssueCooldownDays(BuffIds.Social));
+            if (blockReason != null)
+            {
+                // Шкала не копится, если срыв всё равно нельзя выдать: иначе игрок видит «на грани» без последствий.
+                LogSkip(npc, blockReason);
+                return;
+            }
 
             var baseGain = SocialStressHelper.GetBaseExposureGain(npc.Name);
             if (baseGain <= 0)
             {
-                _monitor.Log(
-                    $"[SocialExposure] Разговор с {npc.Name} — дружелюбный контакт, +0",
-                    LogLevel.Debug);
+                LogSkip(npc, "близкий человек (8+ сердец)");
                 return;
             }
 
@@ -92,6 +111,9 @@ namespace HarveyStressMeter.Services
 
             AddExposure(gain, $"разговор с {npc.Name} (+{gain}, base {baseGain}, mult {multiplier:0.##})");
         }
+
+        private void LogSkip(NPC npc, string reason)
+            => _monitor.Log($"[SocialExposure] Разговор с {npc.Name}: +0 — {reason}", LogLevel.Info);
 
         public void UpdateRecovery(bool harveyNearby)
         {
@@ -169,6 +191,8 @@ namespace HarveyStressMeter.Services
             sb.AppendLine($"thresholdsShownToday: {State.ThresholdsShownToday}");
             sb.AppendLine($"socialDebuffActive: {IsSocialDebuffBlockingAccumulation()}");
             sb.AppendLine($"hasOtherStressDebuff: {HasOtherActiveStressDebuff()}");
+            sb.AppendLine($"issueBlockReason: {_stateService.GetIssueBlockReason(BuffIds.Social, TreatmentService.GetIssueCooldownDays(BuffIds.Social)) ?? "(none)"}");
+            sb.AppendLine($"npcsCountedToday: {string.Join(", ", _npcsCountedToday)}");
             sb.AppendLine($"harveyDatingOrMarried: {HarveyFriendshipHelper.IsDatingHarvey() || HarveyFriendshipHelper.IsMarriedToHarvey()}");
             sb.AppendLine($"harveyRecoverySeconds: {_harveyRecoverySeconds}/{SocialStressHelper.HarveyRecoveryIntervalSeconds}");
             sb.AppendLine($"homeRecoverySeconds: {_homeRecoverySeconds}/{SocialStressHelper.HomeRecoveryIntervalSeconds}");
@@ -222,8 +246,15 @@ namespace HarveyStressMeter.Services
             if (IsSocialDebuffBlockingAccumulation())
                 return;
 
-            if (_stateService.HasImmunity(BuffIds.Social))
+            var blockReason = _stateService.GetIssueBlockReason(
+                BuffIds.Social,
+                TreatmentService.GetIssueCooldownDays(BuffIds.Social));
+            if (blockReason != null)
+            {
+                _monitor.Log($"[SocialExposure] Порог 100, но debuff Social не выдан: {blockReason}", LogLevel.Info);
+                Game1.addHUDMessage(new HUDMessage(SocialStressHelper.MaxReachedButProtectedHud, HUDMessage.newQuest_type));
                 return;
+            }
 
             _monitor.Log("[SocialExposure] Порог 100 — выдан debuff Social", LogLevel.Info);
             _treatmentService.ApplyStressBuff(BuffIds.Social, "Социальный дискомфорт");

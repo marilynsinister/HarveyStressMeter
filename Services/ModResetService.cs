@@ -33,6 +33,20 @@ namespace HarveyStressMeter.Services
             .Select(f => (string)f.GetRawConstantValue()!)
             .ToArray();
 
+        private static readonly HashSet<string> KnownQuestIds = new(
+            typeof(QuestIds)
+                .GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)
+                .Where(f => f.IsLiteral && !f.IsInitOnly && f.FieldType == typeof(string))
+                .Select(f => (string)f.GetRawConstantValue()!),
+            StringComparer.Ordinal);
+
+        private static readonly HashSet<string> KnownTopicIds = new(
+            typeof(TopicIds)
+                .GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)
+                .Where(f => f.IsLiteral && !f.IsInitOnly && f.FieldType == typeof(string))
+                .Select(f => (string)f.GetRawConstantValue()!),
+            StringComparer.OrdinalIgnoreCase);
+
         public ModResetService(
             IModHelper helper,
             SaveData data,
@@ -92,7 +106,8 @@ namespace HarveyStressMeter.Services
         {
             var questIds = Game1.player.questLog
                 .Select(q => q.id.Value)
-                .Where(id => !string.IsNullOrEmpty(id) && id.StartsWith("HarveyMod_", StringComparison.Ordinal))
+                // Только квесты Stress: префикс HarveyMod_ общий с Injury, его квесты не трогаем.
+                .Where(id => !string.IsNullOrEmpty(id) && KnownQuestIds.Contains(id))
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
 
@@ -123,7 +138,9 @@ namespace HarveyStressMeter.Services
                 || buffId.StartsWith("buffLight", StringComparison.OrdinalIgnoreCase)
                 || buffId.StartsWith("buffCalming", StringComparison.OrdinalIgnoreCase)
                 || buffId.StartsWith("buffDim", StringComparison.OrdinalIgnoreCase)
-                || buffId.StartsWith("buffHarvey", StringComparison.OrdinalIgnoreCase)
+                // buffHarveyTreatment<Stress> — лечение стресса; голые buffHarvey* (buffHarveyCare, buffHarveyTreatment…) принадлежат Injury.
+                || (buffId.StartsWith("buffHarveyTreatment", StringComparison.OrdinalIgnoreCase)
+                    && buffId.Length > "buffHarveyTreatment".Length)
                 || buffId.StartsWith("HarveyStress.", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -132,10 +149,10 @@ namespace HarveyStressMeter.Services
             return topicId.StartsWith("topicStress", StringComparison.OrdinalIgnoreCase)
                 || topicId.StartsWith("topicOverworkBreak", StringComparison.OrdinalIgnoreCase)
                 || topicId.StartsWith("topicDarkness", StringComparison.OrdinalIgnoreCase)
-                || topicId.StartsWith("topicHarvey", StringComparison.OrdinalIgnoreCase)
-                || topicId.StartsWith("HarveyMod_", StringComparison.OrdinalIgnoreCase)
-                || topicId == TopicIds.SpokeToday
-                || topicId == TopicIds.AteToday;
+                || topicId.StartsWith("HarveyStress_", StringComparison.OrdinalIgnoreCase)
+                || topicId.StartsWith("topicHarveyDarkness", StringComparison.OrdinalIgnoreCase)
+                // topicHarvey*/HarveyMod_* в целом принадлежат Injury — сбрасываем только свои известные ID.
+                || KnownTopicIds.Contains(topicId);
         }
     }
 }
