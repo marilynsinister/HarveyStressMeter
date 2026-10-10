@@ -120,6 +120,25 @@ namespace HarveyStressMeter.Services
             EnsureToday();
         }
 
+        /// <summary>
+        /// Trigger action для CP-событий: <c>marilynsinister.HarveyStressMeter_ComfortRelief &lt;amount&gt;</c>.
+        /// Не учитывается в дневном лимите занятий — это сюжетная сцена.
+        /// </summary>
+        public bool OnComfortReliefAction(string[] args, StardewValley.Delegates.TriggerActionContext context, out string? error)
+        {
+            error = null;
+            if (!ArgUtility.TryGetInt(args, 1, out int amount, out error, "int amount"))
+                return false;
+
+            if (Context.IsWorldReady && amount > 0 && _stressLoadService.GetCurrentStressLoad() > 0)
+            {
+                _stressLoadService.DecayStress(amount);
+                _monitor.Log($"[Comfort] Событие: StressLoad -{amount} → {_stressLoadService.GetCurrentStressLoad()}", LogLevel.Debug);
+            }
+
+            return true;
+        }
+
         private void CheckAnimalsAndPets(GameLocation? location)
         {
             if (location == null)

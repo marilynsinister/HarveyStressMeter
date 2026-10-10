@@ -293,6 +293,9 @@ namespace HarveyStressMeter
                 Monitor);
             _thunderFlashbackService.SetSafeAuraService(_harveySafePersonAuraService);
             _comfortActivityService = new ComfortActivityService(_data, _config, _stressLoadService, Monitor);
+            StardewValley.Triggers.TriggerActionManager.RegisterAction(
+                $"{ModManifest.UniqueID}_ComfortRelief",
+                _comfortActivityService.OnComfortReliefAction);
             _helper.Events.GameLoop.UpdateTicked += (_, e) => _comfortActivityService.OnUpdateTicked((int)e.Ticks);
             _helper.Events.GameLoop.TimeChanged += (_, e) => _comfortActivityService.OnTimeChanged(e.OldTime, e.NewTime);
             _helper.Events.GameLoop.DayStarted += (_, _) => _comfortActivityService.OnDayStarted();
