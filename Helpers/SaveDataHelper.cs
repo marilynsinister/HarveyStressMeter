@@ -162,6 +162,8 @@ namespace HarveyStressMeter.Helpers
                 target.HarveySafePersonAura,
                 source.HarveySafePersonAura ?? new HarveySafePersonAuraState());
 
+            target.ComfortActivities = source.ComfortActivities ?? new ComfortActivityState();
+
             target.SocialAnxietyTherapy ??= new SocialAnxietyTherapyState();
             CopySocialAnxietyTherapyInto(
                 target.SocialAnxietyTherapy,
@@ -206,6 +208,7 @@ namespace HarveyStressMeter.Helpers
             target.EpisodeImmunityUntil = new Dictionary<string, SDate>();
             target.SocialExposure = new SocialExposureState();
             target.SocialAnxietyTherapy = new SocialAnxietyTherapyState();
+            target.ComfortActivities = new ComfortActivityState();
 
 #pragma warning disable CS0618
             target.ActiveLockedDebuffs = new Dictionary<string, string>();

@@ -158,6 +158,12 @@ namespace HarveyStressMeter.Models
 
         public bool EnableHarveySafePersonAura { get; set; } = true;
 
+        /// <summary>Рыбалка, сбор, животные, питомец, закат, салун и аркада понемногу снижают StressLoad.</summary>
+        public bool EnableComfortActivities { get; set; } = true;
+
+        /// <summary>Максимальное снижение StressLoad от занятий за день.</summary>
+        public int ComfortDailyReliefCap { get; set; } = 20;
+
         public float HarveySafeDistanceTiles { get; set; } = 6f;
 
         public int SafeAuraDecayIntervalMinutes { get; set; } = 10;

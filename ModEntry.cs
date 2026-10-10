@@ -49,6 +49,7 @@ namespace HarveyStressMeter
         private HarveyFlashbackRescueService _harveyFlashbackRescueService = null!;
         private HarveyCareTrustService _harveyCareTrustService = null!;
         private HarveySafePersonAuraService _harveySafePersonAuraService = null!;
+        private ComfortActivityService _comfortActivityService = null!;
         private SocialExposureService _socialExposureService = null!;
         private StressSystemsCoordinator _stressSystemsCoordinator = null!;
         private HarveyCareTrustDialogueService _harveyCareTrustDialogueService = null!;
@@ -291,6 +292,10 @@ namespace HarveyStressMeter
                 _treatmentService,
                 Monitor);
             _thunderFlashbackService.SetSafeAuraService(_harveySafePersonAuraService);
+            _comfortActivityService = new ComfortActivityService(_data, _config, _stressLoadService, Monitor);
+            _helper.Events.GameLoop.UpdateTicked += (_, e) => _comfortActivityService.OnUpdateTicked((int)e.Ticks);
+            _helper.Events.GameLoop.TimeChanged += (_, e) => _comfortActivityService.OnTimeChanged(e.OldTime, e.NewTime);
+            _helper.Events.GameLoop.DayStarted += (_, _) => _comfortActivityService.OnDayStarted();
             _thunderFlashbackService.SetEpisodeQuestProgressService(_episodeQuestProgressService);
             Monitor.Log("Safe aura wired", LogLevel.Info);
             _harveyFlashbackRescueService = new HarveyFlashbackRescueService(

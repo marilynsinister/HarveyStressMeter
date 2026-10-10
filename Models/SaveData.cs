@@ -66,6 +66,9 @@ namespace HarveyStressMeter.Models
         /// <summary>Периодическое снижение StressLoad / стабилизация flashback рядом с Харви.</summary>
         public HarveySafePersonAuraState HarveySafePersonAura { get; set; } = new();
 
+        /// <summary>Дневной учёт занятий, снижающих StressLoad (рыбалка, питомец, закат…).</summary>
+        public ComfortActivityState ComfortActivities { get; set; } = new();
+
         /// <summary>Programmatic-состояние терапии социальной тревожности (таймер + follow-up).</summary>
         public SocialAnxietyTherapyState SocialAnxietyTherapy { get; set; } = new();
 
