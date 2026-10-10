@@ -14,12 +14,19 @@ namespace HarveyStressMeter.Services
 {
     /// <summary>
     /// Компактный Stress Meter HUD + опциональный debug overlay.
-    /// TODO: заменить прямоугольники на assets/stress_meter.png, когда текстура будет готова.
+    /// Рамка и заливка шкалы — из assets/stress_meter.png (scripts/generate_stress_meter.py);
+    /// без текстуры шкала рисуется плоскими прямоугольниками.
     /// </summary>
     public sealed class StressMeterHudService
     {
         private const int PulseDurationTicks = 90;
         private const int MessageCooldownTicks = 3600;
+
+        // Раскладка assets/stress_meter.png — см. scripts/generate_stress_meter.py.
+        private static readonly Rectangle FrameSource = new(0, 0, 8, 8);
+        private const int FrameBorderSource = 2;
+        private static readonly Rectangle FillSourceHorizontal = new(8, 0, 4, 8);
+        private static readonly Rectangle FillSourceVertical = new(12, 0, 4, 4);
 
         private readonly IModHelper _helper;
         private readonly IMonitor _monitor;
@@ -350,28 +357,33 @@ namespace HarveyStressMeter.Services
             int barHeight = Math.Max(6, (int)(8 * _config.Scale));
             int padding = Math.Max(4, (int)(4 * _config.Scale));
             int extraSocialLines = ShouldShowSocialExposureStatus() ? Game1.smallFont.LineSpacing : 0;
-            var origin = ResolveAnchorOrigin(barWidth, barHeight + padding + Game1.smallFont.LineSpacing + extraSocialLines);
+            var origin = ResolveAnchorOrigin(barWidth, barHeight + GetFrameBorder() + padding + Game1.smallFont.LineSpacing + extraSocialLines);
 
+            int border = GetFrameBorder();
             var backRect = new Rectangle(origin.X, origin.Y, barWidth, barHeight);
+
+            if (severity >= StressSeverity.Critical && _pulseTicks > 0)
+            {
+                var glowRect = new Rectangle(origin.X - border - 2, origin.Y - border - 2, barWidth + 2 * border + 4, barHeight + 2 * border + 4);
+                DrawFilledRect(spriteBatch, glowRect, colors.Fill * (0.25f * pulse));
+            }
+
             DrawFilledRect(spriteBatch, backRect, colors.Background * opacity);
 
             int fillWidth = (int)(barWidth * (load / (float)_stressLoadService.GetMaxStressLoad()));
             if (fillWidth > 0)
-                DrawFilledRect(spriteBatch, new Rectangle(origin.X, origin.Y, fillWidth, barHeight), colors.Fill * opacity);
+                DrawBarFill(spriteBatch, new Rectangle(origin.X, origin.Y, fillWidth, barHeight), colors.Fill * opacity, vertical: false);
 
-            if (severity >= StressSeverity.Critical && _pulseTicks > 0)
-            {
-                var glowRect = new Rectangle(origin.X - 1, origin.Y - 1, barWidth + 2, barHeight + 2);
-                DrawFilledRect(spriteBatch, glowRect, colors.Fill * (0.25f * pulse));
-            }
+            DrawBarFrame(spriteBatch, backRect, opacity);
 
+            int labelY = origin.Y + barHeight + border + 2;
             DrawMeterLabel(spriteBatch, label, load, debugMode, colors.Text, opacity,
-                origin.X, origin.Y + barHeight + 2, barWidth, centerHorizontally: true);
+                origin.X, labelY, barWidth, centerHorizontally: true);
 
             if (ShouldShowSocialExposureStatus())
             {
                 var socialLabel = BuildSocialExposureDisplayText(debugMode);
-                var socialY = origin.Y + barHeight + 2 + Game1.smallFont.LineSpacing;
+                var socialY = labelY + Game1.smallFont.LineSpacing;
                 DrawMeterLabel(spriteBatch, socialLabel, load, debugMode, colors.Text * 0.92f, opacity * 0.95f,
                     origin.X, socialY, barWidth, centerHorizontally: true);
             }
@@ -396,26 +408,30 @@ namespace HarveyStressMeter.Services
             int x = viewport.Width - marginRight - barThickness;
             int y = viewport.Height - marginBottom - barLength;
 
+            int border = GetFrameBorder();
             var backRect = new Rectangle(x, y, barThickness, barLength);
+
+            if (severity >= StressSeverity.Critical && _pulseTicks > 0)
+            {
+                var glowRect = new Rectangle(x - border - 2, y - border - 2, barThickness + 2 * border + 4, barLength + 2 * border + 4);
+                DrawFilledRect(spriteBatch, glowRect, colors.Fill * (0.25f * pulse));
+            }
+
             DrawFilledRect(spriteBatch, backRect, colors.Background * opacity);
 
             int fillHeight = (int)(barLength * (load / (float)_stressLoadService.GetMaxStressLoad()));
             if (fillHeight > 0)
             {
                 var fillRect = new Rectangle(x, y + barLength - fillHeight, barThickness, fillHeight);
-                DrawFilledRect(spriteBatch, fillRect, colors.Fill * opacity);
+                DrawBarFill(spriteBatch, fillRect, colors.Fill * opacity, vertical: true);
             }
 
-            if (severity >= StressSeverity.Critical && _pulseTicks > 0)
-            {
-                var glowRect = new Rectangle(x - 1, y - 1, barThickness + 2, barLength + 2);
-                DrawFilledRect(spriteBatch, glowRect, colors.Fill * (0.25f * pulse));
-            }
+            DrawBarFrame(spriteBatch, backRect, opacity);
 
             var text = _config.ShowDebugNumbers || debugMode ? $"{label} {load}" : label;
             var textSize = Game1.smallFont.MeasureString(text);
             var textPos = new Vector2(
-                x - textSize.X - labelPadding,
+                x - border - textSize.X - labelPadding,
                 y + barLength - textSize.Y);
 
             DrawMeterLabel(spriteBatch, text, load, debugMode, colors.Text, opacity, textPos, drawValueInLabel: false);
@@ -425,7 +441,7 @@ namespace HarveyStressMeter.Services
                 var socialText = BuildSocialExposureDisplayText(debugMode);
                 var socialSize = Game1.smallFont.MeasureString(socialText);
                 var socialPos = new Vector2(
-                    x - socialSize.X - labelPadding,
+                    x - border - socialSize.X - labelPadding,
                     textPos.Y - socialSize.Y - 2);
                 DrawMeterLabel(spriteBatch, socialText, load, debugMode, colors.Text * 0.92f, opacity * 0.95f, socialPos, drawValueInLabel: false);
             }
@@ -545,15 +561,61 @@ namespace HarveyStressMeter.Services
             spriteBatch.DrawString(Game1.smallFont, text, new Vector2(box.X + pad, box.Y + pad), Color.White);
         }
 
-        private void DrawFilledRect(SpriteBatch spriteBatch, Rectangle rect, Color color)
+        private static void DrawFilledRect(SpriteBatch spriteBatch, Rectangle rect, Color color)
         {
-            if (_meterTexture != null)
+            spriteBatch.Draw(Game1.staminaRect, rect, color);
+        }
+
+        /// <summary>Толщина рамки в экранных пикселях (0 без текстуры).</summary>
+        private int GetFrameBorder() =>
+            _meterTexture == null ? 0 : FrameBorderSource * GetPixelScale();
+
+        private int GetPixelScale() => Math.Max(1, (int)MathF.Round(2f * _config.Scale));
+
+        private void DrawBarFill(SpriteBatch spriteBatch, Rectangle rect, Color color, bool vertical)
+        {
+            if (_meterTexture == null)
             {
-                spriteBatch.Draw(_meterTexture, rect, color);
+                DrawFilledRect(spriteBatch, rect, color);
                 return;
             }
 
-            spriteBatch.Draw(Game1.staminaRect, rect, color);
+            spriteBatch.Draw(_meterTexture, rect, vertical ? FillSourceVertical : FillSourceHorizontal, color);
+        }
+
+        /// <summary>9-slice рамка вокруг <paramref name="inner"/> (снаружи, на толщину бордюра).</summary>
+        private void DrawBarFrame(SpriteBatch spriteBatch, Rectangle inner, float opacity)
+        {
+            if (_meterTexture == null)
+                return;
+
+            int b = FrameBorderSource;
+            int d = GetFrameBorder();
+            var color = Color.White * opacity;
+
+            int[] srcX = { FrameSource.X, FrameSource.X + b, FrameSource.Right - b };
+            int[] srcY = { FrameSource.Y, FrameSource.Y + b, FrameSource.Bottom - b };
+            int[] srcW = { b, FrameSource.Width - 2 * b, b };
+            int[] srcH = { b, FrameSource.Height - 2 * b, b };
+            int[] dstX = { inner.X - d, inner.X, inner.Right };
+            int[] dstY = { inner.Y - d, inner.Y, inner.Bottom };
+            int[] dstW = { d, inner.Width, d };
+            int[] dstH = { d, inner.Height, d };
+
+            for (int row = 0; row < 3; row++)
+            {
+                for (int col = 0; col < 3; col++)
+                {
+                    if (row == 1 && col == 1)
+                        continue;
+
+                    spriteBatch.Draw(
+                        _meterTexture,
+                        new Rectangle(dstX[col], dstY[row], dstW[col], dstH[row]),
+                        new Rectangle(srcX[col], srcY[row], srcW[col], srcH[row]),
+                        color);
+                }
+            }
         }
 
         private Point ResolveAnchorOrigin(int width, int totalHeight)
