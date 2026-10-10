@@ -25,8 +25,8 @@ namespace HarveyStressMeter.Services
             if (Game1.player.hasBuff(buffId))
                 Game1.player.buffs.Remove(buffId);
 
-            var buff = new Buff(buffId, displayName, iconTexture: null, iconSheetIndex: 0, 
-                duration: durationMs, effects: effects)
+            // Иконку и описание Buff берёт из Data/Buffs; явный iconSheetIndex перебил бы иконку из данных.
+            var buff = new Buff(buffId, duration: durationMs, effects: effects, displayName: displayName)
             { visible = true };
             
             Game1.player.applyBuff(buff);
@@ -57,8 +57,7 @@ namespace HarveyStressMeter.Services
 
                 var effects = data.Effects != null ? ConvertToEffects(data.Effects) : new BuffEffects();
 
-                var buff = new Buff(buffId, data.DisplayName, iconTexture: null, iconSheetIndex: 0, 
-                    duration: duration, effects: effects)
+                var buff = new Buff(buffId, duration: duration, effects: effects)
                 { visible = true };
 
                 Game1.player.applyBuff(buff);
@@ -107,9 +106,6 @@ namespace HarveyStressMeter.Services
 
                 var buff = new Buff(
                     buffId,
-                    data.DisplayName,
-                    iconTexture: null,
-                    iconSheetIndex: 0,
                     duration: Buff.ENDLESS,
                     effects: new BuffEffects())
                 { visible = true };
