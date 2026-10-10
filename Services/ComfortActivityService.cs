@@ -10,13 +10,14 @@ using StardewValley.Minigames;
 namespace HarveyStressMeter.Services
 {
     /// <summary>
-    /// «Занятия для души»: обычные дела фермы немного снижают StressLoad.
+    /// «Занятия для души»: обычные дела фермы и вечер в комнате Харви (4+ сердца) немного снижают StressLoad.
     /// Каждое следующее срабатывание за день слабее предыдущего, общий дневной потолок — ComfortDailyReliefCap.
     /// </summary>
     public sealed class ComfortActivityService
     {
         private const int PollIntervalTicks = 60;
         private const int DwellMinutesRequired = 30;
+        private const int HarveyEveningMinHearts = 4;
 
         private sealed record Activity(string Id, int BaseRelief, int MaxUsesPerDay, string Message);
 
@@ -29,6 +30,7 @@ namespace HarveyStressMeter.Services
             public const string Sunset = "Sunset";
             public const string Saloon = "Saloon";
             public const string Arcade = "Arcade";
+            public const string HarveyEvening = "HarveyEvening";
         }
 
         private static readonly Dictionary<string, Activity> Activities = new[]
@@ -40,6 +42,7 @@ namespace HarveyStressMeter.Services
             new Activity(Ids.Sunset, 8, 1, "Ты смотришь на закат. Дышать становится легче."),
             new Activity(Ids.Saloon, 6, 1, "Шум салуна, тёплый свет. Можно просто посидеть."),
             new Activity(Ids.Arcade, 5, 1, "Пара раундов в автомате — и голова проясняется."),
+            new Activity(Ids.HarveyEvening, 10, 1, "Тихий вечер у Харви: шуршит радио, он рассказывает про самолёты."),
         }.ToDictionary(a => a.Id);
 
         private static readonly HashSet<string> SunsetLocations = new(StringComparer.OrdinalIgnoreCase)
@@ -104,6 +107,12 @@ namespace HarveyStressMeter.Services
 
             if (newTime >= 1700 && location.Name == "Saloon")
                 Dwell(Ids.Saloon, minutes);
+
+            if (newTime >= 1800 && location.Name == "HarveyRoom" && IsHarveyHere(location)
+                && Game1.player.getFriendshipHeartLevelForNPC("Harvey") >= HarveyEveningMinHearts)
+            {
+                Dwell(Ids.HarveyEvening, minutes);
+            }
         }
 
         public void OnDayStarted()
@@ -183,6 +192,9 @@ namespace HarveyStressMeter.Services
             State.LastFishCaught = Game1.player.stats.FishCaught;
             State.LastItemsForaged = Game1.player.stats.ItemsForaged;
         }
+
+        private static bool IsHarveyHere(GameLocation location) =>
+            location.characters.Any(npc => npc.Name == "Harvey");
 
         private static int ToMinutes(int time) => time / 100 * 60 + time % 100;
     }
