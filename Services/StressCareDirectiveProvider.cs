@@ -211,7 +211,9 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.ImmediateAction,
                 Title = PlayerGrammar.Gendered("Не оставайся один", "Не оставайся одна"),
-                Text = $"Побудь рядом с Харви {goal} сек или поговори с близким человеком (4+ сердца). "
+                Text = (SocialShutdownQuestHelper.GetTrustedThreshold() == null
+                        ? $"Побудь рядом с Харви {goal} сек — близких друзей пока нет, это самый мягкий путь. "
+                        : $"Побудь рядом с Харви {goal} сек или {SocialShutdownQuestHelper.GetTrustedPathHint(informal: true)}. ")
                     + $"Малознакомых сегодня — не больше {SocialShutdownQuestHelper.MaxUnfamiliarTalksPerDay}.",
                 Reason = $"Ты {PlayerGrammar.Gendered("закрылся", "закрылась")} от людей, а изоляция только усиливает стресс.",
                 NextStep = complete

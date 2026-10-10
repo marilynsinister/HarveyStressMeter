@@ -208,7 +208,7 @@ namespace HarveyStressMeter.Models
             var harveyLine = $"Рядом с Харви: {System.Math.Min(SecondsNearHarvey, SocialShutdownQuestHelper.HarveySecondsRequired)}/{SocialShutdownQuestHelper.HarveySecondsRequired} сек";
             var trustedLine = SocialShutdownTrustedTalk
                 ? "Доверенный контакт: ✅"
-                : "Доверенный контакт: поговорите с другом от 4 сердечек";
+                : $"Доверенный контакт: {SocialShutdownQuestHelper.GetTrustedPathHint()}";
             var unfamiliarLine =
                 $"Малознакомые сегодня: {SocialShutdownUnfamiliarCount}/{SocialShutdownQuestHelper.MaxUnfamiliarTalksPerDay}";
 
