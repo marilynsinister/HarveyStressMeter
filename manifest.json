@@ -9,6 +9,10 @@
   "UpdateKeys": [],
   "Dependencies": [
     {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    },
+    {
       "UniqueID": "marilynsinister.HarveyOverhaul.Core",
       "IsRequired": true,
       "MinimumVersion": "1.0.0"

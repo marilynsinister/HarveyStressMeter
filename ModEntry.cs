@@ -477,6 +477,7 @@ namespace HarveyStressMeter
         {
             CoreTreatmentTimeGate.Bind(Helper);
             RegisterCoreProviders("GameLaunched");
+            GenericModConfigMenuIntegration.Register(Helper, ModManifest, _config);
         }
 
         private void OnSaveLoadedRegisterCoreProviders(object? sender, SaveLoadedEventArgs e)
