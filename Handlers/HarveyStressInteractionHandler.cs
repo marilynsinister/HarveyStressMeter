@@ -50,6 +50,10 @@ namespace HarveyStressMeter.Handlers
             if (Game1.activeClickableMenu is DialogueBox)
                 return false;
 
+            // Клик уже обработал другой мод Harvey Overhaul (меню палаты, вопрос о травме) — не показываем второй диалог.
+            if (e.IsSuppressed())
+                return false;
+
             if (!e.Button.IsActionButton())
                 return false;
 

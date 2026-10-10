@@ -490,7 +490,9 @@ namespace HarveyStressMeter.Helpers
                 ObjectivesCompleted = source.ObjectivesCompleted,
                 AwaitingHarveyReview = source.AwaitingHarveyReview,
                 ReadyForReviewDate = source.ReadyForReviewDate,
-                Progress = CloneTreatmentProgress(source.Progress)
+                Progress = CloneTreatmentProgress(source.Progress),
+                NeglectStage = source.NeglectStage,
+                StartedReminderShown = source.StartedReminderShown
             };
         }
 

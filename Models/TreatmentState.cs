@@ -92,6 +92,12 @@ namespace HarveyStressMeter.Models
         /// </summary>
         public TreatmentProgress Progress { get; set; } = new();
 
+        /// <summary>Стадия запущенного стресса без лечения (0 — нет, 1 — напоминание, 2 — копится, 3 — Харви встревожен).</summary>
+        public int NeglectStage { get; set; }
+
+        /// <summary>Напоминание о начатом, но заброшенном назначении уже показано.</summary>
+        public bool StartedReminderShown { get; set; }
+
         // ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
 
         /// <summary>

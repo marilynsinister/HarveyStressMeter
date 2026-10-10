@@ -97,6 +97,9 @@ namespace HarveyStressMeter
 
             // Subscribe to events through EventHandler
             _eventHandler.SubscribeToEvents();
+            // После EventHandler.OnDayStarted: дебаффы уже восстановлены на новый день.
+            var stressNeglectService = new StressNeglectService(Monitor, _data, _stressLoadService, _harveyCareTrustService);
+            _helper.Events.GameLoop.DayStarted += stressNeglectService.OnDayStarted;
             if (_stressMedicalIntentProvider != null)
                 _helper.Events.GameLoop.UpdateTicked += _stressMedicalIntentProvider.OnUpdateTicked;
 
