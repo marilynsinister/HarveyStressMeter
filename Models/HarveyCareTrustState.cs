@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using HarveyStressMeter.Constants;
 
 namespace HarveyStressMeter.Models
 {
@@ -40,5 +41,26 @@ namespace HarveyStressMeter.Models
 
         /// <summary>Ключи trust-реплик из stress_flow_dialogues.json, уже показанные один раз.</summary>
         public HashSet<string> ShownCareTrustDialogueKeys { get; set; } = new();
+
+        /// <summary>«Границы»: ответы на вопросы Харви (HarveyCareConsents → ответ).</summary>
+        public Dictionary<string, HarveyConsentAnswer> Consents { get; set; } = new();
+
+        /// <summary>Абсолютный день, когда Харви последний раз спрашивал о каждом разрешении.</summary>
+        public Dictionary<string, int> ConsentAskedDay { get; set; } = new();
+
+        /// <summary>Разрешения, за ответ на которые доверие уже начислено (один раз на вопрос).</summary>
+        public HashSet<string> ConsentTrustAwarded { get; set; } = new();
+
+        /// <summary>Абсолютный день последнего вопроса (не больше одного вопроса в день).</summary>
+        public int LastConsentAskDay { get; set; }
+
+        /// <summary>Сколько очков можно вернуть разговором после штрафа (0 — разговор не нужен).</summary>
+        public int PendingRepairPoints { get; set; }
+
+        /// <summary>Причина последнего штрафа (HarveyCareTrustReasons) — для реплики Харви.</summary>
+        public string? PendingRepairReason { get; set; }
+
+        /// <summary>Абсолютный день штрафа; разговор о нём доступен ConsentRepairWindowDays дней.</summary>
+        public int PendingRepairDay { get; set; }
     }
 }

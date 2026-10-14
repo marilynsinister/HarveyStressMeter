@@ -5,6 +5,7 @@ using Newtonsoft.Json.Converters;
 using StardewModdingAPI;
 using StardewModdingAPI.Utilities;
 using StardewValley;
+using HarveyStressMeter.Constants;
 using HarveyStressMeter.Models;
 
 namespace HarveyStressMeter.Helpers
@@ -403,6 +404,13 @@ namespace HarveyStressMeter.Helpers
             target.LastAmbientTrustEpisodeId = source.LastAmbientTrustEpisodeId;
             target.SupportiveTalkTrustToday = source.SupportiveTalkTrustToday;
             target.ShownCareTrustDialogueKeys = new HashSet<string>(source.ShownCareTrustDialogueKeys ?? new HashSet<string>());
+            target.Consents = new Dictionary<string, HarveyConsentAnswer>(source.Consents ?? new Dictionary<string, HarveyConsentAnswer>());
+            target.ConsentAskedDay = new Dictionary<string, int>(source.ConsentAskedDay ?? new Dictionary<string, int>());
+            target.ConsentTrustAwarded = new HashSet<string>(source.ConsentTrustAwarded ?? new HashSet<string>());
+            target.LastConsentAskDay = source.LastConsentAskDay;
+            target.PendingRepairPoints = source.PendingRepairPoints;
+            target.PendingRepairReason = source.PendingRepairReason;
+            target.PendingRepairDay = source.PendingRepairDay;
         }
 
         private static void CopySocialExposureInto(SocialExposureState target, SocialExposureState source)

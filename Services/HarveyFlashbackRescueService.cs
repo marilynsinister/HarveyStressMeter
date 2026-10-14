@@ -411,7 +411,7 @@ namespace HarveyStressMeter.Services
                 FlashbackRescueTiers.Married =>
                     "Харви: Я здесь. Дыши со мной — вдох, выдох. Ты в безопасности.",
                 FlashbackRescueTiers.Dating =>
-                    "Харви: Я нашёл тебя. Это гроза, не взрывы. Я рядом.",
+                    "Харви: Я нашёл тебя. Это просто гроза. Я рядом.",
                 FlashbackRescueTiers.HighTrust =>
                     "Харви: Это я. Ты в лесу, со мной. Дыши медленно.",
                 _ => "Харви: Это доктор Харви. Сфокусируйся на дыхании — ты не одна.",

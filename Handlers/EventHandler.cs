@@ -118,6 +118,7 @@ namespace HarveyStressMeter.Handlers
         {
             _data.StressState.ClearActiveTreatments();
             _gameLogicHandler.ClearStressDialoguePending();
+            Patches.QuestTextPatch.ClearAll();
         }
 
         private void OnDayStarted(object? s, DayStartedEventArgs e)

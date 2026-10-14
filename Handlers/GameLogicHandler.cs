@@ -34,6 +34,7 @@ namespace HarveyStressMeter.Handlers
         private readonly ThunderFlashbackService _thunderFlashbackService;
         private readonly HarveyFlashbackRescueService _harveyFlashbackRescueService;
         private readonly HarveyCareTrustService _harveyCareTrustService;
+        private HarveyConsentService? _harveyConsentService;
         private readonly HarveySafePersonAuraService _harveySafePersonAuraService;
         private readonly SocialExposureService _socialExposureService;
         private readonly StressGameplayEffectService _stressGameplayEffectService;
@@ -137,6 +138,8 @@ namespace HarveyStressMeter.Handlers
 
         public void SetCoreApi(IHarveyCoreApi? coreApi) => _coreApi = coreApi;
 
+        public void SetConsentService(HarveyConsentService consentService) => _harveyConsentService = consentService;
+
         public void RepairStuckSocialTreatments()
             => _triggerService.RepairStuckSocialTreatments();
 
@@ -163,6 +166,7 @@ namespace HarveyStressMeter.Handlers
             _thunderFlashbackService.ResetDailyState();
             _harveyFlashbackRescueService.ResetDailyState();
             _harveyCareTrustService.OnDayStarted();
+            _harveyConsentService?.OnDayStarted();
         }
 
         public void UpdateDailyDarknessState()
@@ -508,6 +512,10 @@ namespace HarveyStressMeter.Handlers
 
         private void HandleDialogueEvents(MenuChangedEventArgs e)
         {
+            // Вопрос о границах / разговор после штрафа — свои реплики Харви, не перехватываем.
+            if (HarveyConsentService.IsFlowActive)
+                return;
+
             // Во время scripted event реплики NPC (speak Harvey/...) — не разговор игрока с NPC.
             // Иначе каждая строка события перехватывается programmatic stress-диалогом.
             if (GameStateHelper.IsEventActive())
@@ -698,6 +706,7 @@ namespace HarveyStressMeter.Handlers
             _stressTreatmentReviewService.TryFallbackCompleteReviewAfterDialogue();
 
             _harveyCareTrustService.TryAwardSupportiveTalk();
+            _harveyConsentService?.QueueAfterHarveyTalk();
 
             UpdateSocialQuestProgress(showUiMessage: false);
             if (_lastDialogueNpc == "Harvey")

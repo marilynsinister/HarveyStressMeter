@@ -155,6 +155,15 @@ namespace HarveyStressMeter.Models
 
         public int MaxTrustPenaltyPerEvent { get; set; } = 5;
 
+        /// <summary>«Границы»: Харви спрашивает разрешения, когда доверие дорастает до уровня.</summary>
+        public bool EnableHarveyConsentQuestions { get; set; } = true;
+
+        /// <summary>Через сколько дней Харви снова спросит после ответа «пока нет».</summary>
+        public int ConsentReaskDays { get; set; } = 14;
+
+        /// <summary>Сколько дней после штрафа доверия Харви готов поговорить о случившемся (и вернуть часть очков).</summary>
+        public int TrustRepairWindowDays { get; set; } = 7;
+
         // --- Harvey safe person aura (рядом с Харви легче) ---
 
         public bool EnableHarveySafePersonAura { get; set; } = true;

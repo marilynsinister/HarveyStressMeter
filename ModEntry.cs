@@ -419,6 +419,7 @@ namespace HarveyStressMeter
             _uiHandler = new UIHandler(Monitor, _helper);
             _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _darknessRemissionService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _socialExposureService, _stressGameplayEffectService, _episodeQuestProgressService);
             _gameLogicHandler.SetSocialAnxietyTherapyService(_socialAnxietyTherapyService!);
+            _gameLogicHandler.SetConsentService(new HarveyConsentService(_data, _config, _harveyCareTrustService, Monitor));
             _harveyStressInteractionHandler = new HarveyStressInteractionHandler(
                 Monitor,
                 _helper,
@@ -480,6 +481,7 @@ namespace HarveyStressMeter
                 FoodConsumptionPatch.Apply(_harmony);
                 HarveyInteractionPatch.Initialize(TryInterceptHarveyInteraction);
                 HarveyInteractionPatch.Apply(_harmony);
+                QuestTextPatch.Apply(_harmony);
             }
             else
                 Monitor.Log("❌ Harmony не инициализирован — отслеживание еды отключено", LogLevel.Error);

@@ -177,6 +177,30 @@ namespace HarveyStressMeter.UI
 
             public static string LevelLine(string levelName, int points) =>
                 $"{levelName} · {points} очков доверия";
+
+            public const string BoundariesTitle = "Границы";
+            public const string BoundariesBody =
+                "Когда доверие растёт, Харви спрашивает, что ему можно. «Нет» — тоже ответ: он его соблюдает.";
+
+            public const string PerkEveningChecks = "Вечерние проверки";
+            public const string PerkHoldHand = "Держать за руку в грозу";
+            public const string PerkSearchInStorm = "Искать, если уйдёшь в грозу";
+            public const string PerkStrictCare = "Сказать «стоп» и увести отдыхать";
+
+            public const string ConsentLocked = "когда доверие вырастет";
+            public const string ConsentNotAsked = "Харви скоро спросит";
+            public const string ConsentGranted = "ты разрешила";
+            public const string ConsentNotYet = "ты сказала «пока нет»";
+            public const string ConsentNever = "ты попросила не делать этого";
+
+            public static string NextLevelLine(int pointsLeft) =>
+                $"До следующей ступени доверия: {pointsLeft} очк.";
+
+            public const string CappedByRelationship =
+                "Очков хватает на большее — но дальше доверие растёт только вместе с отношениями.";
+
+            public const string RepairPending =
+                "После недавнего срыва Харви хочет поговорить. Зайди к нему — разговор может вернуть часть доверия.";
         }
     }
 }

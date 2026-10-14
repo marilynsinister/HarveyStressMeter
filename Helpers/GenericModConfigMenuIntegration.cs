@@ -72,6 +72,12 @@ namespace HarveyStressMeter.Helpers
                 () => config.EnableHarveyFlashbackRescue,
                 value => config.EnableHarveyFlashbackRescue = value,
                 () => "Харви ищет в лесу во время грозы");
+            gmcm.AddBoolOption(
+                manifest,
+                () => config.EnableHarveyConsentQuestions,
+                value => config.EnableHarveyConsentQuestions = value,
+                () => "Харви спрашивает разрешения",
+                () => "Когда доверие растёт, Харви спрашивает, что ему можно: вечерние проверки, держать за руку, искать в грозу, строгий уход.\nОтвет меняет механику. Выключено — всё разрешается по уровню доверия, как раньше.");
 
             gmcm.AddSectionTitle(manifest, () => "Интерфейс");
             gmcm.AddBoolOption(
@@ -108,6 +114,7 @@ namespace HarveyStressMeter.Helpers
             config.ComfortDailyReliefCap = defaults.ComfortDailyReliefCap;
             config.EnableHarveySafePersonAura = defaults.EnableHarveySafePersonAura;
             config.EnableHarveyFlashbackRescue = defaults.EnableHarveyFlashbackRescue;
+            config.EnableHarveyConsentQuestions = defaults.EnableHarveyConsentQuestions;
             config.ShowStressMeter = defaults.ShowStressMeter;
             config.ShowOnlyWhenStressed = defaults.ShowOnlyWhenStressed;
             config.EnableHudMessages = defaults.EnableHudMessages;

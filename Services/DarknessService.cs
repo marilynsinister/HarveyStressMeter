@@ -27,6 +27,7 @@ namespace HarveyStressMeter.Services
         private bool _worryLetterSent;
 
         private readonly GameClockMinuteCounter _step1Clock = new();
+        private string? _lastJournalKey;
         private bool _step1WasProgressing;
         private bool _step1WasAwayFromHome;
         private bool _step1EveningCreditedHudShown;
@@ -711,9 +712,15 @@ namespace HarveyStressMeter.Services
 
             if (IsStep1AwaitingHarveyTalk())
             {
+                if (!ConversationHelper.HasTopic(DarknessLegacyHelper.Step1ReadyForHarveyTopic))
+                    ConversationHelper.AddTopic(DarknessLegacyHelper.Step1ReadyForHarveyTopic, 7);
+
                 RefreshTherapyQuestJournal(1);
                 return;
             }
+
+            // После загрузки сейва тексты журнала ещё не подставлены — подставить сразу, не ждать прогресса.
+            RefreshTherapyQuestJournal(1);
 
             bool evening = Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 2400;
             bool atHome = GameStateHelper.IsPlayerHomeLocation();
@@ -1393,10 +1400,34 @@ namespace HarveyStressMeter.Services
             if (string.IsNullOrEmpty(questId))
                 return;
 
-            _questService.UpdateQuest(questId, objective: objective);
+            // Описание с прогрессом — только у шага 1 (вечера дома); у шагов 2–3 прогресс в цели.
+            string? description = stage == 1 ? BuildStep1DescriptionForInstance() : null;
+            string journalKey = $"{Patches.QuestTextPatch.Generation}|{questId}|{objective}|{description}";
+            if (journalKey == _lastJournalKey)
+                return;
+
+            _lastJournalKey = journalKey;
+            _questService.UpdateQuest(questId, description: description, objective: objective);
             _monitor.Log(
                 $"[DarknessStep1] Quest journal updated: questId={questId}, objective=\"{objective.Replace('\n', '|')}\"",
                 LogLevel.Trace);
+        }
+
+        private string BuildStep1DescriptionForInstance()
+        {
+            var d = _data.Darkness;
+            int required = Step1EveningsRequired;
+            int evenings = Math.Min(d.SafeDarknessEveningsCompleted, required);
+
+            string status;
+            if (IsStep1AwaitingHarveyTalk())
+                status = DarknessTherapyCopy.Step1DescriptionAwaitingHarvey(required);
+            else if (IsStep1TodayCredited())
+                status = DarknessTherapyCopy.Step1DescriptionTodayCredited();
+            else
+                status = DarknessTherapyCopy.Step1DescriptionToday(GetStep1DisplayMinutesToday());
+
+            return DarknessTherapyCopy.Step1Description(evenings, required, status);
         }
 
         private string BuildStep1ObjectiveForInstance()

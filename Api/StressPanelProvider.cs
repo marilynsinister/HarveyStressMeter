@@ -194,8 +194,8 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
 
     private List<HarveyPanelSectionDto> BuildTrustSections()
     {
-        return
-        [
+        var sections = new List<HarveyPanelSectionDto>
+        {
             new HarveyPanelSectionDto
             {
                 Title = BuildTrustLevelLine(),
@@ -204,7 +204,50 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
                 Priority = 10,
                 Severity = HarveyPanelSeverity.Info,
             },
-        ];
+        };
+
+        if (_trustService.ConsentQuestionsEnabled)
+        {
+            sections.Add(new HarveyPanelSectionDto
+            {
+                Title = HarveyPanelTexts.Trust.BoundariesTitle,
+                Body = HarveyPanelTexts.Trust.BoundariesBody,
+                Status = BuildBoundariesStatus(),
+                Priority = 20,
+                Severity = HarveyPanelSeverity.Info,
+            });
+        }
+
+        return sections;
+    }
+
+    /// <summary>Разрешения из «Границ»: открыто ли по уровню и что ответила фермерша.</summary>
+    private string BuildBoundariesStatus()
+    {
+        var level = _trustService.GetTrustLevel();
+        var lines = new List<string>();
+
+        foreach (var (consentId, label) in new[]
+                 {
+                     (HarveyCareConsents.EveningChecks, HarveyPanelTexts.Trust.PerkEveningChecks),
+                     (HarveyCareConsents.HoldHand, HarveyPanelTexts.Trust.PerkHoldHand),
+                     (HarveyCareConsents.SearchInStorm, HarveyPanelTexts.Trust.PerkSearchInStorm),
+                     (HarveyCareConsents.StrictCare, HarveyPanelTexts.Trust.PerkStrictCare),
+                 })
+        {
+            string state = level < HarveyCareConsents.RequiredTrustLevel(consentId)
+                ? HarveyPanelTexts.Trust.ConsentLocked
+                : _trustService.GetConsent(consentId) switch
+                {
+                    HarveyConsentAnswer.Granted => HarveyPanelTexts.Trust.ConsentGranted,
+                    HarveyConsentAnswer.NotYet => HarveyPanelTexts.Trust.ConsentNotYet,
+                    HarveyConsentAnswer.Never => HarveyPanelTexts.Trust.ConsentNever,
+                    _ => HarveyPanelTexts.Trust.ConsentNotAsked,
+                };
+            lines.Add($"{label} — {state}");
+        }
+
+        return string.Join("\n", lines);
     }
 
     private bool HasActiveStressAssignment()
@@ -325,6 +368,22 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
 
     private string BuildTrustDescriptionLine()
     {
+        var body = BuildTrustMoodLine();
+        var extra = new List<string>();
+
+        if (_trustService.State.PendingRepairPoints > 0)
+            extra.Add(HarveyPanelTexts.Trust.RepairPending);
+
+        if (_trustService.IsCappedByRelationship())
+            extra.Add(HarveyPanelTexts.Trust.CappedByRelationship);
+        else if (_trustService.GetNextLevelProgress() is { } next)
+            extra.Add(HarveyPanelTexts.Trust.NextLevelLine(next.PointsLeft));
+
+        return extra.Count == 0 ? body : body + "\n" + string.Join("\n", extra);
+    }
+
+    private string BuildTrustMoodLine()
+    {
         var level = _trustService.GetTrustLevel();
         var points = _trustService.GetTrustPoints();
         var state = _trustService.State;
@@ -345,6 +404,10 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
 
     private string BuildTrustPermissionsLine()
     {
+        // С «Границами» разрешения показывает отдельная секция — там видно и ответ фермерши.
+        if (_trustService.ConsentQuestionsEnabled)
+            return "";
+
         var state = _trustService.State;
         var lines = new List<string>();
 

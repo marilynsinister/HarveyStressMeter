@@ -55,6 +55,7 @@ namespace HarveyStressMeter.Services
             var level = GetTrustLevel();
             float mult = level switch
             {
+                HarveyCareTrustLevels.Anchor when IsConsentGranted(HarveyCareConsents.StrictCare) => 0.75f,
                 HarveyCareTrustLevels.Anchor => 0.80f,
                 HarveyCareTrustLevels.SafePerson => 0.85f,
                 HarveyCareTrustLevels.TrustedDoctor => 0.90f,
@@ -67,34 +68,52 @@ namespace HarveyStressMeter.Services
 
         public int GetTreatmentStressReductionBonus()
         {
-            return GetTrustLevel() switch
+            int bonus = GetTrustLevel() switch
             {
                 HarveyCareTrustLevels.Anchor => 5,
                 HarveyCareTrustLevels.SafePerson => 3,
                 HarveyCareTrustLevels.TrustedDoctor => 2,
                 _ => 0,
             };
+
+            // Вечерние проверки: Харви раньше замечает, что ей хуже, и лечение действует чуть сильнее.
+            if (bonus > 0 && IsConsentGranted(HarveyCareConsents.EveningChecks))
+                bonus++;
+
+            return bonus;
         }
 
         public float GetFlashbackStabilizationMultiplier()
         {
-            return GetTrustLevel() switch
+            float mult = GetTrustLevel() switch
             {
                 HarveyCareTrustLevels.Anchor => 1.35f,
                 HarveyCareTrustLevels.SafePerson => 1.20f,
                 _ => 1f,
             };
+
+            // Рука, которую можно сжать, возвращает в настоящее быстрее голоса.
+            if (mult > 1f && IsConsentGranted(HarveyCareConsents.HoldHand))
+                mult += 0.10f;
+
+            return mult;
         }
 
         public float GetRescueChanceBonus()
         {
-            return GetTrustLevel() switch
+            float bonus = GetTrustLevel() switch
             {
                 HarveyCareTrustLevels.Anchor => 0.15f,
                 HarveyCareTrustLevels.SafePerson => 0.12f,
                 HarveyCareTrustLevels.TrustedDoctor => 0.08f,
                 _ => 0f,
             };
+
+            // Ему разрешили искать — он знает её места и выходит сразу, не сомневаясь.
+            if (IsConsentGranted(HarveyCareConsents.SearchInStorm))
+                bonus += 0.05f;
+
+            return bonus;
         }
 
         public bool IsHarveySafePersonUnlocked()
@@ -102,7 +121,40 @@ namespace HarveyStressMeter.Services
 
         public bool CanHarveyForestRescue()
             => (State.ForestRescueUnlocked || GetTrustLevel() >= HarveyCareTrustLevels.SafePerson)
-               && GetTrustLevel() >= HarveyCareTrustLevels.SafePerson;
+               && GetTrustLevel() >= HarveyCareTrustLevels.SafePerson
+               && IsConsentAllowed(HarveyCareConsents.SearchInStorm);
+
+        public bool ConsentQuestionsEnabled => _config.EnableHarveyConsentQuestions;
+
+        public HarveyConsentAnswer GetConsent(string consentId)
+            => State.Consents.TryGetValue(consentId, out var answer) ? answer : HarveyConsentAnswer.NotAsked;
+
+        /// <summary>Разрешено явно.</summary>
+        public bool IsConsentGranted(string consentId)
+            => _config.EnableHarveyConsentQuestions && GetConsent(consentId) == HarveyConsentAnswer.Granted;
+
+        /// <summary>
+        /// Не запрещено: «да» или ещё не спрашивал (старые сохранения, уровень только что открылся).
+        /// «Пока нет» и «нет» Харви соблюдает. При выключенных вопросах — всё по уровню доверия.
+        /// </summary>
+        public bool IsConsentAllowed(string consentId)
+            => !_config.EnableHarveyConsentQuestions
+               || GetConsent(consentId) is HarveyConsentAnswer.NotAsked or HarveyConsentAnswer.Granted;
+
+        /// <summary>Следующий уровень доверия и сколько очков до него; null — максимум или упёрлись в потолок отношений.</summary>
+        public (int Level, int PointsLeft)? GetNextLevelProgress()
+        {
+            int raw = GetRawTrustLevel();
+            if (raw >= HarveyCareTrustLevels.Anchor)
+                return null;
+
+            int next = raw + 1;
+            return (next, Math.Max(0, LevelThresholds[next] - State.TrustPoints));
+        }
+
+        /// <summary>Очков хватает на уровень выше, но отношения с Харви пока не позволяют.</summary>
+        public bool IsCappedByRelationship()
+            => GetRawTrustLevel() > GetMaxTrustLevelForRelationship();
 
         public void AwardTrust(string reason, int points)
         {
@@ -132,6 +184,11 @@ namespace HarveyStressMeter.Services
             var actual = Math.Min(points, _config.MaxTrustPenaltyPerEvent);
             State.TrustPoints = Math.Max(0, State.TrustPoints - actual);
             State.LastTrustPenaltyDay = today;
+
+            // Разговор после штрафа может вернуть половину (HarveyConsentService.TryStartRepairTalk).
+            State.PendingRepairPoints = Math.Max(1, actual / 2);
+            State.PendingRepairReason = reason;
+            State.PendingRepairDay = today;
             RefreshTrustLevelAndUnlocks();
 
             _monitor.Log(
@@ -290,6 +347,9 @@ namespace HarveyStressMeter.Services
             sb.AppendLine($"FlashbacksStabilizedWithHarvey: {State.FlashbacksStabilizedWithHarvey}");
             sb.AppendLine($"DaysSinceLastSuccess: {State.DaysSinceLastSuccessfulAssignment}");
             sb.AppendLine($"AssignmentBoostDaysRemaining: {State.AssignmentBoostDaysRemaining}");
+            foreach (var consentId in HarveyCareConsents.All)
+                sb.AppendLine($"Consent {consentId}: {GetConsent(consentId)} (asked day {(State.ConsentAskedDay.TryGetValue(consentId, out var d) ? d : 0)})");
+            sb.AppendLine($"PendingRepair: {State.PendingRepairPoints} pts ({State.PendingRepairReason ?? "-"}, day {State.PendingRepairDay})");
             return sb.ToString().TrimEnd();
         }
 

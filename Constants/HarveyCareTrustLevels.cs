@@ -28,5 +28,8 @@ namespace HarveyStressMeter.Constants
         public const string ForestRescue = "ForestRescue";
         public const string SupportiveTalk = "SupportiveTalk";
         public const string LongIgnoredAssignment = "LongIgnoredAssignment";
+        public const string TrustRepaired = "TrustRepaired";
+        public const string ConsentGranted = "ConsentGranted";
+        public const string BoundaryRespected = "BoundaryRespected";
     }
 }

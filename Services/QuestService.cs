@@ -49,6 +49,7 @@ namespace HarveyStressMeter.Services
             if (description != null)
             {
                 quest.questDescription = description;
+                Patches.QuestTextPatch.SetDescription(questId, description);
                 // Логирование убрано для оптимизации (вызывается часто)
                 updated = true;
             }
@@ -56,6 +57,7 @@ namespace HarveyStressMeter.Services
             if (objective != null)
             {
                 quest.currentObjective = objective;
+                Patches.QuestTextPatch.SetObjective(questId, objective);
                 // Логирование убрано для оптимизации (вызывается часто)
                 updated = true;
             }
@@ -80,6 +82,7 @@ namespace HarveyStressMeter.Services
 
             try
             {
+                Patches.QuestTextPatch.Clear(questId);
                 Game1.player.addQuest(questId);
                 _monitor?.Log($"[QuestService.AddQuest] ✅ Квест '{questId}' добавлен", LogLevel.Info);
             }
@@ -107,6 +110,7 @@ namespace HarveyStressMeter.Services
             }
 
             Game1.player.completeQuest(questId);
+            Patches.QuestTextPatch.Clear(questId);
             _monitor?.Log($"[QuestService.CompleteQuest] ✅ Квест '{questId}' завершен", LogLevel.Info);
         }
 

@@ -21,6 +21,29 @@ namespace HarveyStressMeter.Helpers
             => $"Вечера дома: {evenings}/{required}. Сегодня: {secondsToday / 60}/{MinutesPerEvening} мин.\n" +
                $"Нужно {FormatDailyRequirement()} дома между 20:00 и 00:00.";
 
+        /// <summary>Описание квеста «Шаг 1» с подсчётом вечеров и тем, как его закрыть.</summary>
+        public static string Step1Description(int evenings, int required, string todayStatus)
+            => "Харви попросил начать с самого мягкого: после 20:00 побыть дома при свете. " +
+               $"Один вечер засчитывается, когда наберётся {MinutesPerEvening} игровых минут дома между 20:00 и полуночью " +
+               "(не больше одного вечера в день; можно заниматься делами, но не выходить из дома).\n\n" +
+               $"Вечера дома: {evenings}/{required}.\n" +
+               todayStatus + "\n\n" +
+               $"Как завершить: набери {required} {EveningsWord(required)} — и поговори с Харви. Он закроет этот шаг.";
+
+        public static string Step1DescriptionToday(int minutesToday)
+            => $"Сегодня: {minutesToday}/{MinutesPerEvening} мин дома.";
+
+        public static string Step1DescriptionTodayCredited()
+            => "Сегодня вечер уже зачтён. Следующий — завтра после 20:00.";
+
+        public static string Step1DescriptionAwaitingHarvey(int required)
+            => $"Все {required} {EveningsWord(required)} есть. Теперь поговори с Харви.";
+
+        private static string EveningsWord(int n)
+            => (n % 10 == 1 && n % 100 != 11) ? "вечер"
+               : (n % 10 is >= 2 and <= 4 && (n % 100 < 12 || n % 100 > 14)) ? "вечера"
+               : "вечеров";
+
         public static string StartTherapyHud()
             => "Терапия началась. После восьми — час дома при свете. Не проверяй себя темнотой специально: мы лечим страх, а не спорим с ним.";
 
