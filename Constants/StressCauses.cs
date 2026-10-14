@@ -17,6 +17,8 @@ namespace HarveyStressMeter.Constants
         public const string Lonely = "Lonely";
         public const string Social = "Social";
         public const string GotoroFlashback = "GotoroFlashback";
+        /// <summary>Открытый огонь рядом (костёр, печь) — после рассказа Харви про склад (T1).</summary>
+        public const string FireMemory = "FireMemory";
 
         /// <summary>Базовые веса причин в StressLoad.</summary>
         public static readonly Dictionary<string, int> BaseWeights = new(StringComparer.Ordinal)
@@ -33,6 +35,7 @@ namespace HarveyStressMeter.Constants
             [ThunderRelapse] = 15,
             [ThunderSensitivity] = 10,
             [GotoroFlashback] = 50,
+            [FireMemory] = 10,
         };
 
         /// <summary>Маппинг buffId → StressCause.</summary>
@@ -50,6 +53,7 @@ namespace HarveyStressMeter.Constants
             [BuffIds.DarknessLevel1] = Darkness,
             [BuffIds.DarknessLevel2] = Darkness,
             [BuffIds.DarknessLevel3] = Darkness,
+            [BuffIds.FireMemory] = FireMemory,
         };
 
         /// <summary>Обратный маппинг StressCause → канонический buffId.</summary>
@@ -65,6 +69,7 @@ namespace HarveyStressMeter.Constants
             [NoSleep] = BuffIds.NoSleep,
             [Thunder] = BuffIds.Thunder,
             [GotoroFlashback] = BuffIds.Panic,
+            [FireMemory] = BuffIds.FireMemory,
         };
 
         public static bool TryGetCauseForBuff(string buffId, out string causeId)
@@ -75,7 +80,7 @@ namespace HarveyStressMeter.Constants
 
         public static bool CanSelfResolve(string causeId) =>
             causeId is Hunger or Tired or TooCold or Darkness or Social or Lonely
-                or ThunderRelapse or ThunderSensitivity;
+                or ThunderRelapse or ThunderSensitivity or FireMemory;
 
         public static bool RequiresHarveyIfSevere(string causeId) =>
             causeId is NoSleep or Overwork or Thunder or GotoroFlashback;

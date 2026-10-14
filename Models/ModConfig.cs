@@ -15,8 +15,9 @@ namespace HarveyStressMeter.Models
         /// </summary>
         public bool EnableDevTestCommands { get; set; } = false;
 
-        /// <summary>HTTP MCP server для AI-тестирования (порт 24844 по умолчанию).</summary>
-        public bool EnableStressMcp { get; set; } = true;
+        /// <summary>HTTP MCP server для AI-тестирования (порт 24844 по умолчанию).
+        /// Выключен по умолчанию: игрокам не нужен открытый порт. Для тестов включить в config.json.</summary>
+        public bool EnableStressMcp { get; set; } = false;
 
         /// <summary>Port for Stress MCP (default 24844; StardewMCP uses 24842, Injury MCP 24843).</summary>
         public int StressMcpPort { get; set; } = 24844;
@@ -157,6 +158,12 @@ namespace HarveyStressMeter.Models
 
         /// <summary>«Границы»: Харви спрашивает разрешения, когда доверие дорастает до уровня.</summary>
         public bool EnableHarveyConsentQuestions { get; set; } = true;
+
+        /// <summary>
+        /// Запах дыма у открытого огня даёт лёгкий стресс (после рассказа Харви про склад, T1).
+        /// Работает только при TraumaBackstory = true в Harvey Overhaul [CP].
+        /// </summary>
+        public bool EnableFireMemoryTrigger { get; set; } = true;
 
         /// <summary>Через сколько дней Харви снова спросит после ответа «пока нет».</summary>
         public int ConsentReaskDays { get; set; } = 14;

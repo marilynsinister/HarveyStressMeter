@@ -2,16 +2,23 @@ using System.Linq;
 using HarveyOverhaul.Core.Models;
 using HarveyOverhaul.Core.Api;
 using HarveyStressMeter.Constants;
+using HarveyStressMeter.Helpers;
 using HarveyStressMeter.Models;
 using HarveyStressMeter.Services;
 using HarveyStressMeter.UI;
+using StardewValley;
 
 namespace HarveyStressMeter.Api;
 
 /// <summary>Отдаёт данные стресса для вкладок Обзор/Стресс/Доверие. План — через <see cref="StressCareDirectiveProvider"/>.</summary>
-public sealed class StressPanelProvider : IHarveyPanelProvider
+public sealed class StressPanelProvider : IHarveyPanelActionProvider
 {
     public const string ProviderId = "marilynsinister.HarveyStressMeter";
+
+    /// <summary>Кнопка в секции «Границы»: вернуться к одной из договорённостей.</summary>
+    private const string RevisitActionId = "consent_revisit";
+
+    private HarveyConsentService? _consentService;
 
     private readonly SaveData _data;
     private readonly HandbookManager _handbookManager;
@@ -30,7 +37,49 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
         _trustService = trustService;
     }
 
+    public void SetConsentService(HarveyConsentService consentService)
+        => _consentService = consentService;
+
     public string UniqueId => ProviderId;
+
+    public bool HandlePanelAction(string actionId)
+    {
+        if (actionId != RevisitActionId || _consentService == null)
+            return false;
+
+        var options = _consentService.GetRevisitableConsents();
+        if (options.Count == 0)
+        {
+            Game1.addHUDMessage(new HUDMessage("Пересматривать пока нечего: Харви ещё ни о чём не спрашивал.", HUDMessage.error_type));
+            return false;
+        }
+
+        // Окно закрываем, вопрос — со следующего тика, когда меню уйдёт.
+        Game1.exitActiveMenu();
+        DelayedAction.functionAfterDelay(() =>
+        {
+            var responses = options
+                .Select(id => new Response(id, HarveyConsentService.GetConsentLabel(id)))
+                .Append(new Response("cancel", "Пока ничего"))
+                .ToArray();
+
+            Game1.currentLocation?.createQuestionDialogue(
+                "К какой договорённости с Харви вернуться? Он спросит заново — прежний ответ ни к чему не обязывает.",
+                responses,
+                (_, answer) =>
+                {
+                    if (answer == "cancel")
+                        return;
+
+                    _trustService.RequestConsentRevisit(answer);
+                    Game1.addHUDMessage(new HUDMessage(
+                        "Харви вернётся к этому в разговоре — не раньше завтра, если сегодня вы уже говорили о границах.",
+                        HUDMessage.newQuest_type));
+                });
+        }, 100);
+
+        return false;
+    }
     public string DisplayName => "Harvey Stress";
     public int Priority => 100;
 
@@ -215,6 +264,8 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
                 Status = BuildBoundariesStatus(),
                 Priority = 20,
                 Severity = HarveyPanelSeverity.Info,
+                ActionLabel = _consentService?.GetRevisitableConsents().Count > 0 ? "Пересмотреть договорённость" : "",
+                ActionId = RevisitActionId,
             });
         }
 
@@ -233,8 +284,13 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
                      (HarveyCareConsents.HoldHand, HarveyPanelTexts.Trust.PerkHoldHand),
                      (HarveyCareConsents.SearchInStorm, HarveyPanelTexts.Trust.PerkSearchInStorm),
                      (HarveyCareConsents.StrictCare, HarveyPanelTexts.Trust.PerkStrictCare),
+                     (HarveyCareConsents.HarveyLimits, HarveyPanelTexts.Trust.PerkHarveyLimits),
                  })
         {
+            // Зеркальный вопрос — только в браке; до свадьбы строку не показываем.
+            if (HarveyCareConsents.RequiresMarriage(consentId) && !HarveyFriendshipHelper.IsMarriedToHarvey())
+                continue;
+
             string state = level < HarveyCareConsents.RequiredTrustLevel(consentId)
                 ? HarveyPanelTexts.Trust.ConsentLocked
                 : _trustService.GetConsent(consentId) switch
@@ -373,6 +429,11 @@ public sealed class StressPanelProvider : IHarveyPanelProvider
 
         if (_trustService.State.PendingRepairPoints > 0)
             extra.Add(HarveyPanelTexts.Trust.RepairPending);
+
+        // Одна шкала на всё лечение: очки за режим травм приходят сюда же из Injury.
+        int injuryPoints = _trustService.State.PointsBySource.GetValueOrDefault("injury");
+        if (injuryPoints > 0)
+            extra.Add(HarveyPanelTexts.Trust.InjuryPointsLine(injuryPoints));
 
         if (_trustService.IsCappedByRelationship())
             extra.Add(HarveyPanelTexts.Trust.CappedByRelationship);

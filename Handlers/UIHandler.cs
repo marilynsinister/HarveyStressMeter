@@ -39,6 +39,6 @@ public class UIHandler
             return;
         }
 
-        api.OpenPanel(HarveyPanelTab.Overview);
+        api.OpenPanel(HarveyPanelTab.Handbook);
     }
 }

@@ -308,6 +308,22 @@ namespace HarveyStressMeter
             _helper.Events.GameLoop.UpdateTicked += (_, e) => _comfortActivityService.OnUpdateTicked((int)e.Ticks);
             _helper.Events.GameLoop.TimeChanged += (_, e) => _comfortActivityService.OnTimeChanged(e.OldTime, e.NewTime);
             _helper.Events.GameLoop.DayStarted += (_, _) => _comfortActivityService.OnDayStarted();
+
+            // Сцены осмотра: «стоп» → Харви остановился → немного доверия (раз в день).
+            StardewValley.Triggers.TriggerActionManager.RegisterAction(
+                $"{ModManifest.UniqueID}_ExamStopRespected",
+                (string[] _, StardewValley.Delegates.TriggerActionContext _, out string? error) =>
+                {
+                    error = null;
+                    if (Context.IsWorldReady)
+                        _harveyCareTrustService.OnExamStopRespected();
+                    return true;
+                });
+
+            // Запах дыма у открытого огня — только если она рассказала Харви про склад (T1).
+            var fireMemoryService = new FireMemoryService(_config, _buffService, _stressLoadService, Monitor);
+            _helper.Events.GameLoop.TimeChanged += (_, e) => fireMemoryService.OnTimeChanged(e.NewTime);
+            _helper.Events.GameLoop.DayStarted += (_, _) => fireMemoryService.OnDayStarted();
             _thunderFlashbackService.SetEpisodeQuestProgressService(_episodeQuestProgressService);
             Monitor.Log("Safe aura wired", LogLevel.Info);
             _harveyFlashbackRescueService = new HarveyFlashbackRescueService(
@@ -419,7 +435,9 @@ namespace HarveyStressMeter
             _uiHandler = new UIHandler(Monitor, _helper);
             _gameLogicHandler = new GameLogicHandler(_data, Monitor, _treatmentService, _triggerService, _buffService, _stateService, _darknessService, _darknessRemissionService, _stressDialogueService, _stressTreatmentReviewService, _stressLoadService, _thunderFlashbackService, _harveyFlashbackRescueService, _harveyCareTrustService, _harveySafePersonAuraService, _socialExposureService, _stressGameplayEffectService, _episodeQuestProgressService);
             _gameLogicHandler.SetSocialAnxietyTherapyService(_socialAnxietyTherapyService!);
-            _gameLogicHandler.SetConsentService(new HarveyConsentService(_data, _config, _harveyCareTrustService, Monitor));
+            var consentService = new HarveyConsentService(_data, _config, _harveyCareTrustService, Monitor);
+            _gameLogicHandler.SetConsentService(consentService);
+            _stressPanelProvider.SetConsentService(consentService);
             _harveyStressInteractionHandler = new HarveyStressInteractionHandler(
                 Monitor,
                 _helper,
@@ -512,6 +530,7 @@ namespace HarveyStressMeter
             coreApi.RegisterCareDirectiveProvider(_stressCareDirectiveProvider);
             coreApi.RegisterStressStateApi(_stressStateApi ??= new StressStateApi(
                 _data, _stateService, _treatmentService, _stressLoadService, Monitor));
+            coreApi.RegisterCareTrustApi(new StressCareTrustApi(_harveyCareTrustService));
             _recoveryPlanBridge.Bind(coreApi);
             _stressMedicalIntentProvider?.SetCoreApi(coreApi);
             _harveyStressInteractionHandler?.SetCoreApi(coreApi);

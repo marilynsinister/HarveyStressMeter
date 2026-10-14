@@ -79,7 +79,7 @@ namespace HarveyStressMeter.UI
             public const string SectionReference = "Справочник";
 
             public const string NoAssignment =
-                "Сейчас нет срочного назначения. Ниже — что Харви обычно советует при стрессе.";
+                "Сейчас нет срочного назначения. Что Харви советует при стрессе — во вкладке «Справочник».";
 
             public const string ProgressPrefix = "Осталось:";
 
@@ -180,12 +180,17 @@ namespace HarveyStressMeter.UI
 
             public const string BoundariesTitle = "Границы";
             public const string BoundariesBody =
-                "Когда доверие растёт, Харви спрашивает, что ему можно. «Нет» — тоже ответ: он его соблюдает.";
+                "Когда доверие растёт, Харви спрашивает, что ему можно. «Нет» — тоже ответ: он его соблюдает. "
+                + "К любой договорённости можно вернуться — кнопка ниже.";
 
             public const string PerkEveningChecks = "Вечерние проверки";
             public const string PerkHoldHand = "Держать за руку в грозу";
             public const string PerkSearchInStorm = "Искать, если уйдёшь в грозу";
             public const string PerkStrictCare = "Сказать «стоп» и увести отдыхать";
+            public const string PerkHarveyLimits = "Останавливать его, когда он перегибает";
+
+            public static string InjuryPointsLine(int points) =>
+                $"Из них за режим травм: {points} очк. Соблюдать назначения при ранах — тоже доверие.";
 
             public const string ConsentLocked = "когда доверие вырастет";
             public const string ConsentNotAsked = "Харви скоро спросит";

@@ -78,6 +78,12 @@ namespace HarveyStressMeter.Helpers
                 value => config.EnableHarveyConsentQuestions = value,
                 () => "Харви спрашивает разрешения",
                 () => "Когда доверие растёт, Харви спрашивает, что ему можно: вечерние проверки, держать за руку, искать в грозу, строгий уход.\nОтвет меняет механику. Выключено — всё разрешается по уровню доверия, как раньше.");
+            gmcm.AddBoolOption(
+                manifest,
+                () => config.EnableFireMemoryTrigger,
+                value => config.EnableFireMemoryTrigger = value,
+                () => "Огонь как триггер прошлого",
+                () => "После рассказа Харви про пожар на складе запах дыма у костра, жаровни или печи даёт лёгкий стресс (раз в день).\nНужна настройка TraumaBackstory в Harvey Overhaul [CP].");
 
             gmcm.AddSectionTitle(manifest, () => "Интерфейс");
             gmcm.AddBoolOption(
@@ -115,6 +121,7 @@ namespace HarveyStressMeter.Helpers
             config.EnableHarveySafePersonAura = defaults.EnableHarveySafePersonAura;
             config.EnableHarveyFlashbackRescue = defaults.EnableHarveyFlashbackRescue;
             config.EnableHarveyConsentQuestions = defaults.EnableHarveyConsentQuestions;
+            config.EnableFireMemoryTrigger = defaults.EnableFireMemoryTrigger;
             config.ShowStressMeter = defaults.ShowStressMeter;
             config.ShowOnlyWhenStressed = defaults.ShowOnlyWhenStressed;
             config.EnableHudMessages = defaults.EnableHudMessages;

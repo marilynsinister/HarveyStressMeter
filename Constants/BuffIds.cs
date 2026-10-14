@@ -28,6 +28,8 @@ namespace HarveyStressMeter.Constants
         public const string Collapse = "buffStressCollapse";
         public const string Numbness = "buffStressNumbness";
         public const string Despair = "buffStressDespair";
+        /// <summary>Запах дыма у открытого огня (FireMemoryService). Лёгкий, проходит сам.</summary>
+        public const string FireMemory = "buffStressFireMemory";
 
         // Новые баффы темноты (система уровней)
         public const string DarknessLevel1 = "buffDarknessLevel1"; // Defense -1

@@ -55,6 +55,9 @@ namespace HarveyStressMeter.Services
             var level = GetTrustLevel();
             float mult = level switch
             {
+                // «Стоп» как договор в обе стороны: она тоже может остановить его — и слушается охотнее.
+                HarveyCareTrustLevels.Anchor when IsConsentGranted(HarveyCareConsents.StrictCare)
+                    && IsConsentGranted(HarveyCareConsents.HarveyLimits) => 0.72f,
                 HarveyCareTrustLevels.Anchor when IsConsentGranted(HarveyCareConsents.StrictCare) => 0.75f,
                 HarveyCareTrustLevels.Anchor => 0.80f,
                 HarveyCareTrustLevels.SafePerson => 0.85f,
@@ -182,6 +185,10 @@ namespace HarveyStressMeter.Services
                 return;
 
             var actual = Math.Min(points, _config.MaxTrustPenaltyPerEvent);
+
+            // Она обещала говорить, когда он перегибает, — срыв для него сигнал, а не предательство.
+            if (IsConsentGranted(HarveyCareConsents.HarveyLimits))
+                actual = Math.Max(1, actual / 2);
             State.TrustPoints = Math.Max(0, State.TrustPoints - actual);
             State.LastTrustPenaltyDay = today;
 
@@ -194,6 +201,44 @@ namespace HarveyStressMeter.Services
             _monitor.Log(
                 $"[HarveyCareTrust] -{actual} ({reason}) → {State.TrustPoints} pts, level {GetTrustLevel()}",
                 LogLevel.Debug);
+        }
+
+        /// <summary>Очки из другого мода (Injury: режим травм) — одна шкала доверия на всё лечение.</summary>
+        public void AwardTrustFromSource(string source, string reason, int points)
+        {
+            if (points <= 0)
+                return;
+
+            int before = State.TrustPoints;
+            AwardTrust($"{source}:{reason}", points);
+            int gained = State.TrustPoints - before;
+            if (gained > 0)
+                State.PointsBySource[source] = State.PointsBySource.GetValueOrDefault(source) + gained;
+        }
+
+        public void PenalizeTrustFromSource(string source, string reason, int points)
+            => PenalizeTrust($"{source}:{reason}", points);
+
+        /// <summary>
+        /// Trigger action из сцен осмотра: фермерша сказала «стоп», Харви остановился.
+        /// Не чаще раза в день: доверие растёт от того, что он слушает, а не от повторов.
+        /// </summary>
+        public bool OnExamStopRespected()
+        {
+            int today = (int)Game1.Date.TotalDays;
+            if (State.LastExamStopRespectedDay == today)
+                return false;
+
+            State.LastExamStopRespectedDay = today;
+            AwardTrust(HarveyCareTrustReasons.ExamStopRespected, 2);
+            return true;
+        }
+
+        /// <summary>Фермерша хочет вернуться к договорённости: Харви спросит заново при следующем разговоре, без штрафа.</summary>
+        public void RequestConsentRevisit(string consentId)
+        {
+            State.ConsentRevisits.Add(consentId);
+            _monitor.Log($"[Consent] Пересмотр «{consentId}» — Харви спросит снова.", LogLevel.Debug);
         }
 
         public void OnTreatmentObjectivesCompleted(string episodeId)
@@ -281,6 +326,8 @@ namespace HarveyStressMeter.Services
 
         public void OnDayStarted()
         {
+            // Потолок по отношениям мог сдвинуться (букет, свадьба) — уровень и флаги пересчитываем каждое утро.
+            RefreshTrustLevelAndUnlocks();
             ResetDailyState();
             EvaluateIgnoredAssignmentPenalty();
         }
@@ -418,7 +465,30 @@ namespace HarveyStressMeter.Services
             State.GroundingDialogueUnlocked = State.TrustLevel >= HarveyCareTrustLevels.TrustedDoctor;
             State.SafePersonUnlocked = State.TrustLevel >= HarveyCareTrustLevels.SafePerson;
             State.ForestRescueUnlocked = State.TrustLevel >= HarveyCareTrustLevels.SafePerson;
+            SyncLevelFlags();
         }
+
+        /// <summary>
+        /// Флаги уровня для CP-условий (PLAYER_HAS_MAIL Current HarveyCareTrust_L2 Received):
+        /// сюжетные сцены открываются доверием в лечении, а не только сердечками.
+        /// </summary>
+        public void SyncLevelFlags()
+        {
+            if (!Context.IsWorldReady || Game1.player == null)
+                return;
+
+            int level = State.TrustLevel;
+            for (int i = HarveyCareTrustLevels.FamiliarDoctor; i <= HarveyCareTrustLevels.Anchor; i++)
+            {
+                string flag = LevelFlagPrefix + i;
+                if (level >= i)
+                    Game1.player.mailReceived.Add(flag);
+                else
+                    Game1.player.mailReceived.Remove(flag);
+            }
+        }
+
+        public const string LevelFlagPrefix = "HarveyCareTrust_L";
 
         private static int CalculateLevelFromPoints(int points)
         {

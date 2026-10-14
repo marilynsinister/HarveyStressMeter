@@ -18,8 +18,17 @@ namespace HarveyStressMeter.Constants
         /// <summary>Сказать «стоп» и увести домой, если она себя загоняет. Сильнее снижает набор стресса.</summary>
         public const string StrictCare = "StrictCare";
 
+        /// <summary>
+        /// Зеркальный вопрос в браке: Харви просит говорить ему, когда он перегибает с заботой.
+        /// Тогда «строгий уход» — договор, а не право: штрафы доверия мягче, «стоп» работает чуть сильнее.
+        /// </summary>
+        public const string HarveyLimits = "HarveyLimits";
+
         /// <summary>Порядок, в котором Харви задаёт вопросы.</summary>
-        public static readonly string[] All = { EveningChecks, HoldHand, SearchInStorm, StrictCare };
+        public static readonly string[] All = { EveningChecks, HoldHand, SearchInStorm, StrictCare, HarveyLimits };
+
+        /// <summary>Вопросы, которые Харви задаёт только мужем.</summary>
+        public static bool RequiresMarriage(string consentId) => consentId == HarveyLimits;
 
         public static int RequiredTrustLevel(string consentId) => consentId switch
         {
@@ -27,6 +36,7 @@ namespace HarveyStressMeter.Constants
             HoldHand => HarveyCareTrustLevels.SafePerson,
             SearchInStorm => HarveyCareTrustLevels.SafePerson,
             StrictCare => HarveyCareTrustLevels.Anchor,
+            HarveyLimits => HarveyCareTrustLevels.Anchor,
             _ => int.MaxValue,
         };
     }

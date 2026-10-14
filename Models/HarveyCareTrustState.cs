@@ -62,5 +62,14 @@ namespace HarveyStressMeter.Models
 
         /// <summary>Абсолютный день штрафа; разговор о нём доступен ConsentRepairWindowDays дней.</summary>
         public int PendingRepairDay { get; set; }
+
+        /// <summary>Договорённости, к которым фермерша попросила вернуться (кнопка во вкладке «Доверие»).</summary>
+        public HashSet<string> ConsentRevisits { get; set; } = new();
+
+        /// <summary>Абсолютный день, когда доверие уже выросло за «стоп» в осмотре (не чаще раза в день).</summary>
+        public int LastExamStopRespectedDay { get; set; }
+
+        /// <summary>Сколько очков пришло из других модов (Injury → «режим травм»), по источнику.</summary>
+        public Dictionary<string, int> PointsBySource { get; set; } = new();
     }
 }

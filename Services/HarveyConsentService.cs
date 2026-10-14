@@ -67,9 +67,17 @@ namespace HarveyStressMeter.Services
                 return null;
 
             int level = _trustService.GetTrustLevel();
+
+            // Сначала — то, к чему она сама попросила вернуться (кнопка во вкладке «Доверие»).
             foreach (var consentId in HarveyCareConsents.All)
             {
-                if (level < HarveyCareConsents.RequiredTrustLevel(consentId))
+                if (State.ConsentRevisits.Contains(consentId) && IsAvailable(consentId, level))
+                    return consentId;
+            }
+
+            foreach (var consentId in HarveyCareConsents.All)
+            {
+                if (!IsAvailable(consentId, level))
                     continue;
 
                 var answer = _trustService.GetConsent(consentId);
@@ -83,6 +91,27 @@ namespace HarveyStressMeter.Services
 
             return null;
         }
+
+        private static bool IsAvailable(string consentId, int level)
+            => level >= HarveyCareConsents.RequiredTrustLevel(consentId)
+               && (!HarveyCareConsents.RequiresMarriage(consentId) || HarveyFriendshipHelper.IsMarriedToHarvey());
+
+        /// <summary>Договорённости, к которым можно вернуться: Харви уже спрашивал, и ответ был.</summary>
+        public IReadOnlyList<string> GetRevisitableConsents()
+            => HarveyCareConsents.All
+                .Where(id => _trustService.GetConsent(id) != HarveyConsentAnswer.NotAsked
+                             && !State.ConsentRevisits.Contains(id))
+                .ToList();
+
+        public static string GetConsentLabel(string consentId) => consentId switch
+        {
+            HarveyCareConsents.EveningChecks => "Вечерние проверки",
+            HarveyCareConsents.HoldHand => "Держать за руку в грозу",
+            HarveyCareConsents.SearchInStorm => "Искать, если уйду в грозу",
+            HarveyCareConsents.StrictCare => "Сказать «стоп» и увести отдыхать",
+            HarveyCareConsents.HarveyLimits => "Говорить ему, когда он перегибает",
+            _ => consentId,
+        };
 
         private void TryStartFollowUp()
         {
@@ -170,9 +199,13 @@ namespace HarveyStressMeter.Services
             State.ConsentAskedDay[consentId] = Today;
             var texts = ConsentTexts.For(consentId);
 
+            // Вернуться к договорённости можно без последствий: новый ответ просто заменяет старый.
+            bool revisit = State.ConsentRevisits.Remove(consentId);
+            string intro = revisit ? ConsentTexts.RevisitIntro(consentId) : texts.Intro;
+
             Ask(
                 harvey,
-                texts.Intro,
+                intro,
                 texts.Question,
                 new[]
                 {
@@ -255,6 +288,17 @@ namespace HarveyStressMeter.Services
 
         private static class ConsentTexts
         {
+            /// <summary>Начало разговора, когда фермерша сама попросила вернуться к договорённости.</summary>
+            public static string RevisitIntro(string consentId) => consentId switch
+            {
+                HarveyCareConsents.EveningChecks => "Ты хотела вернуться к вечерним проверкам.$0#$b#Что бы ты ни решила сейчас — я не обижусь. Договорённость не клятва.",
+                HarveyCareConsents.HoldHand => "Ты хотела ещё раз поговорить про грозу. Про руку.$s#$b#Скажи как есть. Я подстроюсь.",
+                HarveyCareConsents.SearchInStorm => "Ты хотела вернуться к тому, искать ли тебя в грозу.$s#$b#Я слушаю. Без споров — обещаю.",
+                HarveyCareConsents.StrictCare => "Ты хотела пересмотреть моё «стоп».$0#$b#Правильно. Правила для того и нужны, чтобы их иногда пересматривать. Даже мои.",
+                HarveyCareConsents.HarveyLimits => "Ты хотела вернуться к тому, как останавливать меня.$h#$b#Говори. Я даже не буду спорить. Почти.",
+                _ => "Ты хотела вернуться к нашей договорённости.$0",
+            };
+
             public static ConsentText For(string consentId) => consentId switch
             {
                 HarveyCareConsents.EveningChecks => new(
@@ -276,6 +320,16 @@ namespace HarveyStressMeter.Services
                     "Хорошо. Я протяну руку — а возьмёшь её ты.$l#$b#Так будет всегда: ты первой берёшь, ты первой отпускаешь.",
                     "Голос — значит, голос.$0#$b#Я буду рядом на том расстоянии, какое ты выберешь.",
                     "Понял. Не трону.$0#$b#*тихо* Спасибо, что сказала. Теперь я точно не сделаю хуже."),
+
+                HarveyCareConsents.HarveyLimits => new(
+                    "Котёнок, я долго думал, как это сказать.$s#$b#Я прошу тебя останавливаться, когда ты себя загоняешь. А кто останавливает меня? Я ведь тоже перегибаю. С пледами, с правилами, с крыльцом в полночь.",
+                    "Скажешь Харви, когда он перегибает с заботой?",
+                    "Да. Скажу — и ты остановишься.",
+                    "Пока не знаю.",
+                    "Нет. Мне нравится, как есть.",
+                    "Договорились. Твоё «Харви, хватит» — такое же правило, как моё «стоп».$l#$b#Для меня это нечестно лёгкое обещание. Но я его сдержу.",
+                    "Хорошо. Подумай.$0#$b#Я спрошу ещё раз — или ты сама скажешь, когда я снова начну считать твои шаги.",
+                    "*смеётся* Правда? Даже крыльцо в полночь?$h#$b#…Ладно. Тогда буду стараться сам. Иногда."),
 
                 HarveyCareConsents.SearchInStorm => new(
                     "В грозу ты иногда уходишь. В лес, подальше от людей.$s#$b#Я понимаю зачем. Но не знаю, хочешь ли ты, чтобы тебя там нашли.",

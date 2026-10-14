@@ -31,5 +31,7 @@ namespace HarveyStressMeter.Constants
         public const string TrustRepaired = "TrustRepaired";
         public const string ConsentGranted = "ConsentGranted";
         public const string BoundaryRespected = "BoundaryRespected";
+        /// <summary>В сцене осмотра она сказала «стоп» — и Харви остановился.</summary>
+        public const string ExamStopRespected = "ExamStopRespected";
     }
 }
