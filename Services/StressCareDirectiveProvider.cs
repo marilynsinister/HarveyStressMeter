@@ -367,6 +367,56 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
         if (!d.IsTherapyActive && !d.DarknessRelapseTreatmentActive)
             return;
 
+        // Все вечера шага 1 засчитаны: сидеть дома уже не нужно — нужен разговор с Харви.
+        bool step1Ready = d.TherapyStage == 1 && !d.CompletedStep1
+            && d.SafeDarknessEveningsCompleted >= DarknessRemissionHelper.GetStep1EveningsRequired(d);
+        if (step1Ready)
+        {
+            directives.Add(new HarveyCareDirective
+            {
+                Id = "stress.darkness_step1_review",
+                Source = HarveyCareDirectiveSource.Stress,
+                Type = HarveyCareDirectiveType.Appointment,
+                State = HarveyCareDirectiveState.Active,
+                Title = "Поговори с Харви о вечерах при свете",
+                Text = "Все вечера дома при свете засчитаны. Харви подведёт итог и скажет, что дальше.",
+                Reason = "Шаг терапии страха темноты закрывается разговором с Харви.",
+                Priority = HarveyCareDirectivePriority.High,
+                HarveyTone = HarveyCareDirectiveTone.Calm,
+            });
+            return;
+        }
+
+        if (d.TherapyStage == 3 && !d.CompletedStep3)
+        {
+            bool hasLantern = DarknessService.HasHarveyLantern();
+            directives.Add(hasLantern
+                ? new HarveyCareDirective
+                {
+                    Id = "stress.darkness_mountain",
+                    Source = HarveyCareDirectiveSource.Stress,
+                    Type = HarveyCareDirectiveType.TodayRule,
+                    Title = "Ночью — две минуты в горах с фонарём Харви",
+                    Text = "С 22:00 до 2:00 поднимись в горы. Фонарь — в руках. Две минуты — и сразу домой.",
+                    Reason = "Финальный шаг терапии страха темноты.",
+                    Priority = HarveyCareDirectivePriority.Normal,
+                    HarveyTone = HarveyCareDirectiveTone.Calm,
+                }
+                : new HarveyCareDirective
+                {
+                    Id = "stress.darkness_lantern",
+                    Source = HarveyCareDirectiveSource.Stress,
+                    Type = HarveyCareDirectiveType.Appointment,
+                    State = HarveyCareDirectiveState.Active,
+                    Title = "Зайди к Харви за фонарём",
+                    Text = "Для финала в горах Харви даст тебе свой фонарь.",
+                    Reason = "Без фонаря ночь в горах не засчитывается.",
+                    Priority = HarveyCareDirectivePriority.High,
+                    HarveyTone = HarveyCareDirectiveTone.Calm,
+                });
+            return;
+        }
+
         directives.Add(new HarveyCareDirective
         {
             Id = "stress.darkness_home",

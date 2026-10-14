@@ -444,6 +444,10 @@ namespace HarveyStressMeter
                 _stressDialogueService,
                 _stressTreatmentReviewService,
                 _stressMedicalIntentProvider);
+            _harveyStressInteractionHandler.SetDarknessService(_darknessService);
+            var lanternLight = new HarveyLanternLightService();
+            _helper.Events.GameLoop.UpdateTicked += (_, _) => lanternLight.OnUpdateTicked();
+            _stressMedicalIntentProvider.SetDarknessService(_darknessService);
             _eventHandler = new Handlers.EventHandler(
                 Monitor,
                 _helper,

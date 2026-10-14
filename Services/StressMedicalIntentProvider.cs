@@ -22,7 +22,10 @@ public sealed class StressMedicalIntentProvider
     private readonly StressTreatmentReviewService _reviewService;
     private readonly TreatmentEpisodeService _episodeService;
     private IHarveyCoreApi? _coreApi;
+    private DarknessService? _darknessService;
     private int _ticksSinceSync;
+
+    public void SetDarknessService(DarknessService darknessService) => _darknessService = darknessService;
 
     public StressMedicalIntentProvider(
         IMonitor monitor,
@@ -143,6 +146,10 @@ public sealed class StressMedicalIntentProvider
         {
             intents.Add(BuildStartIntent(buffId, today));
         }
+
+        // Терапия темноты: все вечера шага 1 засчитаны — это такой же «приём у Харви», как review.
+        if (_darknessService?.IsStep1ReadyForHarvey == true || _darknessService?.NeedsLanternFromHarvey == true)
+            intents.Add(BuildReviewIntent(BuffIds.Darkness, today));
 
         var episodeSelection = _episodeService.EvaluateSelection();
         if (episodeSelection.Action == EpisodeSelectionAction.AwaitingReview

@@ -22,6 +22,9 @@ namespace HarveyStressMeter.Handlers
         private readonly StressTreatmentReviewService _reviewService;
         private readonly StressMedicalIntentProvider _medicalIntentProvider;
         private IHarveyCoreApi? _coreApi;
+        private DarknessService? _darknessService;
+
+        public void SetDarknessService(DarknessService darknessService) => _darknessService = darknessService;
 
         public HarveyStressInteractionHandler(
             IMonitor monitor,
@@ -73,6 +76,12 @@ namespace HarveyStressMeter.Handlers
 
             LogHarveyClicked(pendingReview, pendingEpisode, pendingBuff);
 
+            if (TryFinalizeDarknessStep1(harvey))
+            {
+                SuppressHarveyClickButtons(e);
+                return true;
+            }
+
             if (ShouldDeferToHigherPriorityMedicalIntent(pendingBuff))
                 return false;
 
@@ -106,6 +115,9 @@ namespace HarveyStressMeter.Handlers
 
             if (harvey.currentLocation != location || who.currentLocation != location)
                 return false;
+
+            if (TryFinalizeDarknessStep1(harvey))
+                return true;
 
             if (_reviewService.TryFindAnyTreatmentAwaitingReview(
                     out var pendingEpisode,
@@ -145,6 +157,57 @@ namespace HarveyStressMeter.Handlers
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Три вечера дома при свете засчитаны — Харви подводит итог и закрывает шаг 1 сразу по клику,
+        /// даже если сегодня с ним уже говорили. Более срочный приём (Core выбрал другой интент) — первым.
+        /// </summary>
+        private bool TryFinalizeDarknessStep1(NPC harvey)
+        {
+            if (TryGiveDarknessLantern(harvey))
+                return true;
+
+            if (_darknessService?.IsStep1ReadyForHarvey != true)
+                return false;
+
+            if (ShouldDeferToHigherPriorityMedicalIntent(BuffIds.Darkness))
+                return false;
+
+            bool relapse = _darknessService.IsRelapseStep1;
+            if (!_darknessService.FinalizeStep1FromHarveyClick())
+                return false;
+
+            string line = relapse
+                ? "Три вечера дома при свете. Ты держала слово — и страх снова отступил.$h#$b#Рецидив закрыт. Если темнота вернётся, ты знаешь дорогу: свет, дом и разговор со мной.$l"
+                : "Три вечера дома при свете — я видел, ты держала слово.$h#$b#Первый шаг пройден. Дальше — короткие вечерние выходы: остановка и город, с восьми до десяти. И сразу домой.$0";
+
+            Game1.DrawDialogue(new Dialogue(harvey, null, line));
+            _coreApi?.SetHarveyClickGate(false, "StressHandler: darkness step 1 finalized");
+            _coreApi?.LogHarveyClickDiagnostics("stress-darkness-step1");
+            _monitor.Log("[HarveyStress] Darkness step 1 finalized by Harvey click.", LogLevel.Info);
+            return true;
+        }
+
+        /// <summary>После шага 2 Харви отдаёт свой фонарь и отправляет в горы (или выдаёт новый взамен потерянного).</summary>
+        private bool TryGiveDarknessLantern(NPC harvey)
+        {
+            if (_darknessService?.NeedsLanternFromHarvey != true)
+                return false;
+
+            if (ShouldDeferToHigherPriorityMedicalIntent(BuffIds.Darkness))
+                return false;
+
+            bool replacement = _darknessService.GiveLanternFromHarvey();
+            string line = replacement
+                ? "Фонарь потерялся? Ничего. У меня есть второй — я всегда держу запасной.$0#$b#Береги его. И помни: две минуты в горах ночью, не больше. Потом домой.$s"
+                : "Возьми. Это мой фонарь — я носил его на ночных вызовах в Зузу.$s#$b#Он не волшебный. Просто когда держишь в руке свет, темнота становится местом, а не врагом.$0#$b#Финал такой: ночью, с десяти до двух, поднимись в горы. Две минуты с фонарём — и сразу домой. Утром расскажешь.$a";
+
+            Game1.DrawDialogue(new Dialogue(harvey, null, line));
+            Game1.playSound("coin");
+            _coreApi?.SetHarveyClickGate(false, "StressHandler: darkness lantern given");
+            _coreApi?.LogHarveyClickDiagnostics("stress-darkness-lantern");
+            return true;
         }
 
         private bool ShouldDeferToHigherPriorityMedicalIntent(string? stressBuffId)

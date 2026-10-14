@@ -759,6 +759,37 @@ namespace HarveyStressMeter.Services
                && !_data.Darkness.CompletedStep1
                && _data.Darkness.SafeDarknessEveningsCompleted >= Step1EveningsRequired;
 
+        /// <summary>Все вечера шага 1 засчитаны — Харви ждёт разговора (для Core-интента, клика и плана).</summary>
+        public bool IsStep1ReadyForHarvey => IsStep1AwaitingHarveyTalk();
+
+        /// <summary>Шаг 1 идёт как лечение рецидива: после разговора терапия завершается целиком.</summary>
+        public bool IsRelapseStep1 => _data.Darkness.DarknessRelapseTreatmentActive;
+
+        /// <summary>
+        /// Закрыть шаг 1 прямо по клику на Харви. Раньше шаг закрывался только в конце обычного разговора —
+        /// если в этот день разговор уже ушёл на другой приём (простуда, травма), повторный клик диалога
+        /// не открывал, и терапия зависала на «поговори с Харви».
+        /// </summary>
+        public bool FinalizeStep1FromHarveyClick()
+        {
+            if (!IsStep1AwaitingHarveyTalk())
+                return false;
+
+            ConversationHelper.RemoveTopic(DarknessLegacyHelper.Step1ReadyForHarveyTopic);
+            if (_data.Darkness.DarknessRelapseTreatmentActive)
+            {
+                _monitor.Log("[DarknessStep1] Клик по Харви — завершение рецидивного лечения", LogLevel.Info);
+                CompleteRelapseTreatmentAfterHarveyTalk();
+            }
+            else
+            {
+                _monitor.Log("[DarknessStep1] Клик по Харви — завершение шага 1", LogLevel.Info);
+                CompleteStep1();
+            }
+
+            return true;
+        }
+
         public void CaptureStep1ReadyTopicAtHarveyTalkStart()
             => _step1HadReadyTopicAtTalkStart = ConversationHelper.HasTopic(DarknessLegacyHelper.Step1ReadyForHarveyTopic);
 
@@ -1137,7 +1168,7 @@ namespace HarveyStressMeter.Services
         {
             _data.Darkness.CompletedStep2 = true;
             _data.Darkness.TherapyStage = 3;
-            _data.Darkness.HasReceivedLantern = true; // "Получен" виртуальный фонарь
+            // Фонарь — настоящий предмет: его отдаёт Харви при следующем разговоре (GiveLanternFromHarvey).
             
             // Снижаем уровень страха еще больше
             if (_data.Darkness.FearLevel > 0)
@@ -1158,11 +1189,10 @@ namespace HarveyStressMeter.Services
             
             Game1.playSound("questcomplete");
             Game1.addHUDMessage(new HUDMessage(
-                "Шаг 2 выполнен. Поговори с Харви — потом финал в горах. Не пропускай разговор.",
+                "Шаг 2 выполнен. Зайди к Харви — он хочет кое-что дать тебе для финала в горах.",
                 HUDMessage.achievement_type));
-            
+
             ConversationHelper.AddTopic("topicDarknessStep2Complete", 2);
-            ConversationHelper.AddTopic("topicDarknessLanternReceived", 0);
             
             // Добавляем квест Шага 3
             Game1.player.addQuest(QuestIds.DarknessStep3);
@@ -1180,6 +1210,27 @@ namespace HarveyStressMeter.Services
             bool isLateNight = Game1.timeOfDay >= 2200 && Game1.timeOfDay <= 2600;
             bool inMountains = Game1.player.currentLocation?.NameOrUniqueName == "Mountain";
 
+            // Без фонаря Харви ночь в горах не засчитывается — он отдаёт фонарь после шага 2.
+            if (isLateNight && inMountains && !HasHarveyLantern())
+            {
+                if (!_step3NoLanternHudShown)
+                {
+                    _step3NoLanternHudShown = true;
+                    Game1.addHUDMessage(new HUDMessage(
+                        HasReceivedLanternFromHarvey
+                            ? "Без фонаря Харви здесь слишком темно. Он у тебя дома? Возьми его с собой."
+                            : "Без фонаря Харви здесь слишком темно. Сначала зайди к нему — он обещал фонарь.",
+                        HUDMessage.error_type));
+                }
+
+                if (_stateService.HasBuffInGame(BuffIds.HarveyLantern))
+                    _buffService.RemoveBuff(BuffIds.HarveyLantern);
+                return;
+            }
+
+            if (!isLateNight || !inMountains)
+                _step3NoLanternHudShown = false;
+
             if (isLateNight && inMountains)
             {
                 // Применяем бафф "Свет надежды" (виртуальный фонарь)
@@ -1189,13 +1240,12 @@ namespace HarveyStressMeter.Services
                     effects.Defense.Add(2);
                     _buffService.ApplyBuff(BuffIds.HarveyLantern, "Свет надежды", effects, -2);
                     Game1.addHUDMessage(new HUDMessage(
-                        "«Свет надежды» — Харви рядом мысленно. Держись плана: две минуты, не больше.",
+                        "Фонарь Харви тёплый в руке. Держись плана: две минуты — и домой.",
                         HUDMessage.newQuest_type));
                     _monitor.Log("[DarknessService] Шаг 3: Бафф 'Свет надежды' применен", LogLevel.Debug);
                 }
 
-                // Увеличиваем счетчик каждую секунду
-                if (Game1.ticks % 60 == 0)
+                // UpdateTherapyProgress вызывается раз в секунду — каждый вызов = секунда в горах.
                 {
                     _data.Darkness.MountainNightSeconds++;
                     
@@ -1458,8 +1508,42 @@ namespace HarveyStressMeter.Services
         }
 
         private string BuildStep3ObjectiveForInstance()
-            => $"Шаг 3: горы ночью {_data.Darkness.MountainNightSeconds}/120 сек (22:00–02:00).\n" +
-               "С «светом надежды» Харви. После — обязательно поговорить с ним.";
+            => HasHarveyLantern()
+                ? $"Шаг 3: горы ночью {_data.Darkness.MountainNightSeconds}/120 сек (22:00–02:00).\n" +
+                  "С фонарём Харви. После — обязательно поговорить с ним."
+                : "Шаг 3: зайди к Харви за фонарём. Потом — две минуты в горах ночью (22:00–02:00).";
+
+        // ===== Фонарь Харви (шаг 3) =====
+
+        private bool _step3NoLanternHudShown;
+
+        /// <summary>Флаг-письмо: предмет-фонарь уже выдан (старый HasReceivedLantern ставился и за «виртуальный»).</summary>
+        private const string LanternGivenFlag = "HarveyLantern_ItemGiven";
+
+        private static bool HasReceivedLanternFromHarvey => Game1.player?.mailReceived.Contains(LanternGivenFlag) == true;
+
+        public static bool HasHarveyLantern()
+            => Game1.player?.Items.Any(i => i?.QualifiedItemId == HarveyItems.Lantern) == true;
+
+        /// <summary>Шаг 3 идёт, а фонаря при себе нет: Харви отдаст его (или новый взамен потерянного).</summary>
+        public bool NeedsLanternFromHarvey
+            => _data.Darkness.IsTherapyActive
+               && _data.Darkness.TherapyStage == 3
+               && !_data.Darkness.CompletedStep3
+               && !HasHarveyLantern();
+
+        /// <summary>Харви отдаёт фонарь. Возвращает true, если это был повторный (старый потерян).</summary>
+        public bool GiveLanternFromHarvey()
+        {
+            bool replacement = HasReceivedLanternFromHarvey;
+            Game1.player.addItemByMenuIfNecessary(ItemRegistry.Create(HarveyItems.Lantern));
+            Game1.player.mailReceived.Add(LanternGivenFlag);
+            _data.Darkness.HasReceivedLantern = true;
+            RefreshTherapyQuestJournal(3);
+            SyncDarknessState("GiveLanternFromHarvey");
+            _monitor.Log($"[DarknessService] Шаг 3: Харви отдал фонарь (повторно={replacement})", LogLevel.Info);
+            return replacement;
+        }
 
         private void ApplyOvercomeBonus()
         {
