@@ -242,6 +242,12 @@ namespace HarveyStressMeter
                 _buffService,
                 _data,
                 Monitor);
+            _helper.Events.GameLoop.DayEnding += (_, _) => _stressGameplayEffectService.OnDayEnding();
+            _helper.Events.GameLoop.DayStarted += (_, _) => _stressGameplayEffectService.OnDayStarted();
+
+            var goodWeekService = new GoodWeekService(_data, _stressLoadService, _config, Monitor);
+            _helper.Events.GameLoop.DayEnding += (_, _) => goodWeekService.OnDayEnding();
+            _helper.Events.GameLoop.DayStarted += (_, _) => goodWeekService.OnDayStarted();
             _treatmentEpisodeService = new TreatmentEpisodeService(
                 _data,
                 _stressLoadService,

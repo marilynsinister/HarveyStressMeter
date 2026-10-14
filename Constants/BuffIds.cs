@@ -40,6 +40,8 @@ namespace HarveyStressMeter.Constants
         /// <summary>Маркер programmatic trust-диалога (бафф не применяется).</summary>
         public const string TrustProgress = "HarveyStress.TrustProgress";
         public const string StressLoadTier = "buffStressLoadTier";
+        /// <summary>Награда за низкий стресс (шкала ≤ 10): +1 удача.</summary>
+        public const string ClearMind = "buffStressClearMind";
 
         // Баффы терапии темноты
         public const string DimLight = "buffDimLight"; // Приглушенный свет (Шаг 1)

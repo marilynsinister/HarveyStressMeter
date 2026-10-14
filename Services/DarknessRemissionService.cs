@@ -20,7 +20,7 @@ namespace HarveyStressMeter.Services
         private int _outsideHomeAccumulatorMinutes;
         private int _lastHealth = -1;
         private bool _wasExhaustedLastTick;
-        private float _prophylaxisElapsedMs;
+        private readonly GameClockMinuteCounter _prophylaxisClock = new();
 
         private const int RiskCap = 100;
         private const int OutsideHomeBucketMinutes = 30;
@@ -120,7 +120,7 @@ namespace HarveyStressMeter.Services
                 UpdateRemissionRiskTick();
 
             if (d.DarknessProphylaxisActive)
-                UpdateProphylaxisTimer(elapsed);
+                UpdateProphylaxisTimer();
 
             TrackHealthAndPassOut();
         }
@@ -160,7 +160,7 @@ namespace HarveyStressMeter.Services
 
             d.DarknessProphylaxisActive = true;
             d.DarknessProphylaxisTodaySeconds = 0;
-            _prophylaxisElapsedMs = 0;
+            _prophylaxisClock.Reset();
 
             if (!_questService.HasQuest(QuestIds.DarknessProphylaxis))
                 _questService.AddQuest(QuestIds.DarknessProphylaxis);
@@ -385,12 +385,14 @@ namespace HarveyStressMeter.Services
             _darknessService.BeginRelapseTreatment(evenings);
         }
 
-        private void UpdateProphylaxisTimer(TimeSpan elapsed)
+        /// <summary>Час игрового времени дома 20:00–00:00 (прогресс в «игровых секундах», как у шага 1).</summary>
+        private void UpdateProphylaxisTimer()
         {
-            if (Game1.CurrentEvent != null || Game1.activeClickableMenu != null)
+            int gameMinutes = _prophylaxisClock.Poll();
+            if (gameMinutes <= 0)
                 return;
 
-            if (Game1.player?.isInBed?.Value == true)
+            if (Game1.CurrentEvent != null || Game1.player?.isInBed?.Value == true)
                 return;
 
             bool evening = Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 2400;
@@ -402,18 +404,13 @@ namespace HarveyStressMeter.Services
             if (d.DarknessProphylaxisTodaySeconds >= DarknessLegacyHelper.Step1SecondsPerEvening)
                 return;
 
-            _prophylaxisElapsedMs += (float)elapsed.TotalMilliseconds;
-            while (_prophylaxisElapsedMs >= 1000f)
-            {
-                _prophylaxisElapsedMs -= 1000f;
-                d.DarknessProphylaxisTodaySeconds++;
+            d.DarknessProphylaxisTodaySeconds = Math.Min(
+                DarknessLegacyHelper.Step1SecondsPerEvening,
+                d.DarknessProphylaxisTodaySeconds + gameMinutes * 60);
+            RefreshProphylaxisQuest();
 
-                if (d.DarknessProphylaxisTodaySeconds % 900 == 0)
-                    RefreshProphylaxisQuest();
-
-                if (d.DarknessProphylaxisTodaySeconds >= DarknessLegacyHelper.Step1SecondsPerEvening)
-                    CompleteProphylaxisEvening();
-            }
+            if (d.DarknessProphylaxisTodaySeconds >= DarknessLegacyHelper.Step1SecondsPerEvening)
+                CompleteProphylaxisEvening();
         }
 
         private void CompleteProphylaxisEvening()

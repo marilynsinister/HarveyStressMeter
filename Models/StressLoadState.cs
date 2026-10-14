@@ -7,6 +7,12 @@ namespace HarveyStressMeter.Models
     {
         public int CurrentStressLoad { get; set; }
 
+        /// <summary>«Хорошая неделя»: 1 — день закончился спокойно (шкала ниже Mild), 0 — нет. Последние 7 дней.</summary>
+        public List<int> CalmDayHistory { get; set; } = new();
+
+        /// <summary>День (DaysPlayed) последней награды «Хорошая неделя».</summary>
+        public int LastGoodWeekRewardDay { get; set; } = -100;
+
         /// <summary>Снижение шкалы от отдыха/лечения/ауры при сохранении активных causes.</summary>
         public int StressRecoveryOffset { get; set; }
 

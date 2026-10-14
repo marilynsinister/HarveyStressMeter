@@ -20,7 +20,7 @@
       "title": "1800/3600 сек в квесте",
       "steps": [
         { "tool": "stress_darkness_add_minutes", "arguments": { "minutes": 30 }, "expect": ["secondsToday=1800/3600"] },
-        { "tool": "stress_darkness_status", "arguments": {}, "expect": ["Прогресс сегодня: 1800/3600"] }
+        { "tool": "stress_darkness_status", "arguments": {}, "expect": ["Сегодня: 30/60 мин"] }
       ]
     },
     {

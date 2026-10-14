@@ -259,9 +259,8 @@ namespace HarveyStressMeter.Handlers
             {
                 _tiredCheckCounter = 0;
 
-                // Пересчёт StressLoad (гроза, комбо-модификаторы)
-                if (GetHasAnyStressBuff())
-                    _stressLoadService.SyncFromGameState();
+                // Пересчёт StressLoad (гроза, комбо-модификаторы, травмы/болезни других модов, поздний час)
+                _stressLoadService.SyncFromGameState();
 
                 // Проверяем усталость в течение дня
                 if (!_stateService.HasActiveTreatmentState(BuffIds.Tired))

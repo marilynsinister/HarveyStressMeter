@@ -26,8 +26,9 @@ namespace HarveyStressMeter.Models
         /// <summary>Master switch for the in-game stress meter.</summary>
         public bool ShowStressMeter { get; set; } = true;
 
-        /// <summary>When true, hide the meter below Mild threshold unless episode/debug rules apply.</summary>
-        public bool ShowOnlyWhenStressed { get; set; } = true;
+        /// <summary>When true, hide the meter below Mild threshold unless episode/debug rules apply.
+        /// По умолчанию false: шкала видна при любой ненулевой нагрузке (травмы, болезни, усталость).</summary>
+        public bool ShowOnlyWhenStressed { get; set; } = false;
 
         /// <summary>Show numeric StressLoad on the compact meter.</summary>
         public bool ShowDebugNumbers { get; set; } = false;

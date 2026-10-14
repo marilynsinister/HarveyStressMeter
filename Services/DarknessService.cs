@@ -26,10 +26,9 @@ namespace HarveyStressMeter.Services
 
         private bool _worryLetterSent;
 
-        private float _step1ElapsedMs;
+        private readonly GameClockMinuteCounter _step1Clock = new();
         private bool _step1WasProgressing;
         private bool _step1WasAwayFromHome;
-        private int _step1LastHudSecondsDisplayed = -1;
         private bool _step1EveningCreditedHudShown;
         private bool _step1AllEveningsHudShown;
         private bool _step1HadReadyTopicAtTalkStart;
@@ -680,7 +679,7 @@ namespace HarveyStressMeter.Services
             switch (_data.Darkness.TherapyStage)
             {
                 case 1:
-                    UpdateStep1Progress(elapsed);
+                    UpdateStep1Progress();
                     break;
                 case 2:
                     UpdateStep2Progress();
@@ -692,10 +691,14 @@ namespace HarveyStressMeter.Services
         }
 
         /// <summary>
-        /// Шаг 1: 3 вечера × 60 минут дома при свете (20:00–00:00). Таймер в игровых секундах (ElapsedGameTime).
+        /// Шаг 1: 3 вечера × 60 игровых минут дома (20:00–00:00). Считаем по игровым часам, не по реальному времени:
+        /// весь вечер 20:00–00:00 длится ~3 реальные минуты, реальный час набрать невозможно.
+        /// Прогресс хранится в «игровых секундах» (1 игровая минута = 60) ради совместимости сейвов.
         /// </summary>
-        private void UpdateStep1Progress(TimeSpan elapsed)
+        private void UpdateStep1Progress()
         {
+            int gameMinutes = _step1Clock.Poll();
+
             if (!_data.Darkness.IsTherapyActive || _data.Darkness.TherapyStage != 1)
             {
                 ClearStep1SessionState();
@@ -715,31 +718,17 @@ namespace HarveyStressMeter.Services
             bool evening = Game1.timeOfDay >= 2000 && Game1.timeOfDay <= 2400;
             bool atHome = GameStateHelper.IsPlayerHomeLocation();
             bool noEvent = !GameStateHelper.IsEventActive();
-            bool sessionClear = !IsStep1SessionBlocked();
+            bool notSleeping = Game1.player?.isInBed?.Value != true;
             bool canCountToday = !IsStep1TodayCredited() && CanCreditAnotherEveningToday();
-            bool isProgressing = evening && atHome && noEvent && sessionClear && canCountToday;
+            bool isProgressing = evening && atHome && noEvent && notSleeping && canCountToday;
 
             HandleStep1HudState(isProgressing, atHome, evening);
 
-            if (isProgressing)
-            {
-                _step1ElapsedMs += (float)elapsed.TotalMilliseconds;
-                while (_step1ElapsedMs >= 1000f)
-                {
-                    _step1ElapsedMs -= 1000f;
-                    IncrementStep1ProgressSecond();
-                }
-            }
+            // Меню/диалоги не блокируют: в одиночной игре часы в них и так стоят.
+            if (isProgressing && gameMinutes > 0)
+                AddStep1Progress(gameMinutes * 60);
 
             _step1WasProgressing = isProgressing;
-        }
-
-        private static bool IsStep1SessionBlocked()
-        {
-            if (Game1.activeClickableMenu != null)
-                return true;
-
-            return Game1.player?.isInBed?.Value == true;
         }
 
         private bool IsStep1TodayCredited()
@@ -861,41 +850,33 @@ namespace HarveyStressMeter.Services
             }
         }
 
-        private void IncrementStep1ProgressSecond()
+        private void AddStep1Progress(int gameSeconds)
         {
-            if (IsStep1TodayCredited())
+            if (IsStep1TodayCredited() || gameSeconds <= 0)
                 return;
 
-            if (IsStep1TimerComplete())
-            {
-                CompleteDarknessTherapyEvening();
-                return;
-            }
-
-            int after = _data.Darkness.SafeDarknessProgressToday + 1;
+            int before = _data.Darkness.SafeDarknessProgressToday;
+            int after = Math.Min(DarknessLegacyHelper.Step1SecondsPerEvening, before + gameSeconds);
             _data.Darkness.SafeDarknessProgressToday = after;
 
             _monitor.Log(
-                $"[DarknessStep1] timer +1 → {after}/{DarknessLegacyHelper.Step1SecondsPerEvening} sec",
+                $"[DarknessStep1] +{gameSeconds / 60} игровых мин → {after / 60}/{DarknessLegacyHelper.Step1MinutesPerEvening}",
                 LogLevel.Trace);
 
             RefreshTherapyQuestJournal(1);
 
-            int displaySeconds = GetStep1DisplaySecondsToday();
-            if (displaySeconds != _step1LastHudSecondsDisplayed)
-            {
-                _step1LastHudSecondsDisplayed = displaySeconds;
-                if (displaySeconds > 0 && displaySeconds % 900 == 0)
-                    ShowStep1TimerHud(atHome: true);
-            }
-
             if (after >= DarknessLegacyHelper.Step1SecondsPerEvening)
             {
                 _monitor.Log(
-                    $"[DarknessStep1] daily timer reached {after}/{DarknessLegacyHelper.Step1SecondsPerEvening} sec — crediting evening",
+                    $"[DarknessStep1] daily timer reached {after / 60}/{DarknessLegacyHelper.Step1MinutesPerEvening} min — crediting evening",
                     LogLevel.Info);
                 CompleteDarknessTherapyEvening();
+                return;
             }
+
+            // HUD на каждой половине часа, чтобы не спамить каждые 10 минут.
+            if (before / 1800 != after / 1800)
+                ShowStep1TimerHud(atHome: true);
         }
 
         /// <summary>
@@ -982,8 +963,6 @@ namespace HarveyStressMeter.Services
             {
                 if (!_step1WasProgressing)
                     ShowStep1TimerHud(atHome: true);
-                else
-                    TryRefreshStep1TimerHudPeriodic(atHome: true);
                 _step1WasAwayFromHome = false;
                 return;
             }
@@ -1015,19 +994,6 @@ namespace HarveyStressMeter.Services
             }
         }
 
-        private void TryRefreshStep1TimerHudPeriodic(bool atHome)
-        {
-            int seconds = GetStep1DisplaySecondsToday();
-            if (seconds <= 0 || seconds == _step1LastHudSecondsDisplayed)
-                return;
-
-            if (seconds % 600 != 0)
-                return;
-
-            _step1LastHudSecondsDisplayed = seconds;
-            ShowStep1TimerHud(atHome);
-        }
-
         private int GetStep1DisplaySecondsToday()
             => Math.Min(
                 _data.Darkness.SafeDarknessProgressToday,
@@ -1051,7 +1017,6 @@ namespace HarveyStressMeter.Services
 
         private void ResetStep1HudFlags()
         {
-            _step1LastHudSecondsDisplayed = -1;
             _step1EveningCreditedHudShown = false;
             _step1AllEveningsHudShown = false;
             _step1WasAwayFromHome = false;
@@ -1454,10 +1419,10 @@ namespace HarveyStressMeter.Services
         private string BuildStep2ObjectiveForInstance()
         {
             var visited = _data.Darkness.SafeZonesVisited;
-            var bus = visited.Contains("BusStop") ? "✅" : "⬜";
-            var town = visited.Contains("Town") ? "✅" : "⬜";
+            var bus = visited.Contains("BusStop") ? "есть" : "нет";
+            var town = visited.Contains("Town") ? "есть" : "нет";
             return
-                $"Шаг 2 (20:00–22:00): {bus} Автобусная остановка, {town} Город ({visited.Count}/2).\n" +
+                $"Шаг 2 (20:00–22:00): {visited.Count}/2. Автобусная остановка — {bus}, Город — {town}.\n" +
                 "Короткий выход, без геройства. Потом — разговор с Харви.";
         }
 
@@ -1582,13 +1547,7 @@ namespace HarveyStressMeter.Services
                 return false;
             }
 
-            int addSec = minutes * 60;
-            int target = Math.Min(
-                DarknessLegacyHelper.Step1SecondsPerEvening,
-                _data.Darkness.SafeDarknessProgressToday + addSec);
-
-            while (_data.Darkness.SafeDarknessProgressToday < target)
-                IncrementStep1ProgressSecond();
+            AddStep1Progress(minutes * 60);
 
             if (_data.Darkness.SafeDarknessProgressToday >= DarknessLegacyHelper.Step1SecondsPerEvening
                 && !IsStep1TodayCredited()
@@ -1632,7 +1591,7 @@ namespace HarveyStressMeter.Services
             d.CompletedStep1 = false;
             ConversationHelper.RemoveTopic(DarknessLegacyHelper.Step1ReadyForHarveyTopic);
             ResetStep1HudFlags();
-            _step1ElapsedMs = 0;
+            _step1Clock.Reset();
 
             if (d.IsTherapyActive && d.TherapyStage == 1)
                 RefreshTherapyQuestJournal(1);

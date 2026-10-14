@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Models;
@@ -39,6 +39,16 @@ namespace HarveyStressMeter.Services
         private StressSeverity _lastSeverity = StressSeverity.Calm;
         private int _lastAppliedStaminaPenalty;
         private int _lastAppliedSpeedPenalty;
+        private int _bedTime = -1;
+        private StressSeverity _severityAtBed = StressSeverity.Calm;
+
+        /// <summary>Шкала не выше этого — «Ясная голова» (+1 удача).</summary>
+        private const int ClearMindMaxLoad = 10;
+        /// <summary>Лёг до этого часа — утром стресс заметно ниже.</summary>
+        private const int EarlyBedTime = 2300;
+        private const int EarlySleepRelief = 10;
+        /// <summary>Критический стресс и сон после полуночи — проснёшься не полностью отдохнувшей.</summary>
+        private const float RestlessSleepStaminaFactor = 0.85f;
 
         public StressGameplayEffectService(
             ModConfig config,
@@ -65,10 +75,12 @@ namespace HarveyStressMeter.Services
             if (!_config.PenaltiesEnabled)
             {
                 ClearTierBuff();
+                SetClearMind(false);
                 return;
             }
 
             var severity = _stressLoadService.GetSeverity();
+            SetClearMind(severity == StressSeverity.Calm && _stressLoadService.GetCurrentStressLoad() <= ClearMindMaxLoad);
 
             if (severity == StressSeverity.Calm)
             {
@@ -91,7 +103,7 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
-            ApplyTierBuff(staminaPenalty, speedPenalty);
+            ApplyTierBuff(staminaPenalty, speedPenalty, severity);
             _lastSeverity = severity;
             _lastAppliedStaminaPenalty = staminaPenalty;
             _lastAppliedSpeedPenalty = speedPenalty;
@@ -203,9 +215,16 @@ namespace HarveyStressMeter.Services
             }
         }
 
-        private void ApplyTierBuff(int staminaPenalty, int speedPenalty)
+        /// <summary>
+        /// Mild: только энергия. High: + дрожат руки (−1 рыбалка). Critical: + рассеянность (−1 удача).
+        /// Ничего не блокирует — лишь делает день чуть тяжелее, пока стресс не снят.
+        /// </summary>
+        private void ApplyTierBuff(int staminaPenalty, int speedPenalty, StressSeverity severity)
         {
-            if (staminaPenalty <= 0 && speedPenalty <= 0)
+            int fishingPenalty = severity >= StressSeverity.High ? 1 : 0;
+            int luckPenalty = severity >= StressSeverity.Critical ? 1 : 0;
+
+            if (staminaPenalty <= 0 && speedPenalty <= 0 && fishingPenalty <= 0)
             {
                 ClearTierBuff();
                 return;
@@ -216,6 +235,10 @@ namespace HarveyStressMeter.Services
                 effects.MaxStamina.Add(-staminaPenalty);
             if (speedPenalty > 0)
                 effects.Speed.Add(-speedPenalty);
+            if (fishingPenalty > 0)
+                effects.FishingLevel.Add(-fishingPenalty);
+            if (luckPenalty > 0)
+                effects.LuckLevel.Add(-luckPenalty);
 
             _buffService.ApplyBuff(
                 BuffIds.StressLoadTier,
@@ -226,5 +249,55 @@ namespace HarveyStressMeter.Services
 
         private void ClearTierBuff()
             => _buffService.RemoveBuff(BuffIds.StressLoadTier);
+
+        private void SetClearMind(bool active)
+        {
+            bool has = _buffService.HasBuff(BuffIds.ClearMind);
+            if (active == has)
+                return;
+
+            if (!active)
+            {
+                _buffService.RemoveBuff(BuffIds.ClearMind);
+                return;
+            }
+
+            var effects = new BuffEffects();
+            effects.LuckLevel.Add(1);
+            _buffService.ApplyBuff(BuffIds.ClearMind, "Ясная голова", effects, Buff.ENDLESS);
+        }
+
+        /// <summary>Запомнить, когда и в каком состоянии игрок лёг спать.</summary>
+        public void OnDayEnding()
+        {
+            _bedTime = Game1.timeOfDay;
+            _severityAtBed = _stressLoadService.GetSeverity();
+        }
+
+        /// <summary>
+        /// Сон влияет на стресс: лёг до 23:00 — стресс ниже; лёг после полуночи на «Критическом» — энергия не вся.
+        /// </summary>
+        public void OnDayStarted()
+        {
+            int bedTime = _bedTime;
+            var severityAtBed = _severityAtBed;
+            _bedTime = -1;
+
+            if (bedTime < 0 || !_config.PenaltiesEnabled)
+                return;
+
+            if (bedTime < EarlyBedTime && _stressLoadService.GetCurrentStressLoad() > 0)
+            {
+                _stressLoadService.DecayStress(EarlySleepRelief);
+                Game1.addHUDMessage(new HUDMessage("Ранний сон помог: тревога стала тише.", HUDMessage.newQuest_type));
+                return;
+            }
+
+            if (bedTime >= 2400 && severityAtBed >= StressSeverity.Critical)
+            {
+                Game1.player.stamina = Math.Min(Game1.player.stamina, Game1.player.MaxStamina * RestlessSleepStaminaFactor);
+                Game1.addHUDMessage(new HUDMessage("Беспокойный сон: стресс не дал толком отдохнуть.", HUDMessage.error_type));
+            }
+        }
     }
 }

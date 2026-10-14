@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Microsoft.Xna.Framework;
@@ -6,6 +7,7 @@ using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
+using StardewValley.Menus;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Helpers;
 using HarveyStressMeter.Models;
@@ -44,6 +46,8 @@ namespace HarveyStressMeter.Services
         private int _pulseTicks;
         private int _messageCooldownTicks;
         private int _lastMessageThreshold;
+        /// <summary>Экранная область шкалы последнего кадра — для подсказки при наведении.</summary>
+        private Rectangle _meterBounds = Rectangle.Empty;
 
         public StressMeterHudService(
             IModHelper helper,
@@ -265,8 +269,13 @@ namespace HarveyStressMeter.Services
                 return;
 
             var debugMode = IsDebugMode();
+            _meterBounds = Rectangle.Empty;
             if (ShouldDrawCompactMeter(debugMode))
+            {
                 DrawCompactMeter(e.SpriteBatch, debugMode);
+                if (Game1.activeClickableMenu == null && _meterBounds.Contains(Game1.getMouseX(), Game1.getMouseY()))
+                    IClickableMenu.drawHoverText(e.SpriteBatch, BuildBreakdownTooltip(), Game1.smallFont);
+            }
 
             if (ShouldDrawDebugOverlay(debugMode))
                 DrawDebugOverlay(e.SpriteBatch);
@@ -375,6 +384,11 @@ namespace HarveyStressMeter.Services
                 DrawBarFill(spriteBatch, new Rectangle(origin.X, origin.Y, fillWidth, barHeight), colors.Fill * opacity, vertical: false);
 
             DrawBarFrame(spriteBatch, backRect, opacity);
+            _meterBounds = new Rectangle(
+                origin.X - border,
+                origin.Y - border,
+                barWidth + 2 * border,
+                barHeight + 2 * border + Game1.smallFont.LineSpacing + 2);
 
             int labelY = origin.Y + barHeight + border + 2;
             DrawMeterLabel(spriteBatch, label, load, debugMode, colors.Text, opacity,
@@ -435,6 +449,9 @@ namespace HarveyStressMeter.Services
                 y + barLength - textSize.Y);
 
             DrawMeterLabel(spriteBatch, text, load, debugMode, colors.Text, opacity, textPos, drawValueInLabel: false);
+            _meterBounds = Rectangle.Union(
+                new Rectangle(x - border, y - border, barThickness + 2 * border, barLength + 2 * border),
+                new Rectangle((int)textPos.X, (int)textPos.Y, (int)textSize.X, (int)textSize.Y));
 
             if (ShouldShowSocialExposureStatus())
             {
@@ -669,6 +686,54 @@ namespace HarveyStressMeter.Services
             Game1.addHUDMessage(new HUDMessage(message, HUDMessage.newQuest_type));
             _messageCooldownTicks = MessageCooldownTicks;
             _lastMessageThreshold = threshold;
+        }
+
+        /// <summary>Подсказка над шкалой: из чего складывается стресс, что он делает и как его снять.</summary>
+        private string BuildBreakdownTooltip()
+        {
+            int load = _stressLoadService.GetCurrentStressLoad();
+            var severity = _stressLoadService.GetSeverity();
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"Стресс: {GetSeverityLabel(severity)} ({load}/{_stressLoadService.GetMaxStressLoad()})");
+
+            var contributions = _stressLoadService.GetContributions();
+            if (contributions.Count > 0)
+            {
+                sb.Append('\n');
+                foreach (var c in contributions.Take(8))
+                    sb.Append($"\n{(c.Weight > 0 ? "+" : "−")}{Math.Abs(c.Weight)}  {c.Label}");
+                if (contributions.Count > 8)
+                    sb.Append($"\n… ещё {contributions.Count - 8}");
+            }
+
+            string effect = DescribeCurrentEffect();
+            if (effect.Length > 0)
+                sb.Append($"\n\n{effect}");
+
+            sb.Append("\n\nСнижают: сон до 23:00, еда, любимые\nзанятия, лечение и забота Харви.");
+            return sb.ToString();
+        }
+
+        private static string DescribeCurrentEffect()
+        {
+            var buffs = Game1.player.buffs.AppliedBuffs;
+            if (buffs.ContainsKey(BuffIds.ClearMind))
+                return "Ясная голова: +1 удача";
+
+            if (!buffs.TryGetValue(BuffIds.StressLoadTier, out var tier))
+                return "";
+
+            var parts = new List<string>();
+            if (tier.effects.MaxStamina.Value < 0)
+                parts.Add($"{tier.effects.MaxStamina.Value:0} к макс. энергии");
+            if (tier.effects.FishingLevel.Value < 0)
+                parts.Add($"{tier.effects.FishingLevel.Value:0} рыбалка");
+            if (tier.effects.LuckLevel.Value < 0)
+                parts.Add($"{tier.effects.LuckLevel.Value:0} удача");
+            if (tier.effects.Speed.Value < 0)
+                parts.Add($"{tier.effects.Speed.Value:0} скорость");
+
+            return parts.Count == 0 ? "" : "Сейчас: " + string.Join(", ", parts);
         }
 
         private static string GetSeverityLabel(StressSeverity severity) => severity switch

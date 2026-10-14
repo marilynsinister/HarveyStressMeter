@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -22,6 +22,8 @@ namespace HarveyStressMeter.Services
         private readonly IMonitor _monitor;
         private HarveyCareTrustService? _trustService;
         private int _debugCauseLoadFloor;
+        private readonly BackgroundStressCalculator _background = new();
+        private int _lastBackgroundLoad;
 
         private StressLoadState State => _data.StressLoad;
 
@@ -50,6 +52,36 @@ namespace HarveyStressMeter.Services
         public int GetCauseLoad() => State.LastCauseLoad;
 
         public int GetStressRecoveryOffset() => State.StressRecoveryOffset;
+
+        /// <summary>Чистый вклад травм/болезней/эпизодов/заботы (см. BackgroundStressCalculator).</summary>
+        public int GetBackgroundLoad() => _lastBackgroundLoad;
+
+        /// <summary>Разбивка шкалы для подсказки: причины стресса + фон + накопленный отдых.</summary>
+        public IReadOnlyList<StressContribution> GetContributions()
+        {
+            var list = State.ActiveCauses.Values
+                .Where(c => c.IsActive)
+                .Select(c => new StressContribution(ResolveCauseLabel(c), c.Weight))
+                .Concat(_background.Contributions)
+                .ToList();
+
+            if (State.StressRecoveryOffset > 0)
+                list.Add(new StressContribution("Отдых и забота", -State.StressRecoveryOffset));
+
+            return list.OrderByDescending(c => Math.Abs(c.Weight)).ToList();
+        }
+
+        private static string ResolveCauseLabel(StressCauseState cause)
+        {
+            if (!string.IsNullOrEmpty(cause.SourceBuffId)
+                && Game1.player?.buffs.AppliedBuffs.TryGetValue(cause.SourceBuffId, out var buff) == true
+                && !string.IsNullOrWhiteSpace(buff.displayName))
+            {
+                return buff.displayName;
+            }
+
+            return cause.CauseId;
+        }
 
         /// <summary>DEV: установить StressLoad напрямую (causes не меняются).</summary>
         public void SetStressLoadForDebug(int value)
@@ -335,11 +367,15 @@ namespace HarveyStressMeter.Services
             var previousCauseLoad = State.LastCauseLoad;
             var previousCurrentLoad = State.CurrentStressLoad;
 
-            var rawCauseLoad = ComputeRawCauseLoadWithGotoro(active, activeCount);
+            _lastBackgroundLoad = _background.Compute(State.GotoroFlashbackActive);
+            var rawCauseLoad = Math.Clamp(
+                ComputeRawCauseLoadWithGotoro(active, activeCount) + _lastBackgroundLoad,
+                0,
+                GetMaxStressLoad());
             var adjustedCauseLoad = ApplyTrustToCauseLoad(rawCauseLoad, previousCauseLoad);
             State.LastCauseLoad = adjustedCauseLoad;
 
-            if (activeCount == 0)
+            if (activeCount == 0 && _lastBackgroundLoad <= 0)
             {
                 State.StressRecoveryOffset = 0;
             }
@@ -389,7 +425,7 @@ namespace HarveyStressMeter.Services
             if (State.StressRecoveryOffset <= 0)
                 return;
 
-            var hasActiveCauses = State.ActiveCauses.Values.Any(c => c.IsActive);
+            var hasActiveCauses = State.ActiveCauses.Values.Any(c => c.IsActive) || _lastBackgroundLoad > 0;
             if (!hasActiveCauses)
             {
                 State.StressRecoveryOffset = 0;

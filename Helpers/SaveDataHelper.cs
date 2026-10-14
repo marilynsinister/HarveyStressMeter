@@ -336,6 +336,8 @@ namespace HarveyStressMeter.Helpers
             target.LastPrimaryCause = source.LastPrimaryCause;
             target.GotoroFlashbackActive = source.GotoroFlashbackActive;
             target.WarTraumaFlag = source.WarTraumaFlag;
+            target.CalmDayHistory = new List<int>(source.CalmDayHistory ?? new List<int>());
+            target.LastGoodWeekRewardDay = source.LastGoodWeekRewardDay;
 
             target.ActiveCauses.Clear();
             foreach (var (causeId, cause) in source.ActiveCauses)
