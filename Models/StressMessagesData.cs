@@ -19,6 +19,10 @@ namespace HarveyStressMeter.Models
         public List<string> Triggered { get; set; } = new();
         public List<string> MovingToForest { get; set; } = new();
         public List<string> InForest { get; set; } = new();
+        /// <summary>Побег в лес выключен (EnableThunderForestFlight=false): укрытие под крышей.</summary>
+        public List<string> MovingToShelter { get; set; } = new();
+        public List<string> InShelter { get; set; } = new();
+        public List<string> LeftShelterEarly { get; set; } = new();
         public List<string> Stabilized { get; set; } = new();
         public List<string> ReturnedTooEarly { get; set; } = new();
         public List<string> AfterHarveyStabilized { get; set; } = new();

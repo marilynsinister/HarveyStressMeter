@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Text;
 using HarveyStressMeter.Constants;
 using HarveyStressMeter.Helpers;
@@ -25,6 +25,9 @@ namespace HarveyStressMeter.Services
         private StressSystemsCoordinator? _coordinator;
 
         private bool _rescueEventWasActive;
+
+        /// <summary>Шанс найти бросается один раз за заход в лес, а не каждую секунду.</summary>
+        private bool _rescueRolledThisForestStay;
 
         /// <summary>MCP test plans: block Update() from auto-starting rescue events mid-step.</summary>
         public bool SuppressAutomaticRescue { get; set; }
@@ -63,6 +66,7 @@ namespace HarveyStressMeter.Services
             State.LastRescueCheckTime = 0;
             State.RescueTier = null;
             _rescueEventWasActive = false;
+            _rescueRolledThisForestStay = false;
         }
 
         public void ResetRescueState()
@@ -89,7 +93,10 @@ namespace HarveyStressMeter.Services
         public void OnLocationChanged(string? previousLocation, string? newLocation)
         {
             if (!GameStateHelper.IsForestShelterLocation())
+            {
                 State.ForestSecondsBeforeRescue = 0;
+                _rescueRolledThisForestStay = false;
+            }
         }
 
         public void Update(int elapsedSeconds = 1)
@@ -106,17 +113,26 @@ namespace HarveyStressMeter.Services
             if (!IsGotoroFlashbackContextActive())
             {
                 State.ForestSecondsBeforeRescue = 0;
+                _rescueRolledThisForestStay = false;
                 return;
             }
 
             if (GameStateHelper.IsForestShelterLocation())
+            {
                 State.ForestSecondsBeforeRescue += elapsedSeconds;
+            }
             else
+            {
                 State.ForestSecondsBeforeRescue = 0;
+                _rescueRolledThisForestStay = false;
+            }
 
             State.LastRescueCheckTime = Game1.timeOfDay;
 
             if (State.HarveyRescueTriggeredToday || State.PendingPostRescueTier != null)
+                return;
+
+            if (_rescueRolledThisForestStay)
                 return;
 
             if (!CanAttemptRescue(out var blockReason))
@@ -135,6 +151,7 @@ namespace HarveyStressMeter.Services
 
             var chance = ComputeRescueChance(tier, out var baseChance, out var trustBonus);
             var roll = Game1.random.NextDouble();
+            _rescueRolledThisForestStay = true;
             LogRescueRoll(tier, baseChance, trustBonus, chance, roll, passed: roll <= chance);
 
             if (chance <= 0 || roll > chance)
@@ -284,11 +301,17 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
-            if (!_rescueEventWasActive)
+            if (Game1.globalFade || Game1.isWarping)
                 return;
 
             var tier = State.PendingPostRescueTier;
             var eventId = State.PendingPostRescueEventId ?? FlashbackRescueEventIds.ForTier(tier!);
+
+            // Update() не вызывается во время событий (таймеры лечения на паузе), поэтому «событие шло»
+            // само по себе не замечалось, и спасение висело незавершённым днями. Просмотренное событие — тоже знак.
+            if (!_rescueEventWasActive && !Game1.player.eventsSeen.Contains(eventId))
+                return;
+
             ApplyPostRescueEffects(tier!, eventId, usedFallback: false);
             State.PendingPositionRestore = !string.IsNullOrEmpty(State.RescueTriggerLocation);
             State.PendingPostRescueTier = null;
@@ -343,7 +366,9 @@ namespace HarveyStressMeter.Services
 
             ApplyFriendshipBonus(friendshipBonus);
             _trustService?.OnForestRescueCompleted();
-            _trustDialogueService?.QueueRescueFollowUpTopic(tier);
+            // Спасение, завершённое с опозданием (старый сейв), не должно всплывать в разговоре спустя дни.
+            if (State.LastRescueDay == (int)Game1.Date.TotalDays)
+                _trustDialogueService?.QueueRescueFollowUpTopic(tier);
 
             MarkRescueConsumedToday(tier, eventId);
             State.HarveyHelpedStabilizeToday = true;
@@ -427,6 +452,12 @@ namespace HarveyStressMeter.Services
             if (!_config.EnableHarveyFlashbackRescue)
             {
                 blockReason = "disabled in config";
+                return false;
+            }
+
+            if (!_config.EnableThunderForestFlight)
+            {
+                blockReason = "forest flight disabled in config";
                 return false;
             }
 

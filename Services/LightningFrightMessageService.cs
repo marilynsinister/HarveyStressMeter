@@ -114,13 +114,14 @@ namespace HarveyStressMeter.Services
         private System.Collections.Generic.IReadOnlyList<string> GetPool(LightningFrightMessagePhase phase)
         {
             var pools = _messages.LightningFright;
+            var forest = _config.EnableThunderForestFlight;
             return phase switch
             {
                 LightningFrightMessagePhase.Triggered => pools.Triggered,
-                LightningFrightMessagePhase.MovingToForest => pools.MovingToForest,
-                LightningFrightMessagePhase.InForest => pools.InForest,
+                LightningFrightMessagePhase.MovingToForest => forest ? pools.MovingToForest : pools.MovingToShelter,
+                LightningFrightMessagePhase.InForest => forest ? pools.InForest : pools.InShelter,
                 LightningFrightMessagePhase.Stabilized => pools.Stabilized,
-                LightningFrightMessagePhase.ReturnedTooEarly => pools.ReturnedTooEarly,
+                LightningFrightMessagePhase.ReturnedTooEarly => forest ? pools.ReturnedTooEarly : pools.LeftShelterEarly,
                 LightningFrightMessagePhase.AfterHarveyStabilized => pools.AfterHarveyStabilized,
                 LightningFrightMessagePhase.LeavingHarveyAnchor => pools.LeavingHarveyAnchor,
                 LightningFrightMessagePhase.RelapseWarning => pools.RelapseWarning,

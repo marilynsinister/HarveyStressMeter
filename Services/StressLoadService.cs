@@ -225,6 +225,9 @@ namespace HarveyStressMeter.Services
 
         public bool IsGotoroFlashbackActive() => State.GotoroFlashbackActive;
 
+        /// <summary>Идёт испуг грозы: причина Thunder держится и без баффа (иммунитет, повтор).</summary>
+        public bool ThunderFlashbackRuntimeActive { get; set; }
+
         /// <summary>Добавляет или активирует причину стресса.</summary>
         public void AddCause(string causeId, string? sourceBuffId = null, int? weightOverride = null)
         {
@@ -348,6 +351,12 @@ namespace HarveyStressMeter.Services
 
             if (State.GotoroFlashbackActive)
                 activeCauseIds.Add(StressCauses.GotoroFlashback);
+
+            // Причины грозы без своего баффа ведёт ThunderFlashbackService — синхронизация их не стирает.
+            activeCauseIds.Add(StressCauses.ThunderRelapse);
+            activeCauseIds.Add(StressCauses.ThunderSensitivity);
+            if (ThunderFlashbackRuntimeActive)
+                activeCauseIds.Add(StressCauses.Thunder);
 
             var stale = State.ActiveCauses.Keys
                 .Where(id => !activeCauseIds.Contains(id))
@@ -566,11 +575,14 @@ namespace HarveyStressMeter.Services
 
         private int ApplyTrustToCauseLoad(int rawCauseLoad, int previousCauseLoad)
         {
-            if (rawCauseLoad <= previousCauseLoad || _trustService == null)
+            if (rawCauseLoad <= previousCauseLoad)
                 return Math.Min(rawCauseLoad, GetMaxStressLoad());
 
             var delta = rawCauseLoad - previousCauseLoad;
-            var mult = _trustService.GetEffectiveStressGainMultiplier();
+            var mult = (_trustService?.GetEffectiveStressGainMultiplier() ?? 1f) * _config.StressGainMultiplier;
+            if (Math.Abs(mult - 1f) < 0.001f)
+                return Math.Min(rawCauseLoad, GetMaxStressLoad());
+
             return Math.Min(
                 previousCauseLoad + (int)Math.Ceiling(delta * mult),
                 GetMaxStressLoad());

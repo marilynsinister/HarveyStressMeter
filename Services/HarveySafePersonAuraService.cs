@@ -105,7 +105,7 @@ namespace HarveyStressMeter.Services
             if (!eval.SafeAuraActive && !eval.HarveyNearby)
                 return 1f;
 
-            if (!_data.StressLoad.GotoroFlashbackActive || !_thunderFlashbackService.State.IsActive)
+            if (!_thunderFlashbackService.State.IsActive)
                 return 1f;
 
             return HarveyNearbyFlashbackStabilizationBonus;
@@ -145,7 +145,7 @@ namespace HarveyStressMeter.Services
                 _thunderFlashbackService.ApplySafeAuraShelterBonus(shelterBonus);
                 State.LastDecayAmount = 0;
                 _monitor.Log(
-                    $"[SafeAura] Gotoro flashback stabilization +{shelterBonus}s shelter (Harvey nearby)",
+                    $"[SafeAura] Flashback stabilization +{shelterBonus}s shelter (Harvey nearby)",
                     LogLevel.Trace);
             }
             else if (_thunderFlashbackService.State.IsStabilizedByHarveyToday)
@@ -348,8 +348,8 @@ namespace HarveyStressMeter.Services
 
         private bool ShouldApplyFlashbackStabilizationInsteadOfDecay()
         {
-            return _data.StressLoad.GotoroFlashbackActive
-                   && _thunderFlashbackService.State.IsActive;
+            // Любой активный испуг грозы: рядом с Харви он отпускает, а не гонит дальше в укрытие.
+            return _thunderFlashbackService.State.IsActive;
         }
 
         private void TryShowAuraMessage()

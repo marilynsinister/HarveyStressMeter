@@ -110,6 +110,13 @@ namespace HarveyStressMeter.Models
 
         public int LightningFrightCooldownMaxMinutes { get; set; } = 60;
 
+        /// <summary>
+        /// Испуг в грозу гонит в лес (Forest/Woods/SecretWoods), там Харви может найти.
+        /// false — укрытием считается любое помещение (дом, клиника, магазин), поиска в лесу нет.
+        /// </summary>
+        public bool EnableThunderForestFlight { get; set; } = true;
+
+        /// <summary>Секунды в укрытии (лес или помещение), чтобы испуг отпустил.</summary>
         public int ForestShelterRequiredSeconds { get; set; } = 90;
 
         public int GotoroForestShelterBonusSeconds { get; set; } = 30;
@@ -197,13 +204,35 @@ namespace HarveyStressMeter.Models
 
         public int SafeAuraMessageCooldownMinutes { get; set; } = 120;
 
-        public bool PenaltiesEnabled =>
-            GameplayMode != StressGameplayMode.StoryFocus;
+        /// <summary>
+        /// Общий режим сложности из HarveyOverhaul.Core (Cozy/Standard/Strict) или null («PerMod» — действует GameplayMode).
+        /// Задаётся при запуске, в config.json не пишется.
+        /// </summary>
+        [Newtonsoft.Json.JsonIgnore]
+        public System.Func<string?>? CoreDifficulty { get; set; }
 
-        public float PenaltyStrengthMultiplier => GameplayMode switch
+        public bool PenaltiesEnabled =>
+            CoreDifficulty?.Invoke() != null || GameplayMode != StressGameplayMode.StoryFocus;
+
+        public float PenaltyStrengthMultiplier => CoreDifficulty?.Invoke() switch
         {
-            StressGameplayMode.Survival => 1.15f,
-            StressGameplayMode.StoryFocus => 0f,
+            "Cozy" => 0.5f,
+            "Standard" => 1f,
+            "Strict" => 1.15f,
+            _ => GameplayMode switch
+            {
+                StressGameplayMode.Survival => 1.15f,
+                StressGameplayMode.StoryFocus => 0f,
+                _ => 1f,
+            },
+        };
+
+        /// <summary>Рост стресса по общему режиму сложности (Уютно — медленнее, Строго — быстрее).</summary>
+        [Newtonsoft.Json.JsonIgnore]
+        public float StressGainMultiplier => CoreDifficulty?.Invoke() switch
+        {
+            "Cozy" => 0.75f,
+            "Strict" => 1.15f,
             _ => 1f,
         };
 

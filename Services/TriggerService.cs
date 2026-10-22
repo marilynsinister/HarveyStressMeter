@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using StardewValley;
@@ -413,15 +413,15 @@ namespace HarveyStressMeter.Services
             switch (progress.SecondsNearHarvey)
             {
                 case 30:
-                    Game1.addHUDMessage(new HUDMessage("Гроза — рядом с Харви: 30/120 сек", HUDMessage.newQuest_type));
+                    Game1.addHUDMessage(new HUDMessage("Рядом с Харви: 30/120 сек", HUDMessage.newQuest_type));
                     UpdateThunderQuestDescription(progress);
                     break;
                 case 60:
-                    Game1.addHUDMessage(new HUDMessage("Гроза — рядом с Харви: 60/120 сек", HUDMessage.newQuest_type));
+                    Game1.addHUDMessage(new HUDMessage("Рядом с Харви: 60/120 сек", HUDMessage.newQuest_type));
                     UpdateThunderQuestDescription(progress);
                     break;
                 case 90:
-                    Game1.addHUDMessage(new HUDMessage("Гроза — рядом с Харви: 90/120 сек", HUDMessage.newQuest_type));
+                    Game1.addHUDMessage(new HUDMessage("Рядом с Харви: 90/120 сек", HUDMessage.newQuest_type));
                     UpdateThunderQuestDescription(progress);
                     break;
                 case 120:
@@ -435,9 +435,11 @@ namespace HarveyStressMeter.Services
 
         private static bool IsThunderQuestProgressConditionsMet(bool harveyNearby)
         {
+            // Раньше засчитывалось только в дождь: в ясную неделю назначение висело без прогресса.
+            // Разговор о грозе в тишине клиники (или дома с мужем) тоже лечит.
             return harveyNearby
-                && Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
-                && (Game1.isLightning || Game1.isRaining);
+                && (Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
+                    || GameStateHelper.IsMarriedFarmHouseContext());
         }
 
         private void CompleteThunderTreatment()
@@ -473,10 +475,10 @@ namespace HarveyStressMeter.Services
                 ? (HarveyFriendshipHelper.IsDatingHarvey() || HarveyFriendshipHelper.IsMarriedToHarvey()
                     ? "✅ Ты пережила грозу вместе с Харви!"
                     : "✅ Вы пережили грозу вместе!")
-                : $"Рядом с Харви в клинике: {seconds}/{ThunderSecondsRequired} сек (нужен дождь или гроза)";
+                : $"Рядом с Харви в клинике: {seconds}/{ThunderSecondsRequired} сек";
 
             _questService.UpdateQuest(QuestIds.Thunder,
-                objective: $"Проведи время с Харви в клинике во время грозы.\n\n{progressLine}");
+                objective: $"Проведи время с Харви в клинике — в грозу или просто поговорить о ней.\n\n{progressLine}");
         }
 
         private void UpdateTiredRestProgress(TreatmentProgress progress)

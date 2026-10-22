@@ -9,7 +9,8 @@ namespace HarveyStressMeter.Services
 {
     /// <summary>
     /// Атмосферный испуг молнии во время грозы (Gotoro war trauma).
-    /// Не телепортирует и не отбирает управление — мягко подталкивает к лесному укрытию.
+    /// Не телепортирует и не отбирает управление — мягко подталкивает к укрытию:
+    /// в лес (EnableThunderForestFlight) или под любую крышу, если побег в лес выключен.
     /// После помощи Харви — стабилизация эпизода с grace period и возможным лёгким relapse.
     /// </summary>
     public sealed class ThunderFlashbackService
@@ -82,6 +83,19 @@ namespace HarveyStressMeter.Services
             State.StabilizedByHarveyLocation = null;
             State.LastRelapseTime = 0;
             State.IsActive = false;
+            _stressLoadService.ThunderFlashbackRuntimeActive = false;
+
+            // Флешбэк остаётся «вчерашним»: без назначения по нему признак Гото́ро снимается к утру.
+            // Раньше он висел неделями — нагрузка «Критическая», а эпизод Гото́ро (бафф паники)
+            // перебивал выбор Core, и Харви не предлагал лечения ни от чего.
+            if (_stressLoadService.IsGotoroFlashbackActive()
+                && _coordinator?.IsActiveGotoroTreatmentEpisode != true)
+            {
+                _stressLoadService.SetGotoroFlashbackActive(false);
+                SyncGotoroFlashbackTopic(add: false);
+                _monitor.Log("[ThunderFlashback] Gotoro ambient cleared at day start (no Gotoro treatment)", LogLevel.Info);
+            }
+
             State.EnteredForestDuringFlashback = false;
             State.ForestShelterSeconds = 0;
             State.TriggerLocation = null;
@@ -129,6 +143,7 @@ namespace HarveyStressMeter.Services
             State.HudMessageCooldownMinutes = _messageService.RollCooldownMinutes();
             State.LightningFrightIntensity = 0;
             State.IsGotoroFlashback = false;
+            _stressLoadService.ThunderFlashbackRuntimeActive = false;
             _stressLoadService.SetGotoroFlashbackActive(false);
             _stressLoadService.RemoveCause(StressCauses.GotoroFlashback);
             _stressLoadService.RemoveCause(StressCauses.ThunderRelapse);
@@ -160,19 +175,20 @@ namespace HarveyStressMeter.Services
         {
             if (State.IsActive)
             {
-                if (GameStateHelper.IsForestShelterLocation())
+                if (IsShelterLocation())
                 {
                     if (!State.EnteredForestDuringFlashback)
                     {
                         State.EnteredForestDuringFlashback = true;
                         _messageService.TryShowPhaseMessage(
                             State,
-                            LightningFrightMessagePhase.MovingToForest,
+                            LightningFrightMessagePhase.InForest,
                             force: true);
                     }
                 }
-                else if (GameStateHelper.IsTownLocation()
-                         && IsForestLocationName(previousLocation))
+                else if (_config.EnableThunderForestFlight
+                    ? GameStateHelper.IsTownLocation() && IsForestLocationName(previousLocation)
+                    : IsIndoorShelterLocationName(previousLocation))
                 {
                     _messageService.TryShowPhaseMessage(
                         State,
@@ -241,7 +257,7 @@ namespace HarveyStressMeter.Services
             if (GameStateHelper.IsBlockingFlashbackContext())
                 return;
 
-            if (GameStateHelper.IsForestShelterLocation())
+            if (IsShelterLocation())
             {
                 if (!State.EnteredForestDuringFlashback)
                     State.EnteredForestDuringFlashback = true;
@@ -264,10 +280,27 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
-            if (GameStateHelper.IsTownLocation())
+            if (_config.EnableThunderForestFlight ? GameStateHelper.IsTownLocation() : !GameStateHelper.IsIndoors())
             {
                 _messageService.TryShowPhaseMessage(State, LightningFrightMessagePhase.MovingToForest);
             }
+        }
+
+        /// <summary>Где испуг отпускает: лес при побеге в лес, иначе любое мирное помещение.</summary>
+        public bool IsShelterLocation()
+            => _config.EnableThunderForestFlight
+                ? GameStateHelper.IsForestShelterLocation()
+                : GameStateHelper.IsIndoors() && !GameStateHelper.IsDangerousStressLocation();
+
+        private static bool IsIndoorShelterLocationName(string? locationName)
+        {
+            if (string.IsNullOrEmpty(locationName))
+                return false;
+
+            var location = Game1.getLocationFromName(locationName);
+            return location is { IsOutdoors: false }
+                   && !locationName.Contains("Mine", StringComparison.OrdinalIgnoreCase)
+                   && !locationName.Contains("Volcano", StringComparison.OrdinalIgnoreCase);
         }
 
         public bool TryRollFright(bool force = false)
@@ -281,7 +314,7 @@ namespace HarveyStressMeter.Services
             if (!force && State.IsActive)
                 return false;
 
-            if (!force && GameStateHelper.IsForestShelterLocation())
+            if (!force && IsShelterLocation())
                 return false;
 
             if (!force)
@@ -321,7 +354,7 @@ namespace HarveyStressMeter.Services
             State.TriggerTime = Game1.timeOfDay;
             State.LightningFrightIntensity = intensity;
             State.IsGotoroFlashback = isGotoro;
-            State.EnteredForestDuringFlashback = GameStateHelper.IsForestShelterLocation();
+            State.EnteredForestDuringFlashback = IsShelterLocation();
             State.ForestShelterSeconds = 0;
             State.RequiredForestShelterSeconds = isGotoro
                 ? _config.ForestShelterRequiredSeconds + _config.GotoroForestShelterBonusSeconds
@@ -329,6 +362,7 @@ namespace HarveyStressMeter.Services
             State.HudMessageCooldownMinutes = _messageService.RollCooldownMinutes();
 
             _stressLoadService.RemoveCause(StressCauses.ThunderRelapse);
+            _stressLoadService.ThunderFlashbackRuntimeActive = true;
             _stressLoadService.AddCause(StressCauses.Thunder, BuffIds.Thunder);
 
             if (isGotoro)
@@ -359,6 +393,7 @@ namespace HarveyStressMeter.Services
         public void StabilizeWithHarvey(int stressDecay, int graceMinutes, string reason)
         {
             var wasGotoro = State.IsGotoroFlashback;
+            _stressLoadService.ThunderFlashbackRuntimeActive = false;
 
             if (State.IsActive)
             {
@@ -384,9 +419,19 @@ namespace HarveyStressMeter.Services
 
             if (_stressLoadService.GetActiveCauses().ContainsKey(StressCauses.Thunder))
             {
-                _stressLoadService.RemoveCause(StressCauses.Thunder);
-                if (_buffService.HasBuff(BuffIds.Thunder))
-                    _buffService.RemoveBuff(BuffIds.Thunder);
+                var thunderTreatment = _stateService.GetActiveTreatment(BuffIds.Thunder);
+                if (thunderTreatment?.TreatmentStarted == true)
+                {
+                    // Назначение уже идёт: бафф принадлежит ему и снимется на контрольном разговоре.
+                    _monitor.Log("[ThunderFlashback] Thunder buff kept: treatment already started", LogLevel.Debug);
+                }
+                else
+                {
+                    _stressLoadService.RemoveCause(StressCauses.Thunder);
+                    if (_buffService.HasBuff(BuffIds.Thunder))
+                        _buffService.RemoveBuff(BuffIds.Thunder);
+                    ResolveUntreatedThunderRecord(thunderTreatment);
+                }
             }
 
             _stressLoadService.RemoveCause(StressCauses.ThunderRelapse);
@@ -418,6 +463,27 @@ namespace HarveyStressMeter.Services
                 $"graceUntil={State.HarveyAnchorGraceUntil}, sensitivityDays={State.ThunderSensitivityDays}, " +
                 $"load={_stressLoadService.GetCurrentStressLoad()}",
                 LogLevel.Info);
+        }
+
+        /// <summary>
+        /// Харви успокоил до назначения — страх грозы снят. Раньше снимался только бафф, а запись «не начато»
+        /// оставалась: в плане висело «Поговори с Харви», а утром бафф возвращался сам.
+        /// </summary>
+        private void ResolveUntreatedThunderRecord(TreatmentState? treatment)
+        {
+            if (treatment == null || treatment.IsCured || treatment.AwaitingHarveyReview)
+                return;
+
+            treatment.IsCured = true;
+            treatment.CompletedDate = StardewModdingAPI.Utilities.SDate.Now();
+            _data.StressState.AddTreatmentToHistory(treatment.BuffId, treatment);
+            _data.StressState.RemoveTreatment(treatment.TreatmentKey);
+
+            ConversationHelper.RemoveTopic(TopicIds.StressThunder);
+            if (TreatmentTopics.LegacyStartByBuff.TryGetValue(BuffIds.Thunder, out var legacyTopic))
+                ConversationHelper.RemoveTopic(legacyTopic);
+
+            _monitor.Log("[ThunderFlashback] Untreated thunder record resolved by Harvey's care", LogLevel.Info);
         }
 
         public bool TryRollThunderRelapse(bool ignoreChance = false)
@@ -550,7 +616,31 @@ namespace HarveyStressMeter.Services
             UpdateActiveTreatmentProgress();
 
             if (State.ForestShelterSeconds >= State.RequiredForestShelterSeconds)
+            {
                 StabilizeFlashback();
+                SayHarveyCalmingLine();
+            }
+        }
+
+        private static readonly string[] HarveyCalmingLines =
+        {
+            "Я здесь. Это просто гроза.",
+            "Дышим вместе. Вдох... и выдох.",
+            "Это Долина. Я рядом.",
+            "Гром снаружи. Я здесь.",
+        };
+
+        /// <summary>Испуг отпустил рядом с Харви — он говорит это вслух, а не молча.</summary>
+        private void SayHarveyCalmingLine()
+        {
+            var harvey = Game1.getCharacterFromName("Harvey");
+            if (harvey?.currentLocation != Game1.currentLocation)
+                return;
+
+            var line = HarveyCalmingLines[Game1.random.Next(HarveyCalmingLines.Length)];
+            harvey.showTextAboveHead(line);
+            if (_config.EnableHudMessages)
+                Game1.addHUDMessage(new HUDMessage($"Харви: {line}", HUDMessage.achievement_type));
         }
 
         public void StabilizeFlashback(bool applyStressDecay = true)
@@ -560,6 +650,7 @@ namespace HarveyStressMeter.Services
 
             State.IsActive = false;
             State.WasStabilizedToday = true;
+            _stressLoadService.ThunderFlashbackRuntimeActive = false;
 
             if (State.IsGotoroFlashback)
                 SyncGotoroFlashbackTopic(add: false);
@@ -591,7 +682,7 @@ namespace HarveyStressMeter.Services
 
             _messageService.ShowMessage(State, stabilizedText, force: true);
 
-            if (GameStateHelper.IsForestShelterLocation())
+            if (IsShelterLocation())
                 _trustService?.OnSafeLocationStabilized(harveyHelped: false);
 
             if (outcome?.MarkedReadyForReview == true

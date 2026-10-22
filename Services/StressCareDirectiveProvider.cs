@@ -233,6 +233,8 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
 
     private static List<HarveyCareDirective> BuildThunderShelter(TreatmentProgress progress)
     {
+        int goal = EpisodeQuestRules.GotoroShelterSecondsRequired;
+        bool storm = Game1.isLightning;
         return
         [
             new HarveyCareDirective
@@ -240,11 +242,15 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Id = "stress.thunder_shelter",
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.ImmediateAction,
-                Title = "Укройся от грозы",
-                Text = "Не стой под открытым небом. Харви просил идти в безопасное место.",
+                Title = storm ? "Укройся от грозы" : "Побудь в спокойном месте",
+                Text = storm
+                    ? "Не стой под открытым небом. Харви просил идти в безопасное место."
+                    : "Гроза позади, но тело ещё помнит. Побудь дома, в клинике или в лесу, пока дыхание не выровняется.",
                 Reason = "Гроза вызвала тяжёлые воспоминания — под открытым небом станет только хуже.",
-                NextStep = "зайди в любое здание или найди Харви, пока гроза не кончится.",
-                Current = progress.SecondsNearHarvey,
+                NextStep = "когда шкала заполнится — поговори с Харви.",
+                Current = Math.Min(progress.SecondsNearHarvey, goal),
+                Goal = goal,
+                Unit = "сек",
                 Priority = HarveyCareDirectivePriority.Critical,
                 HarveyTone = HarveyCareDirectiveTone.Worried,
             },

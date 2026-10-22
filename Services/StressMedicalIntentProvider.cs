@@ -87,6 +87,25 @@ public sealed class StressMedicalIntentProvider
             _coreApi.ResolveHarveyMedicalIntent(logDetails: true);
     }
 
+    /// <summary>
+    /// Стресс-состояние, которое Core выбрал для следующего клика по Харви (null — выбран не стресс или ничего).
+    /// Диалог старта должен предлагать именно его: свой порядок PriorityOrder с весами Core расходится
+    /// (Гроза — тяжёлый стресс, 500, а Недосып — 300), и тогда оба лечения блокировали друг друга.
+    /// </summary>
+    public string? GetCoreSelectedStressStateId()
+    {
+        if (_coreApi == null)
+            return null;
+
+        var selected = (_coreApi.GetLastHarveyMedicalIntentResolution()
+            ?? _coreApi.ResolveHarveyMedicalIntent()).Selected;
+
+        return selected != null
+            && string.Equals(selected.ProviderId, HarveyProviderRegistry.StressProviderId, StringComparison.Ordinal)
+            ? selected.StateId
+            : null;
+    }
+
     public bool CanShowStressIntent(string buffId, HarveyMedicalIntentKind kind = HarveyMedicalIntentKind.Stress)
     {
         if (_coreApi == null)
@@ -152,6 +171,17 @@ public sealed class StressMedicalIntentProvider
             intents.Add(BuildReviewIntent(BuffIds.Darkness, today));
 
         var episodeSelection = _episodeService.EvaluateSelection();
+
+        // Харви начнёт с эпизода (диалог старта выбирает его первым) — Core должен выбрать то же состояние.
+        // Иначе бафф эпизода (например, паника у Гото́ро) не был в списке, Core выбирал «Социальную тревогу»,
+        // диалог эпизода отклонялся — и Харви не предлагал ничего.
+        if (episodeSelection.Action == EpisodeSelectionAction.StartEpisode
+            && !string.IsNullOrEmpty(episodeSelection.PrimaryBuffId)
+            && !_stateService.WasTreatmentOfferShownToday(episodeSelection.PrimaryBuffId))
+        {
+            intents.Add(BuildStartIntent(episodeSelection.PrimaryBuffId, today, episodeStart: true));
+        }
+
         if (episodeSelection.Action == EpisodeSelectionAction.AwaitingReview
             && !string.IsNullOrEmpty(episodeSelection.PrimaryBuffId))
         {
@@ -164,17 +194,20 @@ public sealed class StressMedicalIntentProvider
             .ToList();
     }
 
-    private static HarveyMedicalIntentRegistration BuildStartIntent(string buffId, int today)
+    private static HarveyMedicalIntentRegistration BuildStartIntent(string buffId, int today, bool episodeStart = false)
     {
-        bool severe = IsSevereStress(buffId);
+        // Эпизод объединяет несколько причин сразу — он важнее отдельного стресса.
+        bool severe = episodeStart || IsSevereStress(buffId);
         return new HarveyMedicalIntentRegistration
         {
             ProviderId = HarveyProviderRegistry.StressProviderId,
             Kind = HarveyMedicalIntentKind.Stress,
             StateId = buffId,
-            BasePriority = severe
-                ? HarveyMedicalIntentPriorities.SevereStress
-                : HarveyMedicalIntentPriorities.MinorStress,
+            BasePriority = episodeStart
+                ? HarveyMedicalIntentPriorities.SevereStress + 10
+                : severe
+                    ? HarveyMedicalIntentPriorities.SevereStress
+                    : HarveyMedicalIntentPriorities.MinorStress,
             DangerRank = GetStressDangerRank(buffId),
             StateAgeTicks = today,
             ActionKey = HarveyStressActions.StartTreatment,

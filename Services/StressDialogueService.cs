@@ -593,7 +593,7 @@ namespace HarveyStressMeter.Services
 
 
 
-        private string FormatDialogue(StressDialogueData dialogueData, string key)
+        private string? FormatDialogue(StressDialogueData dialogueData, string key)
 
         {
 
@@ -1512,6 +1512,19 @@ namespace HarveyStressMeter.Services
 
             var episodeSelection = CheckForEpisodeStart();
 
+            // Core выбрал другое стресс-состояние — предлагаем его, а не молчим (ApproveStressDialogueForCore отклонил бы эпизод).
+            if (episodeSelection != null
+                && _medicalIntentProvider != null
+                && !string.IsNullOrEmpty(episodeSelection.PrimaryBuffId)
+                && _medicalIntentProvider.GetCoreSelectedStressStateId() is { } coreSelected
+                && !string.Equals(coreSelected, episodeSelection.PrimaryBuffId, StringComparison.OrdinalIgnoreCase))
+            {
+                _monitor.Log(
+                    $"[StressDialogue] Episode {episodeSelection.EpisodeId} (buff={episodeSelection.PrimaryBuffId}) skipped: Core selected {coreSelected}",
+                    LogLevel.Debug);
+                episodeSelection = null;
+            }
+
             if (episodeSelection != null)
 
             {
@@ -1724,7 +1737,19 @@ namespace HarveyStressMeter.Services
 
         {
 
-            foreach (var buffId in StressDebuffSelector.GetUntreatedDebuffs(_stateService, _data))
+            var untreated = StressDebuffSelector.GetUntreatedDebuffs(_stateService, _data);
+
+            // Сначала то, что выбрал Core: иначе ApproveStressDialogueForCore отклонит наш выбор,
+            // а выбор Core мы так и не предложим — ни одно лечение не начнётся.
+            string? coreSelected = _medicalIntentProvider?.GetCoreSelectedStressStateId();
+            if (coreSelected != null)
+            {
+                string? match = untreated.FirstOrDefault(id => string.Equals(id, coreSelected, StringComparison.OrdinalIgnoreCase));
+                if (match != null && !CannotOfferStartDialogueAgain(match, null, out _))
+                    return match;
+            }
+
+            foreach (var buffId in untreated)
 
             {
 

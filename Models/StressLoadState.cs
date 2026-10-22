@@ -13,6 +13,9 @@ namespace HarveyStressMeter.Models
         /// <summary>День (DaysPlayed) последней награды «Хорошая неделя».</summary>
         public int LastGoodWeekRewardDay { get; set; } = -100;
 
+        /// <summary>Сколько «Хороших недель» подряд (без пропуска недели). 2 — письмо-серия, каждые 4 — «месяц» и пикник.</summary>
+        public int GoodWeekStreak { get; set; }
+
         /// <summary>Снижение шкалы от отдыха/лечения/ауры при сохранении активных causes.</summary>
         public int StressRecoveryOffset { get; set; }
 

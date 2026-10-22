@@ -158,6 +158,12 @@ namespace HarveyStressMeter.Handlers
             _data.OverworkBreakActive = false;
             _data.TalkedToHarveyToday = false;
 
+            // Диалог, закрытый событием или сном, не проходит через HandleHarveyDialogueEnd — флаги «уже показываю»
+            // оставались до перезагрузки сейва, и Харви днями не предлагал лечения.
+            _harveyStressDialogueCycleHandled = false;
+            _lastDialogueNpc = null;
+            ClearStressDialoguePending();
+
             _socialExposureService.ResetDaily();
 
             ResetDailyQuestCounters();
@@ -923,14 +929,8 @@ namespace HarveyStressMeter.Handlers
                     () => Game1.getCharacterFromName("Harvey")?.showTextAboveHead("Я всегда рядом."));
             }
 
-            // Thunder - removal indoors with Harvey
-            if (CanNaturallyRemoveDebuff(BuffIds.Thunder)
-                && harveyNearby
-                && Game1.player.currentLocation?.NameOrUniqueName == "Hospital"
-                && (Game1.isLightning || Game1.isRaining))
-            {
-                NaturallyResolveBeforeTreatment(BuffIds.Thunder, TopicIds.StressThunder);
-            }
+            // Thunder — без естественного снятия рядом с Харви: подойти к нему значит заговорить,
+            // и бафф пропадал молча до его реплики. Снимается через разговор и квест в клинике.
 
             // TooCold - removal in warm zones
             if (CanNaturallyRemoveDebuff(BuffIds.TooCold)
@@ -1075,6 +1075,8 @@ namespace HarveyStressMeter.Handlers
             if (Game1.stats.DaysPlayed < 2) return;
             if (_stateService.HasActiveTreatmentState(BuffIds.Thunder)) return;
             if (_stateService.HasImmunity(BuffIds.Thunder)) return;
+            // Харви уже успокоил сегодня — не возвращаем страх через час той же грозы.
+            if (_thunderFlashbackService.State.IsStabilizedByHarveyToday) return;
 
             if (Game1.random.NextDouble() < 0.3)
             {

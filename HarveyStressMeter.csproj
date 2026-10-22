@@ -14,8 +14,10 @@
     <GamePath>D:\Games\Steam\steamapps\common\Stardew Valley</GamePath>
     <GameModsPath>$(GamePath)\Mods\HarveyOverhaul</GameModsPath>
     
-    <!-- Исключить .deps.json из деплоя (не нужен для SMAPI модов) -->
-    <IgnoreModFilePaths>\.deps\.json$</IgnoreModFilePaths>
+    <!-- Исключить .deps.json из деплоя (не нужен для SMAPI модов).
+         Config.json тоже: иначе каждая сборка затирала настройки игрока в папке игры (SMAPI создаст файл сам). -->
+    <IgnoreModFilePatterns>\.deps\.json$</IgnoreModFilePatterns>
+    <IgnoreModFilePaths>Config.json</IgnoreModFilePaths>
   </PropertyGroup>
 
   <ItemGroup>

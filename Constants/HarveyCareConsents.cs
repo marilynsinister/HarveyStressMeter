@@ -6,10 +6,13 @@ namespace HarveyStressMeter.Constants
     /// </summary>
     public static class HarveyCareConsents
     {
-        /// <summary>Иногда заходить или спрашивать вечером, как она. Бонус к снижению стресса от лечения.</summary>
+        /// <summary>
+        /// Иногда заходить или спрашивать вечером, как она. Бонус к снижению стресса от лечения.
+        /// На «пока нет»/«нет» нет короткого ночного обхода (Injury) и вечернего визита на ферму (CP).
+        /// </summary>
         public const string EveningChecks = "EveningChecks";
 
-        /// <summary>Взять за руку во время флешбека. Бонус к стабилизации флешбека.</summary>
+        /// <summary>Взять за руку во время флешбека. Бонус к стабилизации флешбека; руку в сцене спасения он предлагает только при «да».</summary>
         public const string HoldHand = "HoldHand";
 
         /// <summary>Искать её, если она уйдёт в грозу. Без разрешения Харви в лес не придёт.</summary>

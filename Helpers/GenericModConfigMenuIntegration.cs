@@ -38,7 +38,8 @@ namespace HarveyStressMeter.Helpers
                 () => config.GameplayMode.ToString(),
                 value => config.GameplayMode = Enum.Parse<StressGameplayMode>(value),
                 () => "Влияние стресса",
-                () => "Сюжет: без штрафов, только реплики и HUD.\nБаланс: умеренные штрафы.\nВыживание: штрафы примерно на 15% сильнее.",
+                () => "Действует, только если в настройках Harvey Overhaul Core выбран режим «Настройки каждой части».\n"
+                      + "Сюжет: без штрафов, только реплики и HUD.\nБаланс: умеренные штрафы.\nВыживание: штрафы примерно на 15% сильнее.",
                 Enum.GetNames<StressGameplayMode>(),
                 FormatGameplayMode);
             gmcm.AddNumberOption(
@@ -69,9 +70,16 @@ namespace HarveyStressMeter.Helpers
                 () => "Рядом с Харви легче");
             gmcm.AddBoolOption(
                 manifest,
+                () => config.EnableThunderForestFlight,
+                value => config.EnableThunderForestFlight = value,
+                () => "Убегать в лес от грозы",
+                () => "Испуг в грозу гонит фермершу в лес: там деревья глушат гром, и там её может найти Харви.\nВыключено — достаточно укрыться в любом помещении (дом, клиника, магазин), поиска в лесу не будет.");
+            gmcm.AddBoolOption(
+                manifest,
                 () => config.EnableHarveyFlashbackRescue,
                 value => config.EnableHarveyFlashbackRescue = value,
-                () => "Харви ищет в лесу во время грозы");
+                () => "Харви ищет в лесу во время грозы",
+                () => "Работает, только когда включён побег в лес.");
             gmcm.AddBoolOption(
                 manifest,
                 () => config.EnableHarveyConsentQuestions,
@@ -119,6 +127,7 @@ namespace HarveyStressMeter.Helpers
             config.EnableComfortActivities = defaults.EnableComfortActivities;
             config.ComfortDailyReliefCap = defaults.ComfortDailyReliefCap;
             config.EnableHarveySafePersonAura = defaults.EnableHarveySafePersonAura;
+            config.EnableThunderForestFlight = defaults.EnableThunderForestFlight;
             config.EnableHarveyFlashbackRescue = defaults.EnableHarveyFlashbackRescue;
             config.EnableHarveyConsentQuestions = defaults.EnableHarveyConsentQuestions;
             config.EnableFireMemoryTrigger = defaults.EnableFireMemoryTrigger;

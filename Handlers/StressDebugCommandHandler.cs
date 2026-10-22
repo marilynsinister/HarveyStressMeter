@@ -1511,7 +1511,7 @@ namespace HarveyStressMeter.Handlers
             LogDev($"QuestId={episode.QuestId ?? "(null)"}");
             LogDev($"AwaitingHarveyReview={episode.AwaitingHarveyReview}");
 
-            var treatment = _data.StressState.GetActiveTreatmentByQuest(episode.QuestId);
+            var treatment = episode.QuestId != null ? _data.StressState.GetActiveTreatmentByQuest(episode.QuestId) : null;
             if (treatment?.Progress == null)
             {
                 LogDev("No treatment progress.");

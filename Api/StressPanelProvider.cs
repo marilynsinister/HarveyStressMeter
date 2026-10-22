@@ -103,6 +103,11 @@ public sealed class StressPanelProvider : IHarveyPanelActionProvider
         var stressSections = BuildStressSections(handbook, assignment);
         var trustSections = BuildTrustSections();
 
+        if (StressPanelForecast.BuildBreakdown(_stressLoadService) is { } breakdown)
+            stressSections.Add(breakdown);
+        if (StressPanelForecast.BuildForecast(_data.StressLoad) is { } forecast)
+            overviewSections.Add(forecast);
+
         bool awaitingReview = HasPendingTreatmentReview()
             || assignment.AwaitingHarveyReview
             || _data.ActiveTreatmentEpisode?.AwaitingHarveyReview == true;

@@ -531,7 +531,18 @@ namespace HarveyStressMeter.Services
             progress.SecondsNearHarvey = Math.Max(
                 progress.SecondsNearHarvey,
                 _data.ThunderFlashback.ForestShelterSeconds);
+
+            // Без идущего флешбэка (гроза кончилась или назначение дали в ясный день) раньше прогресс не рос,
+            // и назначение висело до следующей грозы. Теперь засчитывается время в спокойном месте.
+            if (!_data.ThunderFlashback.IsActive
+                && Game1.CurrentEvent == null
+                && GameStateHelper.IsAnxietySafeLocation())
+            {
+                progress.SecondsNearHarvey++;
+            }
+
             UpdateQuestJournal(StressEpisodes.GotoroFlashback, progress);
+            TryCompleteEpisode(StressEpisodes.GotoroFlashback, progress);
         }
 
         private void MarkCauseCompleted(TreatmentProgress progress, string causeId)
@@ -582,6 +593,10 @@ namespace HarveyStressMeter.Services
 
                 StressEpisodes.AnxietySpike =>
                     progress.AnxietySafeSeconds >= EpisodeQuestRules.AnxietySafeSecondsRequired,
+
+                StressEpisodes.GotoroFlashback =>
+                    !_data.ThunderFlashback.IsActive
+                    && progress.SecondsNearHarvey >= EpisodeQuestRules.GotoroShelterSecondsRequired,
 
                 _ => false,
             };
@@ -642,7 +657,7 @@ namespace HarveyStressMeter.Services
                     $"{Math.Min(progress.AnxietySafeSeconds, EpisodeQuestRules.AnxietySafeSecondsRequired)}/{EpisodeQuestRules.AnxietySafeSecondsRequired} сек",
 
                 StressEpisodes.GotoroFlashback =>
-                    $"{progress.SecondsNearHarvey} сек укрытия",
+                    $"{Math.Min(progress.SecondsNearHarvey, EpisodeQuestRules.GotoroShelterSecondsRequired)}/{EpisodeQuestRules.GotoroShelterSecondsRequired} сек в спокойном месте",
 
                 _ => "",
             };
@@ -775,8 +790,9 @@ namespace HarveyStressMeter.Services
             return $"""
                 Вернитесь в настоящее:
 
-                Укрытие в лесу: {progress.SecondsNearHarvey} сек (стабилизация во flashback)
-                Поговорите с Харви после стабилизации.
+                Спокойное место: {Math.Min(progress.SecondsNearHarvey, EpisodeQuestRules.GotoroShelterSecondsRequired)}/{EpisodeQuestRules.GotoroShelterSecondsRequired} сек
+                (дом, клиника или лес; в грозу — укрытие от грома)
+                Поговорите с Харви, когда дыхание выровняется.
                 """.Trim();
         }
     }

@@ -35,6 +35,9 @@ public sealed class StressCareTrustApi : IHarveyCareTrustApi
     public void Penalize(string sourceProviderId, string reason, int points)
         => _trustService.PenalizeTrustFromSource(SourceKey(sourceProviderId), reason, points);
 
+    public bool IsConsentAllowed(string consentId)
+        => _trustService.IsConsentAllowed(consentId);
+
     /// <summary>Короткий ключ источника для PointsBySource («injury» вместо полного UniqueID).</summary>
     private static string SourceKey(string providerId)
         => providerId.Contains("Injury", StringComparison.OrdinalIgnoreCase) ? "injury" : providerId;

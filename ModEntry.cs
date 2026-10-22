@@ -320,6 +320,31 @@ namespace HarveyStressMeter
                     return true;
                 });
 
+            // «Границы» в CP: GameStateQuery marilynsinister.HarveyStressMeter_CONSENT <id> <ответ>+
+            // Ответы: Granted, NotYet, Never, NotAsked и Allowed (= «да» или ещё не спрашивал).
+            // В событиях — условие сцены или «$query …#если да|если нет» в реплике.
+            StardewValley.GameStateQuery.Register(
+                $"{ModManifest.UniqueID}_CONSENT",
+                (query, _) =>
+                {
+                    if (!Context.IsWorldReady || query.Length < 3)
+                        return false;
+
+                    string consentId = query[1];
+                    var answer = _harveyCareTrustService.GetConsent(consentId);
+                    for (int i = 2; i < query.Length; i++)
+                    {
+                        if (query[i].Equals("Allowed", StringComparison.OrdinalIgnoreCase)
+                                ? _harveyCareTrustService.IsConsentAllowed(consentId)
+                                : query[i].Equals("Granted", StringComparison.OrdinalIgnoreCase)
+                                    ? _harveyCareTrustService.IsConsentGranted(consentId)
+                                    : string.Equals(query[i], answer.ToString(), StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+
+                    return false;
+                });
+
             // Запах дыма у открытого огня — только если она рассказала Харви про склад (T1).
             var fireMemoryService = new FireMemoryService(_config, _buffService, _stressLoadService, Monitor);
             _helper.Events.GameLoop.TimeChanged += (_, e) => fireMemoryService.OnTimeChanged(e.NewTime);
@@ -443,11 +468,11 @@ namespace HarveyStressMeter
                 _helper,
                 _stressDialogueService,
                 _stressTreatmentReviewService,
-                _stressMedicalIntentProvider);
+                _stressMedicalIntentProvider!);
             _harveyStressInteractionHandler.SetDarknessService(_darknessService);
             var lanternLight = new HarveyLanternLightService();
             _helper.Events.GameLoop.UpdateTicked += (_, _) => lanternLight.OnUpdateTicked();
-            _stressMedicalIntentProvider.SetDarknessService(_darknessService);
+            _stressMedicalIntentProvider!.SetDarknessService(_darknessService);
             _eventHandler = new Handlers.EventHandler(
                 Monitor,
                 _helper,
@@ -531,6 +556,7 @@ namespace HarveyStressMeter
             }
 
             coreApi.RegisterPanelProvider(_stressPanelProvider);
+            _config.CoreDifficulty = () => coreApi.DifficultyOverride;
             coreApi.RegisterCareDirectiveProvider(_stressCareDirectiveProvider);
             coreApi.RegisterStressStateApi(_stressStateApi ??= new StressStateApi(
                 _data, _stateService, _treatmentService, _stressLoadService, Monitor));

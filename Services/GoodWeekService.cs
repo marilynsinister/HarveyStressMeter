@@ -8,12 +8,20 @@ namespace HarveyStressMeter.Services
     /// <summary>
     /// «Хорошая неделя»: если 5 из последних 7 дней закончились спокойно (шкала ниже «Напряжения»),
     /// Харви присылает письмо с похвалой и подарком. Мягкая награда за заботу о себе — без штрафов.
+    /// Серии: вторая неделя подряд — письмо побогаче, каждая четвёртая («месяц») — письмо, тема
+    /// <see cref="GoodMonthTopic"/> на неделю и пикник с Харви (CP: goodWeek.json, сцена повторяется).
+    /// Пропущенная неделя просто начинает серию заново.
     /// </summary>
     public sealed class GoodWeekService
     {
         private const int WindowDays = 7;
         private const int CalmDaysRequired = 5;
         private const string MailPrefix = "marilynsinister.HarveyOverhaul_mailGoodWeek";
+        public const string GoodMonthTopic = "HarveyGoodMonth";
+        public const string PicnicEventId = "HarveyOverhaulGoodWeek.GW1_Picnic";
+
+        /// <summary>Следующая хорошая неделя считается продолжением серии, если пришла не позже этого срока.</summary>
+        private const int StreakGraceDays = WindowDays + 3;
 
         private readonly SaveData _data;
         private readonly StressLoadService _stressLoadService;
@@ -48,11 +56,24 @@ namespace HarveyStressMeter.Services
             if (calmDays < CalmDaysRequired)
                 return;
 
-            string mailId = MailPrefix + ResolveVariant();
+            state.GoodWeekStreak = today - state.LastGoodWeekRewardDay <= StreakGraceDays
+                ? state.GoodWeekStreak + 1
+                : 1;
+
+            string tier = state.GoodWeekStreak % 4 == 0 ? "Month" : state.GoodWeekStreak == 2 ? "Streak" : "";
+            string mailId = MailPrefix + tier + ResolveVariant();
             Game1.player.mailbox.Add(mailId);
             state.LastGoodWeekRewardDay = today;
             state.CalmDayHistory.Clear();
-            _monitor.Log($"[GoodWeek] {calmDays}/{WindowDays} спокойных дней — письмо {mailId}", LogLevel.Info);
+
+            if (tier == "Month")
+            {
+                // Пикник повторяется: каждый «месяц» спокойствия — снова.
+                Game1.player.eventsSeen.Remove(PicnicEventId);
+                Game1.player.activeDialogueEvents[GoodMonthTopic] = 7;
+            }
+
+            _monitor.Log($"[GoodWeek] {calmDays}/{WindowDays} спокойных дней, серия {state.GoodWeekStreak} — письмо {mailId}", LogLevel.Info);
         }
 
         private static string ResolveVariant()
