@@ -15,7 +15,6 @@ namespace HarveyStressMeter.Helpers
             sb.AppendLine("-1000 -1000/");
             sb.AppendLine("farmer -1 -1 2 Harvey 1000 1000 3/");
             sb.AppendLine("skippable/");
-            sb.AppendLine("ignoreCollisions Harvey/");
             sb.AppendLine("playSound thunder_small/");
             sb.AppendLine("emote farmer 28/");
             sb.AppendLine("pause 800/");
@@ -28,8 +27,6 @@ namespace HarveyStressMeter.Helpers
                 sb.AppendLine($"speak Harvey \"{Escape(speak)}\"/");
 
             sb.AppendLine("pause 400/");
-            sb.AppendLine("stopIgnoringCollisions farmer/");
-            sb.AppendLine("stopIgnoringCollisions Harvey/");
             sb.AppendLine($"end dialogue Harvey \"{Escape(GetClosingLine(tier))}\"");
 
             return sb.ToString().TrimEnd();

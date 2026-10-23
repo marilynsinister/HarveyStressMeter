@@ -1,5 +1,6 @@
 using StardewModdingAPI;
 using StardewValley;
+using HarveyOverhaul.Core.Services;
 
 namespace HarveyStressMeter.Helpers
 {
@@ -117,7 +118,7 @@ namespace HarveyStressMeter.Helpers
                 {
                     try
                     {
-                        var evt = new Event(cpScript);
+                        var evt = new Event(HarveyEventStaging.AtPlayer(location, cpScript));
                         evt.id = eventId;
                         location.startEvent(evt);
                         usedCpEvent = true;
@@ -135,7 +136,7 @@ namespace HarveyStressMeter.Helpers
             try
             {
                 var dynamicScript = RescueEventScriptBuilder.Build(tier, eventId);
-                var dynamicEvent = new Event(dynamicScript);
+                var dynamicEvent = new Event(HarveyEventStaging.AtPlayer(location, dynamicScript));
                 dynamicEvent.id = eventId;
                 location.startEvent(dynamicEvent);
                 monitor.Log(
