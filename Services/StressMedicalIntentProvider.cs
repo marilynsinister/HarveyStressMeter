@@ -176,8 +176,7 @@ public sealed class StressMedicalIntentProvider
         // Иначе бафф эпизода (например, паника у Гото́ро) не был в списке, Core выбирал «Социальную тревогу»,
         // диалог эпизода отклонялся — и Харви не предлагал ничего.
         if (episodeSelection.Action == EpisodeSelectionAction.StartEpisode
-            && !string.IsNullOrEmpty(episodeSelection.PrimaryBuffId)
-            && !_stateService.WasTreatmentOfferShownToday(episodeSelection.PrimaryBuffId))
+            && !string.IsNullOrEmpty(episodeSelection.PrimaryBuffId))
         {
             intents.Add(BuildStartIntent(episodeSelection.PrimaryBuffId, today, episodeStart: true));
         }

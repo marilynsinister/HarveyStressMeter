@@ -1811,20 +1811,9 @@ namespace HarveyStressMeter.Services
 
             var resolvedBuff = DarknessLegacyHelper.ResolveTreatmentBuffId(buffId);
 
-            if (_stateService.WasTreatmentOfferShownToday(resolvedBuff)
-
-                || (!string.Equals(resolvedBuff, buffId, StringComparison.Ordinal)
-
-                    && _stateService.WasTreatmentOfferShownToday(buffId)))
-
-            {
-
-                reason = "OfferShownToday";
-
-                return true;
-
-            }
-
+            // «Уже предлагал сегодня» старт не блокирует: реплика старта всегда несёт $action, и если лечение
+            // после неё не началось (ambient-реплика, сорванный $action), план продолжал звать к Харви,
+            // Core выбирал это же состояние, а диалог его отклонял — Харви молчал до утра.
             if (IsTreatmentStartComplete(resolvedBuff, episodeId, out reason))
 
                 return true;

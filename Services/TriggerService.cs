@@ -14,7 +14,7 @@ namespace HarveyStressMeter.Services
     /// </summary>
     public class TriggerService
     {
-        private const int TiredRestSecondsRequired = 60;
+        private const int TiredRestSecondsRequired = EpisodeQuestRules.TiredRestSecondsRequired;
         private const int ThunderSecondsRequired = 120;
         private const int OverworkBreakSecondsRequired = 30;
         private const int SocialShutdownHarveySecondsRequired = SocialShutdownQuestHelper.HarveySecondsRequired;
@@ -194,6 +194,11 @@ namespace HarveyStressMeter.Services
             {
                 // ⭐ ИСПРАВЛЕНО: Пропускаем завершенные лечения
                 if (treatment.IsCured || treatment.IsCompleted)
+                    continue;
+
+                // Цель выполнена — ждём Харви. Иначе счётчики шли дальше и каждую секунду
+                // снова отмечали задание выполненным (звук «квест выполнен» без конца).
+                if (treatment.AwaitingHarveyReview)
                     continue;
 
                 if (treatment.Progress == null || string.IsNullOrEmpty(treatment.QuestId))
@@ -410,23 +415,14 @@ namespace HarveyStressMeter.Services
 
             progress.SecondsNearHarvey++;
 
-            switch (progress.SecondsNearHarvey)
+            // Журнал — каждую секунду, чтобы было видно, сколько уже зачтено.
+            UpdateThunderQuestDescription(progress);
+
+            if (progress.SecondsNearHarvey is 30 or 60 or 90)
             {
-                case 30:
-                    Game1.addHUDMessage(new HUDMessage("Рядом с Харви: 30/120 сек", HUDMessage.newQuest_type));
-                    UpdateThunderQuestDescription(progress);
-                    break;
-                case 60:
-                    Game1.addHUDMessage(new HUDMessage("Рядом с Харви: 60/120 сек", HUDMessage.newQuest_type));
-                    UpdateThunderQuestDescription(progress);
-                    break;
-                case 90:
-                    Game1.addHUDMessage(new HUDMessage("Рядом с Харви: 90/120 сек", HUDMessage.newQuest_type));
-                    UpdateThunderQuestDescription(progress);
-                    break;
-                case 120:
-                    UpdateThunderQuestDescription(progress);
-                    break;
+                Game1.addHUDMessage(new HUDMessage(
+                    $"Рядом с Харви: {progress.SecondsNearHarvey}/{ThunderSecondsRequired} сек",
+                    HUDMessage.newQuest_type));
             }
 
             if (progress.SecondsNearHarvey >= ThunderSecondsRequired)
@@ -495,25 +491,19 @@ namespace HarveyStressMeter.Services
             if (!restingAtHome)
                 return;
 
+            if (progress.TiredRestSeconds >= TiredRestSecondsRequired)
+                return;
+
             progress.TiredRestSeconds++;
 
-            switch (progress.TiredRestSeconds)
+            // Журнал — каждую секунду: игрок видит, сколько уже зачтено.
+            UpdateTiredQuestDescription(progress);
+
+            if (progress.TiredRestSeconds is 15 or 30 or 45)
             {
-                case 15:
-                    Game1.addHUDMessage(new HUDMessage("Отдых дома: 15/60 сек", HUDMessage.newQuest_type));
-                    UpdateTiredQuestDescription(progress);
-                    break;
-                case 30:
-                    Game1.addHUDMessage(new HUDMessage("Отдых дома: 30/60 сек", HUDMessage.newQuest_type));
-                    UpdateTiredQuestDescription(progress);
-                    break;
-                case 45:
-                    Game1.addHUDMessage(new HUDMessage("Отдых дома: 45/60 сек", HUDMessage.newQuest_type));
-                    UpdateTiredQuestDescription(progress);
-                    break;
-                case 60:
-                    UpdateTiredQuestDescription(progress);
-                    break;
+                Game1.addHUDMessage(new HUDMessage(
+                    $"Отдых дома: {progress.TiredRestSeconds}/{TiredRestSecondsRequired} сек",
+                    HUDMessage.newQuest_type));
             }
 
             if (progress.TiredRestSeconds >= TiredRestSecondsRequired)
@@ -528,7 +518,7 @@ namespace HarveyStressMeter.Services
             int seconds = Math.Min(progress.TiredRestSeconds, TiredRestSecondsRequired);
             string progressLine = progress.TiredRestSeconds >= TiredRestSecondsRequired
                 ? "✅ Отдых дома завершён!"
-                : $"Отдых дома: {seconds}/{TiredRestSecondsRequired} сек (уберите кирку, топор и мотыгу)";
+                : $"Отдых дома: {seconds}/{TiredRestSecondsRequired} сек (кирка, топор и мотыга — в сундук)";
 
             _questService.UpdateQuest(QuestIds.Tired,
                 objective: $"Отдохни в фермерском доме, избегая тяжёлой работы.\n\n{progressLine}");
@@ -595,8 +585,14 @@ namespace HarveyStressMeter.Services
                 return;
             }
 
+            // Бафф перерыва раньше выдавался только при входе в зону отдыха: если назначение дали в клинике
+            // или день начался дома, перерыв не считался, пока не выйдешь и не зайдёшь снова.
             if (!_stateService.HasBuffInGame(BuffIds.OverworkBreak))
-                return;
+            {
+                _buffService.ApplyBuff(BuffIds.OverworkBreak, "Перерыв", new StardewValley.Buffs.BuffEffects(), -2);
+                ConversationHelper.AddTopic(TopicIds.OverworkBreakActive, 1);
+                ConversationHelper.RemoveTopic(TopicIds.OverworkBreakInterrupted);
+            }
 
             _data.OverworkBreakActive = true;
             _data.OverworkBreakSeconds++;
@@ -664,6 +660,13 @@ namespace HarveyStressMeter.Services
 
             progress.SecondsNearHarvey++;
 
+            if (progress.SecondsNearHarvey < SocialAnxietyTherapyService.HarveySecondsRequired
+                && progress.SecondsNearHarvey % 15 != 0)
+            {
+                UpdateQuestDescription(progress);
+                return true;
+            }
+
             // HUD уведомления для времени с Харви (только при достижении ключевых моментов)
             switch (progress.SecondsNearHarvey)
             {
@@ -717,7 +720,7 @@ namespace HarveyStressMeter.Services
         private string GetProgressText(TreatmentProgress progress)
         {
             int conversationsAfterQuest = progress.SocialTalksAfterQuest;
-            int timeWithHarvey = progress.SecondsNearHarvey;
+            int timeWithHarvey = Math.Min(progress.SecondsNearHarvey, SocialAnxietyTherapyService.HarveySecondsRequired);
 
             // ⭐ ИЗМЕНЕНО: Проверяем оба варианта завершения квеста
 

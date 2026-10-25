@@ -1,4 +1,4 @@
-using HarveyOverhaul.Core.Api;
+﻿using HarveyOverhaul.Core.Api;
 using HarveyOverhaul.Core.Core;
 using HarveyOverhaul.Core.Models;
 using HarveyOverhaul.Core.Services;
@@ -297,8 +297,8 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Id = "stress.rule.sleep",
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.TodayRule,
-                Title = "Лечь спать вовремя",
-                Text = "Харви просил лечь до полуночи, чтобы день восстановления засчитался.",
+                Title = "Лечь спать до 22:00",
+                Text = "Харви просил лечь до 22:00, чтобы день восстановления засчитался.",
                 Reason = "Недосып — одна из причин истощения.",
                 Priority = HarveyCareDirectivePriority.Normal,
                 State = done ? HarveyCareDirectiveState.Done : HarveyCareDirectiveState.Active,
@@ -481,7 +481,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
         }
     }
 
-    private static void AppendLegacyBuffTreatment(TreatmentState treatment, List<HarveyCareDirective> directives)
+    private void AppendLegacyBuffTreatment(TreatmentState treatment, List<HarveyCareDirective> directives)
     {
         var mapped = MapStressBuffDirective(
             treatment.BuffId,
@@ -492,7 +492,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
             directives.Add(mapped);
     }
 
-    private static HarveyCareDirective? MapStressBuffDirective(
+    private HarveyCareDirective? MapStressBuffDirective(
         string buffId,
         string title,
         TreatmentProgress? progress,
@@ -561,7 +561,8 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
         if (string.Equals(buffId, BuffIds.Tired, StringComparison.OrdinalIgnoreCase)
             || string.Equals(treatment?.QuestId, QuestIds.Tired, StringComparison.Ordinal))
         {
-            int goal = EpisodeQuestRules.PhysicalTiredRestSecondsRequired;
+            // Это отдельное назначение (60 сек), а не шаг эпизода истощения (30 сек): план показывал ✓ на 30.
+            int goal = EpisodeQuestRules.TiredRestSecondsRequired;
             int current = Math.Min(progress.TiredRestSeconds, goal);
             return new HarveyCareDirective
             {
@@ -569,7 +570,7 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.ImmediateAction,
                 Title = "Отдохни дома",
-                Text = "Усталость накопилась. Побудь дома без тяжёлой работы (убери кирку, топор и мотыгу из рук).",
+                Text = "Усталость накопилась. Побудь дома без тяжёлой работы (кирку, топор и мотыгу — в сундук: с ними в инвентаре отдых не засчитывается).",
                 Reason = "Выносливость упала почти до нуля.",
                 Current = current,
                 Goal = goal,
@@ -616,7 +617,15 @@ public sealed class StressCareDirectiveProvider : IHarveyCareDirectiveProvider
                 Source = HarveyCareDirectiveSource.Stress,
                 Type = HarveyCareDirectiveType.TodayRule,
                 Title = "Сделай перерыв",
-                Text = LegacyTreatmentObjectives.OverworkDailyStart,
+                // Раньше здесь был общий текст без счётчика — в плане не было видно, сколько перерывов засчитано.
+                Text = LegacyTreatmentObjectives.Overwork(
+                    _data.OverworkBreaksToday,
+                    _data.OverworkBreakSeconds,
+                    _data.OverworkBreakActive) + "\n   Зона отдыха: дом, клиника, комната Харви или купальня.",
+                Current = Math.Min(_data.OverworkBreaksToday, 3),
+                Goal = 3,
+                Unit = "перерыва",
+                State = _data.OverworkBreaksToday >= 3 ? HarveyCareDirectiveState.Done : HarveyCareDirectiveState.Active,
                 Reason = $"Ты {PlayerGrammar.Gendered("работал", "работала")} до изнеможения — глубокой ночью с пустой выносливостью.",
                 Priority = HarveyCareDirectivePriority.Normal,
                 HarveyTone = HarveyCareDirectiveTone.Worried,

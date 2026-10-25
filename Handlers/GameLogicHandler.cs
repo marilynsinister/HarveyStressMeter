@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.Xna.Framework;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
@@ -466,6 +466,9 @@ namespace HarveyStressMeter.Handlers
             int bedtime = Game1.timeOfDay;
             if (bedtime >= 600 && bedtime <= 2200)
             {
+                // План показывает «засчитано» по этой серии — раньше её никто не увеличивал.
+                if (noSleepTreatment?.Progress != null)
+                    noSleepTreatment.Progress.EarlySleepStreak++;
                 _treatmentService.UpdateTreatmentObjective(BuffIds.NoSleep, LegacyTreatmentObjectives.NoSleepDone);
                 _treatmentService.MarkTreatmentReadyForReview(BuffIds.NoSleep);
                 Game1.playSound("questcomplete");
