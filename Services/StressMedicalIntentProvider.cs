@@ -106,6 +106,19 @@ public sealed class StressMedicalIntentProvider
             : null;
     }
 
+    /// <summary>Core выбрал для клика интент другого провайдера (травма) — стресс должен уступить.</summary>
+    public bool IsNonStressIntentSelected()
+    {
+        if (_coreApi == null)
+            return false;
+
+        var selected = (_coreApi.GetLastHarveyMedicalIntentResolution()
+            ?? _coreApi.ResolveHarveyMedicalIntent()).Selected;
+
+        return selected != null
+            && !string.Equals(selected.ProviderId, HarveyProviderRegistry.StressProviderId, StringComparison.Ordinal);
+    }
+
     public bool CanShowStressIntent(string buffId, HarveyMedicalIntentKind kind = HarveyMedicalIntentKind.Stress)
     {
         if (_coreApi == null)
@@ -226,7 +239,9 @@ public sealed class StressMedicalIntentProvider
             ProviderId = HarveyProviderRegistry.StressProviderId,
             Kind = HarveyMedicalIntentKind.Stress,
             StateId = buffId,
-            BasePriority = 450,
+            // Выше старта любого стресса (500, эпизод 510): назначение выполнено, план уже зовёт к Харви.
+            // При 450 старт грозы/темноты перебивал итог, и оба диалога блокировали друг друга.
+            BasePriority = HarveyMedicalIntentPriorities.SevereStress + 20,
             DangerRank = GetStressDangerRank(buffId),
             StateAgeTicks = today,
             IsPhaseReady = true,

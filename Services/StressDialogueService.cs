@@ -899,9 +899,11 @@ namespace HarveyStressMeter.Services
         {
             string? buffId;
             string? dialogueText;
+            bool armedNow = false;
 
             if (_reviewService.TryPrepareEpisodeReviewDialogue(out buffId, out dialogueText, repairStuck: true))
             {
+                armedNow = true;
                 if (!string.IsNullOrEmpty(preferredBuffId))
                     buffId = preferredBuffId;
             }
@@ -945,8 +947,14 @@ namespace HarveyStressMeter.Services
             _activeStressDialogueMode = StressHarveyDialogueMode.Review;
             _autoStartTreatmentAfterClose = false;
 
-            if (!ApproveStressDialogueForCore(buffId))
+            if (!ApproveStressReviewForCore(buffId))
+            {
+                // Не оставляем pending от непоказанной реплики: иначе следующий клик брал текст review
+                // социальной тревоги для любого лечения.
+                if (armedNow)
+                    _reviewService.ClearPendingReview();
                 return false;
+            }
 
             ShowStressDialogue(harvey, buffId, dialogueText);
             return true;
@@ -1339,7 +1347,11 @@ namespace HarveyStressMeter.Services
                 _monitor.Log(
                     $"[StressDialogueService] Mode=review (buff={buffId})",
                     LogLevel.Debug);
-                return ApproveStressDialogueForCore(buffId);
+                if (ApproveStressReviewForCore(buffId))
+                    return true;
+
+                _reviewService.ClearPendingReview();
+                return false;
             }
 
 
@@ -1464,6 +1476,28 @@ namespace HarveyStressMeter.Services
 
             _monitor.Log(
                 $"[StressDialogueService] Core deferred stress buff={buffId} — higher-priority medical intent active",
+                LogLevel.Info);
+            _activeStressDialogueMode = StressHarveyDialogueMode.None;
+            _selectedEpisodeIdForDialogue = null;
+            return false;
+        }
+
+        /// <summary>
+        /// Итоговый разговор уступает только травме (другой провайдер Core). Внутри стресса он идёт первым:
+        /// назначение уже выполнено, план зовёт к Харви. Раньше Core выбирал старт другого стресса
+        /// (или другое review по своим весам), review отклонялся, старт тоже не показывался — Харви молчал,
+        /// а бафф и «Поговори с Харви» висели в плане.
+        /// </summary>
+        private bool ApproveStressReviewForCore(string? buffId)
+        {
+            if (string.IsNullOrEmpty(buffId) || _medicalIntentProvider == null)
+                return true;
+
+            if (!_medicalIntentProvider.IsNonStressIntentSelected())
+                return true;
+
+            _monitor.Log(
+                $"[StressDialogueService] Core deferred stress review buff={buffId} — injury intent active",
                 LogLevel.Info);
             _activeStressDialogueMode = StressHarveyDialogueMode.None;
             _selectedEpisodeIdForDialogue = null;

@@ -82,7 +82,9 @@ namespace HarveyStressMeter.Handlers
                 return true;
             }
 
-            if (ShouldDeferToHigherPriorityMedicalIntent(pendingBuff))
+            // Уступаем только травме. Выбор между review и стартом внутри стресса делает сам диалог:
+            // раньше review другого баффа отклонялся здесь, и до старта дело не доходило — Харви молчал.
+            if (ShouldDeferToHigherPriorityMedicalIntent(null))
                 return false;
 
             if (TryShowProgrammaticDialogue(harvey, pendingReview))
@@ -126,7 +128,7 @@ namespace HarveyStressMeter.Handlers
             {
                 LogHarveyClicked(pendingReview: true, pendingEpisode, pendingBuff);
 
-                if (ShouldDeferToHigherPriorityMedicalIntent(pendingBuff))
+                if (ShouldDeferToHigherPriorityMedicalIntent(null))
                     return false;
 
                 if (_stressDialogueService.TryShowProgrammaticReviewDialogue(harvey))
@@ -139,8 +141,9 @@ namespace HarveyStressMeter.Handlers
                     return true;
                 }
 
+                // Review не показался — пробуем старт/прогресс ниже, а не отдаём клик vanilla (там Харви
+                // за день уже всё сказал и молчит).
                 LogAnxietySpikeStuckStates();
-                return false;
             }
 
             if (ShouldDeferToHigherPriorityMedicalIntent(null))
