@@ -696,7 +696,7 @@ namespace HarveyStressMeter.Services
                 return;
 
             var treatment = _data.StressState.GetActiveTreatment(primaryBuffId);
-            if (treatment == null || treatment == byQuest)
+            if (treatment == null || treatment == byQuest || IsOtherQuestTreatment(treatment, episode))
                 return;
 
             treatment.ObjectivesCompleted = true;
@@ -709,8 +709,9 @@ namespace HarveyStressMeter.Services
             if (string.IsNullOrEmpty(primaryBuffId))
                 return;
 
-            var treatment = _data.StressState.GetActiveTreatment(primaryBuffId);
-            if (treatment == null)
+            var treatment = _data.StressState.GetActiveTreatmentByQuest(episode.QuestId)
+                ?? _data.StressState.GetActiveTreatment(primaryBuffId);
+            if (treatment == null || IsOtherQuestTreatment(treatment, episode))
                 return;
 
             treatment.ObjectivesCompleted = false;
@@ -725,6 +726,15 @@ namespace HarveyStressMeter.Services
             _data.StressState.TreatmentFlags.SetQuestAddedToJournal(episode.QuestId, false);
             _data.StressState.RemoveTreatment(treatment.TreatmentKey);
         }
+
+        /// <summary>
+        /// Отдельное назначение с тем же баффом (например «отдохнуть», выданное до эпизода) живёт своим квестом:
+        /// эпизод не должен ни отмечать его, ни снимать — иначе квест остаётся в журнале без лечения.
+        /// </summary>
+        private static bool IsOtherQuestTreatment(TreatmentState treatment, TreatmentEpisodeState episode)
+            => treatment.TreatmentStarted
+               && !string.IsNullOrEmpty(treatment.QuestId)
+               && !string.Equals(treatment.QuestId, episode.QuestId, StringComparison.Ordinal);
 
         private static void ShowHudMessage(string text)
             => Game1.addHUDMessage(new HUDMessage(text, HUDMessage.newQuest_type));

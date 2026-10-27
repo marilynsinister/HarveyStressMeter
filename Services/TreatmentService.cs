@@ -514,7 +514,11 @@ namespace HarveyStressMeter.Services
             bool skipConversationTopic = false)
         {
             var episode = _data.ActiveTreatmentEpisode;
-            if (episode?.IsActiveEpisode() == true && _episodeService != null)
+            // Отдельное назначение по этому баффу (например «отдохнуть» до начала эпизода) закрывается само.
+            // Раньше его цель уходила в эпизод с тем же primary buff: эпизод преждевременно ждал Харви,
+            // а у отдельного квеста счётчик стоял на максимуме без review — квест и дебафф висели навсегда.
+            if (episode?.IsActiveEpisode() == true && _episodeService != null
+                && FindStandaloneTreatment(buffId, episode.QuestId) == null)
             {
                 var primaryBuff = episode.PrimaryCauseId != null
                     && StressCauses.CauseToBuff.TryGetValue(episode.PrimaryCauseId, out var mappedBuff)
@@ -531,12 +535,22 @@ namespace HarveyStressMeter.Services
             MarkTreatmentReadyForReviewLegacy(buffId, optionalMessage, skipConversationTopic);
         }
 
+        /// <summary>Начатое лечение по баффу со своим квестом, а не с квестом эпизода.</summary>
+        private TreatmentState? FindStandaloneTreatment(string buffId, string? episodeQuestId)
+            => _data.StressState.GetActiveTreatmentsByBuff(buffId).FirstOrDefault(t =>
+                t.TreatmentStarted
+                && !t.IsCompleted
+                && !string.IsNullOrEmpty(t.QuestId)
+                && !string.Equals(t.QuestId, episodeQuestId, StringComparison.Ordinal));
+
         private void MarkTreatmentReadyForReviewLegacy(
             string buffId,
             string? optionalMessage = null,
             bool skipConversationTopic = false)
         {
-            var activeTreatment = _data.StressState.GetActiveTreatment(buffId);
+            // При активном эпизоде у баффа два лечения (своё и эпизода) — берём своё.
+            var activeTreatment = FindStandaloneTreatment(buffId, _data.ActiveTreatmentEpisode?.QuestId)
+                ?? _data.StressState.GetActiveTreatment(buffId);
             if (activeTreatment == null)
             {
                 _monitor.Log($"[MarkTreatmentReadyForReview] ⚠️ Активное лечение для buffId '{buffId}' не найдено", LogLevel.Warn);
@@ -604,7 +618,8 @@ namespace HarveyStressMeter.Services
         public void CompleteTreatment(string buffId, string message = "Лечение завершено.")
         {
             var episode = _data.ActiveTreatmentEpisode;
-            if (episode?.AwaitingHarveyReview == true && _episodeService != null)
+            if (episode?.AwaitingHarveyReview == true && _episodeService != null
+                && FindStandaloneTreatment(buffId, episode.QuestId)?.AwaitingHarveyReview != true)
             {
                 _episodeService.CompleteTreatmentEpisode(episode.EpisodeId, message);
                 return;
@@ -615,7 +630,8 @@ namespace HarveyStressMeter.Services
 
         private void CompleteTreatmentLegacy(string buffId, string message = "Лечение завершено.")
         {
-            var activeTreatment = _data.StressState.GetActiveTreatment(buffId);
+            var activeTreatment = FindStandaloneTreatment(buffId, _data.ActiveTreatmentEpisode?.QuestId)
+                ?? _data.StressState.GetActiveTreatment(buffId);
             if (activeTreatment == null)
             {
                 _monitor.Log($"[CompleteTreatment] ⚠️ Активное лечение для buffId '{buffId}' не найдено — завершение пропущено", LogLevel.Warn);

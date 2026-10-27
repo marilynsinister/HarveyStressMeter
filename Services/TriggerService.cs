@@ -492,7 +492,11 @@ namespace HarveyStressMeter.Services
                 return;
 
             if (progress.TiredRestSeconds >= TiredRestSecondsRequired)
+            {
+                // Отдых уже засчитан, а Харви не ждёт (сейв, где отметка ушла в эпизод или в grace period) — отметить снова.
+                _treatmentService.MarkTreatmentReadyForReview(BuffIds.Tired);
                 return;
+            }
 
             progress.TiredRestSeconds++;
 
